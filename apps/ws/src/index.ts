@@ -14,10 +14,13 @@ import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth.js";
 import { pubClient, subClient } from "./redis.js";
 import {
   ensureTopicMembership,
+  getMessageTopicId,
   insertMessage,
   isUserMuted,
+  listReactionsForTopic,
   listRecentMessages,
   setLastReadMessage,
+  toggleReaction,
 } from "./messages.js";
 
 interface SocketData {
@@ -63,8 +66,11 @@ io.on("connection", (socket: AuthedSocket) => {
     try {
       await ensureTopicMembership(user.sub, topicId);
       socket.join(`topic:${topicId}`);
-      const recent = await listRecentMessages(topicId, 50);
-      ack?.({ ok: true, messages: recent });
+      const [recent, reactions] = await Promise.all([
+        listRecentMessages(topicId, 50),
+        listReactionsForTopic(topicId, 50),
+      ]);
+      ack?.({ ok: true, messages: recent, reactions });
     } catch (err) {
       ack?.({ ok: false, error: (err as Error).message });
     }
@@ -104,11 +110,31 @@ io.on("connection", (socket: AuthedSocket) => {
     }
   });
 
-  socket.on(WS_EVENTS.REACTION_TOGGLE, (raw: unknown, ack?: (res: unknown) => void) => {
+  socket.on(WS_EVENTS.REACTION_TOGGLE, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
-      reactionToggleSchema.parse(raw);
-      // TODO slice 1.5: actual reaction persistence
-      ack?.({ ok: true });
+      const parsed = reactionToggleSchema.parse(raw);
+      const muted = await isUserMuted(user.sub);
+      if (muted) {
+        ack?.({ ok: false, error: "MUTED", reason: muted.reason, expiresAt: muted.expiresAt });
+        return;
+      }
+      const topicId = await getMessageTopicId(parsed.messageId);
+      if (!topicId) {
+        ack?.({ ok: false, error: "message not found" });
+        return;
+      }
+      const result = await toggleReaction({
+        messageId: parsed.messageId,
+        userId: user.sub,
+        emojiKey: parsed.emojiKey,
+      });
+      const event = result.added ? WS_EVENTS.REACTION_ADD : WS_EVENTS.REACTION_REMOVE;
+      io.to(`topic:${topicId}`).emit(event, {
+        messageId: parsed.messageId,
+        userId: user.sub,
+        emojiKey: parsed.emojiKey,
+      });
+      ack?.({ ok: true, ...result });
     } catch (err) {
       ack?.({ ok: false, error: (err as Error).message });
     }

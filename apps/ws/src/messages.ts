@@ -1,5 +1,12 @@
-import { and, asc, desc, eq, gt, isNull, or } from "drizzle-orm";
-import { encryptionKeys, messages, topicMembers, topics, userMutes } from "@legends/db/schema";
+import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import {
+  encryptionKeys,
+  messageReactions,
+  messages,
+  topicMembers,
+  topics,
+  userMutes,
+} from "@legends/db/schema";
 import {
   decryptMessage,
   encryptMessage,
@@ -89,6 +96,28 @@ export async function insertMessage(args: {
   };
 }
 
+export interface ReactionRow {
+  messageId: string;
+  userId: string;
+  emojiKey: string;
+}
+
+export async function listReactionsForTopic(topicId: string, limit = 200): Promise<ReactionRow[]> {
+  const recent = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.topicId, topicId), isNull(messages.deletedAt)))
+    .orderBy(desc(messages.id))
+    .limit(limit);
+  if (recent.length === 0) return [];
+  const ids = recent.map((r) => r.id);
+  const rows = await db
+    .select()
+    .from(messageReactions)
+    .where(inArray(messageReactions.messageId, ids));
+  return rows.map((r) => ({ messageId: r.messageId.toString(), userId: r.userId, emojiKey: r.emojiKey }));
+}
+
 export async function listRecentMessages(topicId: string, limit = 50): Promise<InsertedMessage[]> {
   const rows = await db
     .select()
@@ -151,5 +180,57 @@ export async function setLastReadMessage(userId: string, topicId: string, messag
 
 export async function listTopics() {
   return db.select().from(topics).orderBy(desc(topics.isSticky), asc(topics.sortOrder));
+}
+
+export type ReactionToggleResult =
+  | { added: true; messageId: string; userId: string; emojiKey: string }
+  | { added: false; messageId: string; userId: string; emojiKey: string };
+
+export async function toggleReaction(args: {
+  messageId: string;
+  userId: string;
+  emojiKey: string;
+}): Promise<ReactionToggleResult> {
+  const messageId = BigInt(args.messageId);
+  const existing = await db
+    .select()
+    .from(messageReactions)
+    .where(
+      and(
+        eq(messageReactions.messageId, messageId),
+        eq(messageReactions.userId, args.userId),
+        eq(messageReactions.emojiKey, args.emojiKey),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .delete(messageReactions)
+      .where(
+        and(
+          eq(messageReactions.messageId, messageId),
+          eq(messageReactions.userId, args.userId),
+          eq(messageReactions.emojiKey, args.emojiKey),
+        ),
+      );
+    return { added: false, messageId: args.messageId, userId: args.userId, emojiKey: args.emojiKey };
+  }
+
+  await db.insert(messageReactions).values({
+    messageId,
+    userId: args.userId,
+    emojiKey: args.emojiKey,
+  });
+  return { added: true, messageId: args.messageId, userId: args.userId, emojiKey: args.emojiKey };
+}
+
+export async function getMessageTopicId(messageId: string): Promise<string | null> {
+  const rows = await db
+    .select({ topicId: messages.topicId })
+    .from(messages)
+    .where(eq(messages.id, BigInt(messageId)))
+    .limit(1);
+  return rows[0]?.topicId ?? null;
 }
 
