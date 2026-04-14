@@ -6,7 +6,7 @@ import {
   users,
 } from "@legends/db/schema";
 import { decryptMessage, unwrapKey } from "@legends/crypto";
-import { db } from "./db.js";
+import { db } from "./db";
 
 export interface ModerationFlagRow {
   id: string;

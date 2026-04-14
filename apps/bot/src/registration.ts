@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { inviteCodes, registrationConfig, users } from "@legends/db/schema";
-import { db } from "./db.js";
+import { db } from "./db";
 
 export interface RegistrationPolicy {
   invitesEnabled: boolean;

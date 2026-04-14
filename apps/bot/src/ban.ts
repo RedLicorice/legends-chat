@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull, or, gt } from "drizzle-orm";
 import { userBans } from "@legends/db/schema";
 import { formatDuration } from "@legends/shared";
-import { db } from "./db.js";
+import { db } from "./db";
 
 export interface ActiveBan {
   reason: string;

@@ -14,7 +14,7 @@ import {
   unwrapKey,
   wrapKey,
 } from "@legends/crypto";
-import { db } from "./db.js";
+import { db } from "./db";
 
 let cachedKey: { id: string; data: Uint8Array } | null = null;
 

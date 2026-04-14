@@ -12,8 +12,8 @@ import {
   type Role,
 } from "@legends/shared";
 import { sessions, userBans, userMutes, users, rolesPermissions } from "@legends/db/schema";
-import { db } from "./db.js";
-import { redis } from "./redis.js";
+import { db } from "./db";
+import { redis } from "./redis";
 
 const accessSecret = new TextEncoder().encode(
   process.env.JWT_ACCESS_SECRET ?? (() => { throw new Error("JWT_ACCESS_SECRET not set"); })(),

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { authLoginTokens } from "@legends/db/schema";
-import { db } from "./db.js";
+import { db } from "./db";
 
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 

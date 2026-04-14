@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { encryptionKeys, messages, topicMembers, topics } from "@legends/db/schema";
 import { decryptMessage, unwrapKey } from "@legends/crypto";
-import { db } from "./db.js";
+import { db } from "./db";
 
 const keyDataCache = new Map<string, Uint8Array>();
 async function getKeyData(keyId: string): Promise<Uint8Array> {

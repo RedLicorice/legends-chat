@@ -1,7 +1,7 @@
 import webpush from "web-push";
 import { and, eq, ne } from "drizzle-orm";
 import { pushSubscriptions, topicMembers, topics, users } from "@legends/db/schema";
-import { db } from "./db.js";
+import { db } from "./db";
 
 const publicKey = process.env.VAPID_PUBLIC_KEY;
 const privateKey = process.env.VAPID_PRIVATE_KEY;

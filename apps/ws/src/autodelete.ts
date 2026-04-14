@@ -2,7 +2,7 @@ import { and, eq, isNull, lt, notInArray, sql } from "drizzle-orm";
 import type { Server } from "socket.io";
 import { messages, topics } from "@legends/db/schema";
 import { WS_EVENTS } from "@legends/shared";
-import { db } from "./db.js";
+import { db } from "./db";
 
 const TICK_MS = 60_000;
 

@@ -10,11 +10,11 @@ import {
   topicReadSchema,
   type AccessTokenPayload,
 } from "@legends/shared";
-import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth.js";
-import { pubClient, subClient } from "./redis.js";
-import { purgeCountModeForTopic, startAutoDelete } from "./autodelete.js";
-import { getTopicAutoDelete } from "./messages.js";
-import { notifyTopicMembers } from "./push.js";
+import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth";
+import { pubClient, subClient } from "./redis";
+import { purgeCountModeForTopic, startAutoDelete } from "./autodelete";
+import { getTopicAutoDelete } from "./messages";
+import { notifyTopicMembers } from "./push";
 import {
   ensureTopicMembership,
   getMessageTopicId,
@@ -24,7 +24,7 @@ import {
   listRecentMessages,
   setLastReadMessage,
   toggleReaction,
-} from "./messages.js";
+} from "./messages";
 
 interface SocketData {
   user: AccessTokenPayload;

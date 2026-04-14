@@ -1,8 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { sessions, userBans, userMutes } from "@legends/db/schema";
 import { REDIS_CHANNELS, REDIS_KEYS } from "@legends/shared";
-import { db } from "./db.js";
-import { redis } from "./redis.js";
+import { db } from "./db";
+import { redis } from "./redis";
 
 export async function banUser(args: {
   userId: string;

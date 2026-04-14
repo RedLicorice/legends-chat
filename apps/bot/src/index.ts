@@ -1,10 +1,10 @@
 import { Bot, session, type Context, type SessionFlavor } from "grammy";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { auditLog, inviteCodes, users } from "@legends/db/schema";
-import { db } from "./db.js";
-import { formatBanMessage, getActiveBan } from "./ban.js";
-import { issueLoginToken, loginUrl } from "./login.js";
-import { createUser, findUserByTelegramId, getRegistrationPolicy } from "./registration.js";
+import { db } from "./db";
+import { formatBanMessage, getActiveBan } from "./ban";
+import { issueLoginToken, loginUrl } from "./login";
+import { createUser, findUserByTelegramId, getRegistrationPolicy } from "./registration";
 
 interface BotSession {
   awaitingInvite: boolean;
