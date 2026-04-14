@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { PERMISSIONS } from "@legends/shared";
 import { getCurrentUser } from "@/lib/auth";
 import { SideMenu } from "@/components/SideMenu";
@@ -20,8 +21,10 @@ export default async function AdminPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Card title="Topics" body="Create and configure community topics." />
           <Card title="Invites" body="Generate invite codes for new members." />
-          <Card title="Moderation queue" body="Review flagged messages." />
-          <Card title="Bans &amp; mutes" body="Manage active and historical sanctions." />
+          <Link href="/admin/moderation" className="block">
+            <Card title="Moderation queue" body="Review flagged messages." />
+          </Link>
+          <Card title="Bans & mutes" body="Manage active and historical sanctions." />
         </div>
         <p className="mt-8 text-sm text-muted">
           Endpoints in slice 1: <code>POST /api/admin/topics</code>, <code>POST /api/admin/invites</code>,
