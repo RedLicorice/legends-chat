@@ -21,11 +21,7 @@ export async function GET(req: NextRequest) {
         gt(authLoginTokens.expiresAt, now),
       ),
     )
-    .returning({
-      userId: authLoginTokens.userId,
-      telegramChatId: authLoginTokens.telegramChatId,
-      telegramMessageId: authLoginTokens.telegramMessageId,
-    });
+    .returning();
 
   if (consumed.length === 0) {
     return NextResponse.json({ error: "invalid or expired token" }, { status: 401 });

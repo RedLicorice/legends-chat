@@ -34,6 +34,7 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
   const [maxUses, setMaxUses] = useState<string>("1");
   const [unlimited, setUnlimited] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState<string>("7");
+  const [noExpiry, setNoExpiry] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -60,7 +61,7 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
     try {
       const body: Record<string, unknown> = {
         role,
-        expiresInDays: Number(expiresInDays) || 7,
+        expiresInDays: noExpiry ? null : (Number(expiresInDays) || 7),
       };
       if (role === "user") {
         body.maxUses = unlimited ? null : Math.max(1, Number(maxUses) || 1);
@@ -159,10 +160,19 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
               type="number"
               min={1}
               max={365}
-              value={expiresInDays}
+              disabled={noExpiry}
+              value={noExpiry ? "" : expiresInDays}
               onChange={(e) => setExpiresInDays(e.target.value)}
-              className="rounded-lg border border-border bg-panel2 px-3 py-2 text-sm text-text outline-none"
+              className="rounded-lg border border-border bg-panel2 px-3 py-2 text-sm text-text outline-none disabled:opacity-50"
             />
+            <label className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={noExpiry}
+                onChange={(e) => setNoExpiry(e.target.checked)}
+              />
+              No expiry
+            </label>
           </label>
 
           <div className="flex items-end">

@@ -22,6 +22,12 @@ export function middleware(req: NextRequest) {
 
   if (req.cookies.get(ACCESS_COOKIE)?.value) return NextResponse.next();
 
+  // API routes must not get HTML redirects — return 401 so the client can
+  // handle it (e.g. show a session-expired toast and redirect itself).
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   // No access cookie. If we still have a refresh cookie, try to silently
   // renew before falling back to the login page.
   if (req.cookies.get(REFRESH_COOKIE)?.value) {

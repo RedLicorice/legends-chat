@@ -15,7 +15,7 @@ const bodySchema = z.object({
   role: z.enum(["user", "moderator", "admin"]).default("user"),
   // null = unlimited (only allowed for user role)
   maxUses: z.number().int().positive().nullable().optional(),
-  expiresInDays: z.number().int().positive().max(365).default(7),
+  expiresInDays: z.number().int().positive().max(365).nullable().default(7),
 });
 
 async function uniqueCode(): Promise<string> {
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       role,
       maxUses: maxUses ?? null,
       createdByUserId: user.id,
-      expiresAt: new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000),
+      expiresAt: expiresInDays != null ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null,
     })
     .returning();
   return NextResponse.json({ invite: row });
