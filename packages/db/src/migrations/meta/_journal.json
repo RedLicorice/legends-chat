@@ -15,6 +15,13 @@
       "when": 1776200000000,
       "tag": "0001_invite_codes_roles_and_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776300000000,
+      "tag": "0002_auth_login_tokens_telegram_refs",
+      "breakpoints": true
     }
   ]
 }

@@ -99,6 +99,8 @@ export const authLoginTokens = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    telegramChatId: bigint("telegram_chat_id", { mode: "bigint" }),
+    telegramMessageId: integer("telegram_message_id"),
   },
   (t) => ({
     tokenIdx: uniqueIndex("auth_login_tokens_token_idx").on(t.token),

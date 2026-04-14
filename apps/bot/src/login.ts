@@ -6,15 +6,21 @@ import { db } from "./db";
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 const REUSE_WINDOW_MS = 15 * 1000;
 
+export interface IssuedToken {
+  id: string;
+  token: string;
+  expiresAt: Date;
+  reused: boolean;
+}
+
 /**
  * Issues a login token for a user with two safeguards:
  *   - If the user already has an active token issued within the last
- *     REUSE_WINDOW_MS, return that same token instead of minting a new one.
- *     This absorbs rapid /start retries from bot crashes or misclicks.
- *   - Otherwise, mark every other active token for this user as consumed
- *     ("invalidated") and issue a fresh one.
+ *     REUSE_WINDOW_MS, return that same token (reused=true).
+ *   - Otherwise, mark every still-active token for this user as consumed
+ *     and issue a fresh one.
  */
-export async function issueLoginToken(userId: string): Promise<string> {
+export async function issueLoginToken(userId: string): Promise<IssuedToken> {
   return db.transaction(async (tx) => {
     const now = new Date();
 
@@ -32,7 +38,12 @@ export async function issueLoginToken(userId: string): Promise<string> {
       .limit(1);
 
     if (mostRecent && now.getTime() - mostRecent.createdAt.getTime() < REUSE_WINDOW_MS) {
-      return mostRecent.token;
+      return {
+        id: mostRecent.id,
+        token: mostRecent.token,
+        expiresAt: mostRecent.expiresAt,
+        reused: true,
+      };
     }
 
     // Invalidate every still-active token for this user before minting a new one.
@@ -47,13 +58,52 @@ export async function issueLoginToken(userId: string): Promise<string> {
       );
 
     const token = randomBytes(32).toString("base64url");
-    await tx.insert(authLoginTokens).values({
-      token,
-      userId,
-      expiresAt: new Date(now.getTime() + TOKEN_TTL_MS),
-    });
-    return token;
+    const expiresAt = new Date(now.getTime() + TOKEN_TTL_MS);
+    const [row] = await tx
+      .insert(authLoginTokens)
+      .values({ token, userId, expiresAt })
+      .returning({ id: authLoginTokens.id });
+    return { id: row!.id, token, expiresAt, reused: false };
   });
+}
+
+export async function attachTelegramMessage(
+  tokenId: string,
+  chatId: bigint,
+  messageId: number,
+): Promise<void> {
+  await db
+    .update(authLoginTokens)
+    .set({ telegramChatId: chatId, telegramMessageId: messageId })
+    .where(eq(authLoginTokens.id, tokenId));
+}
+
+export async function isTokenConsumed(tokenId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ consumedAt: authLoginTokens.consumedAt })
+    .from(authLoginTokens)
+    .where(eq(authLoginTokens.id, tokenId))
+    .limit(1);
+  return !!row?.consumedAt;
+}
+
+export async function listPendingTokensWithTelegramRefs(): Promise<
+  Array<{ id: string; expiresAt: Date; chatId: bigint; messageId: number }>
+> {
+  const now = new Date();
+  const rows = await db
+    .select({
+      id: authLoginTokens.id,
+      expiresAt: authLoginTokens.expiresAt,
+      chatId: authLoginTokens.telegramChatId,
+      messageId: authLoginTokens.telegramMessageId,
+    })
+    .from(authLoginTokens)
+    .where(and(isNull(authLoginTokens.consumedAt), gt(authLoginTokens.expiresAt, now)));
+  return rows
+    .filter((r): r is { id: string; expiresAt: Date; chatId: bigint; messageId: number } =>
+      r.chatId !== null && r.messageId !== null,
+    );
 }
 
 export function loginUrl(token: string): string {

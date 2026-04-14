@@ -32,6 +32,9 @@ importers:
       grammy:
         specifier: ^1.32.0
         version: 1.42.0
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.10.1
       postgres:
         specifier: ^3.4.5
         version: 3.4.9

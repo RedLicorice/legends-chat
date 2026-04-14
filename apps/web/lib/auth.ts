@@ -23,7 +23,9 @@ const refreshSecret = new TextEncoder().encode(
 );
 
 const ACCESS_TTL = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 900);
-const REFRESH_TTL = Number(process.env.JWT_REFRESH_TTL_SECONDS ?? 2_592_000);
+// 24h: the window during which the app silently refreshes before asking
+// the user to re-authenticate via the Telegram bot.
+const REFRESH_TTL = Number(process.env.JWT_REFRESH_TTL_SECONDS ?? 86_400);
 
 export async function issueSession(userId: string, role: Role): Promise<{ accessJwt: string; refreshJwt: string }> {
   const jti = randomUUID();
@@ -73,6 +75,65 @@ export async function clearAuthCookies(): Promise<void> {
   const jar = await cookies();
   jar.delete(ACCESS_COOKIE);
   jar.delete(REFRESH_COOKIE);
+}
+
+/**
+ * Reads the refresh cookie, verifies it, checks the matching `sessions`
+ * row is still active, and mints a new access JWT that it writes back to
+ * the cookie jar. Returns true on success, false on any failure (caller
+ * should treat the user as unauthenticated).
+ *
+ * The refresh JWT itself is not rotated — its expiry is the hard 24h
+ * limit after which the user must go through the bot again.
+ */
+export async function refreshAccessCookie(): Promise<boolean> {
+  const jar = await cookies();
+  const refreshCookie = jar.get(REFRESH_COOKIE)?.value;
+  if (!refreshCookie) return false;
+
+  let payload: { sub: string; jti: string; sid: string };
+  try {
+    const verified = await jwtVerify(refreshCookie, refreshSecret, { algorithms: ["HS256"] });
+    payload = refreshTokenPayloadSchema.parse(verified.payload);
+  } catch {
+    return false;
+  }
+
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.id, payload.sid))
+    .limit(1);
+  if (!session) return false;
+  if (session.refreshTokenHash !== payload.jti) return false;
+  if (session.revokedAt) return false;
+  if (session.userId !== payload.sub) return false;
+
+  if (await isUserBanned(payload.sub)) return false;
+
+  const [u] = await db
+    .select({ id: users.id, role: users.role })
+    .from(users)
+    .where(eq(users.id, payload.sub))
+    .limit(1);
+  if (!u) return false;
+
+  const newJti = randomUUID();
+  const accessJwt = await new SignJWT({ sub: u.id, role: u.role, jti: newJti })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${ACCESS_TTL}s`)
+    .sign(accessSecret);
+
+  const secure = process.env.NODE_ENV === "production";
+  jar.set(ACCESS_COOKIE, accessJwt, {
+    httpOnly: true,
+    secure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: ACCESS_TTL,
+  });
+  return true;
 }
 
 export interface CurrentUser {

@@ -31,6 +31,7 @@ export const REDIS_CHANNELS = {
   USER_MUTED: "legends:user:muted",
   USER_UNMUTED: "legends:user:unmuted",
   USER_UNBANNED: "legends:user:unbanned",
+  LOGIN_TOKEN_CONSUMED: "legends:login:token:consumed",
 } as const;
 
 export const REDIS_KEYS = {

@@ -3,8 +3,13 @@ import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { auditLog, inviteCodes, users } from "@legends/db/schema";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
-import { issueLoginToken, loginUrl } from "./login";
+import { attachTelegramMessage, issueLoginToken, loginUrl } from "./login";
 import { createUser, findUserByTelegramId, getRegistrationPolicy } from "./registration";
+import {
+  rescheduleOnStartup,
+  scheduleExpiryCheck,
+  subscribeToConsumption,
+} from "./token-lifecycle";
 
 interface BotSession {
   awaitingInvite: boolean;
@@ -17,9 +22,20 @@ if (!token) throw new Error("TELEGRAM_BOT_TOKEN not set");
 const bot = new Bot<Ctx>(token);
 bot.use(session<BotSession, Ctx>({ initial: () => ({ awaitingInvite: false }) }));
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 async function sendLoginLink(ctx: Ctx, userId: string): Promise<void> {
-  const t = await issueLoginToken(userId);
-  await ctx.reply(`Tap to log in (link valid for 5 minutes):\n${loginUrl(t)}`);
+  const issued = await issueLoginToken(userId);
+  const url = loginUrl(issued.token);
+  const sent = await ctx.reply(
+    `<a href="${escapeHtml(url)}">🔑 Log in to Legends Chat</a>\n<i>Link valid for 5 minutes.</i>`,
+    { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+  );
+  const chatId = BigInt(sent.chat.id);
+  await attachTelegramMessage(issued.id, chatId, sent.message_id);
+  scheduleExpiryCheck(bot.api, issued.id, chatId, sent.message_id, issued.expiresAt);
 }
 
 bot.command("start", async (ctx) => {
@@ -149,6 +165,9 @@ bot.on("message:text", async (ctx) => {
 bot.catch((err) => {
   console.error("bot error", err);
 });
+
+subscribeToConsumption(bot.api);
+rescheduleOnStartup(bot.api).catch((err) => console.error("[lifecycle] reschedule failed", err));
 
 console.log("legends-chat telegram bot starting...");
 bot.start();
