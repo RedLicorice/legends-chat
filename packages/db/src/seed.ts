@@ -82,11 +82,13 @@ async function main() {
     await db.insert(topics).values(t).onConflictDoNothing();
   }
 
-  // 7. seed invite code
+  // 7. seed invite code — dev-only multi-use user invite.
   await db
     .insert(inviteCodes)
     .values({
-      code: "WELCOME-SEED",
+      code: "LGND#SEED23",
+      role: "user",
+      maxUses: null,
       createdByUserId: adminId,
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     })

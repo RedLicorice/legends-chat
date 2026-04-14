@@ -5,6 +5,7 @@ export const PERMISSIONS = {
   MESSAGES_DELETE_ANY: "messages.delete.any",
   MESSAGES_FLAG: "messages.flag",
   INVITES_CREATE: "invites.create",
+  INVITES_CREATE_ELEVATED: "invites.create.elevated",
   BOTS_MANAGE: "bots.manage",
   MODERATION_QUEUE_REVIEW: "moderation.queue.review",
   USERS_BAN_DIRECT: "users.ban.direct",

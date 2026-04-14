@@ -1,5 +1,5 @@
 import { Bot, session, type Context, type SessionFlavor } from "grammy";
-import { and, eq, gt, isNull, or } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { auditLog, inviteCodes, users } from "@legends/db/schema";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
@@ -83,52 +83,67 @@ bot.on("message:text", async (ctx) => {
   const created = await db
     .transaction(async (tx) => {
       const now = new Date();
-      const consumed = await tx
+      // Atomic claim: only increment if there is capacity left.
+      // For non-user roles we require uses_count = 0 (single-use) on top of max_uses.
+      const claimed = await tx
         .update(inviteCodes)
-        .set({ usedAt: now })
+        .set({ usesCount: sql`${inviteCodes.usesCount} + 1` })
         .where(
           and(
             eq(inviteCodes.code, code),
-            isNull(inviteCodes.usedByUserId),
             or(isNull(inviteCodes.expiresAt), gt(inviteCodes.expiresAt, now)),
+            or(
+              isNull(inviteCodes.maxUses),
+              sql`${inviteCodes.usesCount} < ${inviteCodes.maxUses}`,
+            ),
+            // Non-user roles: enforce single-use regardless of max_uses.
+            or(eq(inviteCodes.role, "user"), eq(inviteCodes.usesCount, 0)),
           ),
         )
-        .returning({ id: inviteCodes.id });
-      if (consumed.length === 0) {
+        .returning({
+          id: inviteCodes.id,
+          role: inviteCodes.role,
+          createdByUserId: inviteCodes.createdByUserId,
+        });
+      if (claimed.length === 0) {
         tx.rollback();
       }
+      const claim = claimed[0]!;
       const [u] = await tx
         .insert(users)
         .values({
           telegramUserId: BigInt(tgUser.id),
           telegramUsername: tgUser.username ?? null,
           displayName: tgUser.first_name || tgUser.username || "User",
+          role: claim.role,
+          invitedByUserId: claim.createdByUserId,
+          invitedByCodeId: claim.id,
         })
         .returning();
-      await tx
-        .update(inviteCodes)
-        .set({ usedByUserId: u!.id })
-        .where(eq(inviteCodes.id, consumed[0]!.id));
-      return u!;
+      return { user: u!, code: claim };
     })
     .catch(() => null);
 
   if (!created) {
-    await ctx.reply("That invite code is invalid or expired. Please try again.");
+    await ctx.reply("That invite code is invalid, expired, or out of uses. Please try again.");
     return;
   }
 
   await db.insert(auditLog).values({
-    actorUserId: created.id,
+    actorUserId: created.user.id,
     action: "user.register.invite",
     targetType: "user",
-    targetId: created.id,
-    metadata: { code },
+    targetId: created.user.id,
+    metadata: { code, role: created.code.role, inviteCodeId: created.code.id },
   });
 
   ctx.session.awaitingInvite = false;
-  await ctx.reply("Welcome aboard! Generating your login link...");
-  await sendLoginLink(ctx, created.id);
+  await ctx.reply(
+    created.code.role === "user"
+      ? "Welcome aboard! Generating your login link..."
+      : `Welcome aboard as ${created.code.role}! Generating your login link...`,
+  );
+  await sendLoginLink(ctx, created.user.id);
 });
 
 bot.catch((err) => {

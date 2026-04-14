@@ -1,5 +1,5 @@
-import { and, eq, gt, isNull, or } from "drizzle-orm";
-import { inviteCodes, registrationConfig, users } from "@legends/db/schema";
+import { eq } from "drizzle-orm";
+import { registrationConfig, users } from "@legends/db/schema";
 import { db } from "./db";
 
 export interface RegistrationPolicy {
@@ -44,18 +44,3 @@ export async function createUser(identity: TelegramIdentity) {
   return row!;
 }
 
-export async function consumeInviteCode(code: string, newUserId: string): Promise<boolean> {
-  const now = new Date();
-  const result = await db
-    .update(inviteCodes)
-    .set({ usedByUserId: newUserId, usedAt: now })
-    .where(
-      and(
-        eq(inviteCodes.code, code),
-        isNull(inviteCodes.usedByUserId),
-        or(isNull(inviteCodes.expiresAt), gt(inviteCodes.expiresAt, now)),
-      ),
-    )
-    .returning({ id: inviteCodes.id });
-  return result.length > 0;
-}

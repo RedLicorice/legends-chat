@@ -36,11 +36,14 @@ export const users = pgTable(
     displayName: text("display_name").notNull(),
     avatarUrl: text("avatar_url"),
     role: userRole("role").notNull().default("user"),
+    invitedByUserId: uuid("invited_by_user_id"),
+    invitedByCodeId: uuid("invited_by_code_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
   (t) => ({
     telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId),
+    invitedByIdx: index("users_invited_by_idx").on(t.invitedByUserId),
   }),
 );
 
@@ -72,11 +75,12 @@ export const inviteCodes = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     code: text("code").notNull(),
+    role: userRole("role").notNull().default("user"),
+    maxUses: integer("max_uses"),
+    usesCount: integer("uses_count").notNull().default(0),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
-    usedByUserId: uuid("used_by_user_id").references(() => users.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    usedAt: timestamp("used_at", { withTimezone: true }),
   },
   (t) => ({
     codeIdx: uniqueIndex("invite_codes_code_idx").on(t.code),

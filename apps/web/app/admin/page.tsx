@@ -20,7 +20,9 @@ export default async function AdminPage() {
         <h1 className="mb-6 text-2xl font-semibold">Admin</h1>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Card title="Topics" body="Create and configure community topics." />
-          <Card title="Invites" body="Generate invite codes for new members." />
+          <Link href="/admin/invites" className="block">
+            <Card title="Invites" body="Generate invite codes for new members." />
+          </Link>
           <Link href="/admin/moderation" className="block">
             <Card title="Moderation queue" body="Review flagged messages." />
           </Link>
