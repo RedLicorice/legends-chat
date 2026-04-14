@@ -92,6 +92,11 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
         prev.filter((x) => !(x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)),
       );
     });
+    socket.on(WS_EVENTS.MESSAGE_DELETE, (d: { id: string; topicId: string }) => {
+      if (d.topicId !== topic.id) return;
+      setMessages((prev) => prev.filter((m) => m.id !== d.id));
+      setReactions((prev) => prev.filter((r) => r.messageId !== d.id));
+    });
 
     return () => {
       socket.emit(WS_EVENTS.TOPIC_LEAVE, topic.id);

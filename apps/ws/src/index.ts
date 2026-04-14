@@ -12,6 +12,8 @@ import {
 } from "@legends/shared";
 import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth.js";
 import { pubClient, subClient } from "./redis.js";
+import { purgeCountModeForTopic, startAutoDelete } from "./autodelete.js";
+import { getTopicAutoDelete } from "./messages.js";
 import {
   ensureTopicMembership,
   getMessageTopicId,
@@ -96,6 +98,12 @@ io.on("connection", (socket: AuthedSocket) => {
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
+      const cfg = await getTopicAutoDelete(parsed.topicId);
+      if (cfg?.mode === "count" && cfg.max) {
+        purgeCountModeForTopic(io, parsed.topicId, cfg.max).catch((e) =>
+          console.error("[autodelete] count purge failed", e),
+        );
+      }
     } catch (err) {
       ack?.({ ok: false, error: (err as Error).message });
     }
@@ -158,6 +166,8 @@ subClient.on("message", (channel, message) => {
     console.error("pubsub parse failed", e);
   }
 });
+
+startAutoDelete(io);
 
 const port = Number(process.env.WS_PORT ?? 3001);
 httpServer.listen(port, () => {

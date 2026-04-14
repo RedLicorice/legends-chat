@@ -182,6 +182,21 @@ export async function listTopics() {
   return db.select().from(topics).orderBy(desc(topics.isSticky), asc(topics.sortOrder));
 }
 
+export async function getTopicAutoDelete(
+  topicId: string,
+): Promise<{ mode: "none" | "age" | "count"; max: number | null } | null> {
+  const [row] = await db
+    .select({
+      mode: topics.autoDeleteMode,
+      max: topics.autoDeleteMaxMessages,
+    })
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .limit(1);
+  if (!row) return null;
+  return { mode: row.mode, max: row.max };
+}
+
 export type ReactionToggleResult =
   | { added: true; messageId: string; userId: string; emojiKey: string }
   | { added: false; messageId: string; userId: string; emojiKey: string };
