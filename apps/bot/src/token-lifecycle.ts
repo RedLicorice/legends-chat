@@ -12,7 +12,10 @@ async function editAndScheduleDelete(
   newText: string,
 ): Promise<void> {
   try {
-    await api.editMessageText(Number(chatId), messageId, newText, { parse_mode: "HTML" });
+    await api.editMessageText(Number(chatId), messageId, newText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [] },
+    });
   } catch (err) {
     // Message might already be gone (user deleted, too old, etc.) — non-fatal.
     console.warn("[lifecycle] editMessageText failed", (err as Error).message);

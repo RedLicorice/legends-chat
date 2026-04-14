@@ -30,8 +30,13 @@ async function sendLoginLink(ctx: Ctx, userId: string): Promise<void> {
   const issued = await issueLoginToken(userId);
   const url = loginUrl(issued.token);
   const sent = await ctx.reply(
-    `<a href="${escapeHtml(url)}">🔑 Log in to Legends Chat</a>\n<i>Link valid for 5 minutes.</i>`,
-    { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+    `<i>Link valid for 5 minutes.</i>`,
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🔑 Log in to Legends Chat", url }]],
+      },
+    },
   );
   const chatId = BigInt(sent.chat.id);
   await attachTelegramMessage(issued.id, chatId, sent.message_id);
