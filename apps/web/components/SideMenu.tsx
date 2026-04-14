@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings, Shield, LogOut } from "lucide-react";
+import { Shield, LogOut } from "lucide-react";
 import type { CurrentUser } from "@/lib/auth";
 import { PERMISSIONS } from "@legends/shared";
 
@@ -34,12 +34,6 @@ export function SideMenu({ user }: { user: CurrentUser }) {
             <Shield className="h-4 w-4" /> Admin
           </Link>
         )}
-        <Link
-          href="/settings"
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-        >
-          <Settings className="h-4 w-4" /> Settings
-        </Link>
       </nav>
 
       <form action="/api/auth/logout" method="post" className="border-t border-border p-3">
