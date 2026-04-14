@@ -1,0 +1,27 @@
+{
+  "name": "@legends/ws",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@legends/crypto": "workspace:*",
+    "@legends/db": "workspace:*",
+    "@legends/shared": "workspace:*",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "drizzle-orm": "^0.36.4",
+    "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
+    "postgres": "^3.4.5",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
