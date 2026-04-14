@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { authLoginTokens } from "@legends/db/schema";
 import { db } from "./db";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const NGROK_ENV_FILE = resolve(ROOT, "logs/ngrok.env");
 
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 const REUSE_WINDOW_MS = 15 * 1000;
@@ -106,7 +112,16 @@ export async function listPendingTokensWithTelegramRefs(): Promise<
     );
 }
 
+function appPublicUrl(): string {
+  // Prefer the URL written by scripts/ngrok.mjs — read at call time so the
+  // bot picks up a freshly-started tunnel without needing a restart.
+  if (existsSync(NGROK_ENV_FILE)) {
+    const match = readFileSync(NGROK_ENV_FILE, "utf-8").match(/^APP_PUBLIC_URL=(.+)$/m);
+    if (match) return match[1].trim();
+  }
+  return process.env.APP_PUBLIC_URL ?? "http://localhost:3000";
+}
+
 export function loginUrl(token: string): string {
-  const base = process.env.APP_PUBLIC_URL ?? "http://localhost:3000";
-  return `${base}/auth/callback?token=${token}`;
+  return `${appPublicUrl()}/auth/callback?token=${token}`;
 }

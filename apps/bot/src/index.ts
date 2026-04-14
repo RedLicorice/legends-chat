@@ -29,13 +29,18 @@ function escapeHtml(s: string): string {
 async function sendLoginLink(ctx: Ctx, userId: string): Promise<void> {
   const issued = await issueLoginToken(userId);
   const url = loginUrl(issued.token);
+  // Telegram only accepts https:// in inline keyboard buttons.
+  // Fall back to plain text for localhost dev sessions.
+  const isHttps = url.startsWith("https://");
   const sent = await ctx.reply(
-    `<i>Link valid for 5 minutes.</i>`,
+    isHttps
+      ? `<i>Link valid for 5 minutes.</i>`
+      : `🔑 <b>Log in to Legends Chat</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes.</i>`,
     {
       parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [[{ text: "🔑 Log in to Legends Chat", url }]],
-      },
+      ...(isHttps && {
+        reply_markup: { inline_keyboard: [[{ text: "🔑 Log in to Legends Chat", url }]] },
+      }),
     },
   );
   const chatId = BigInt(sent.chat.id);
