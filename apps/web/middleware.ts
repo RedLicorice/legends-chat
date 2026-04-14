@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ACCESS_COOKIE } from "@legends/shared";
 
-const PUBLIC_PATHS = ["/auth/callback", "/api/health", "/manifest.webmanifest", "/sw.js"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health", "/manifest.webmanifest", "/sw.js"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

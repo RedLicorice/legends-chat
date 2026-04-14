@@ -11,7 +11,7 @@ import {
   rolesPermissions,
   topics,
   users,
-} from "./schema.js";
+} from "./schema";
 
 const url = process.env.DATABASE_URL ?? "postgres://legends:legends@localhost:5432/legends";
 const client = postgres(url, { max: 1 });
