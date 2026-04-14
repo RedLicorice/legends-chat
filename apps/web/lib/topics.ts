@@ -49,7 +49,7 @@ export async function listTopicsForUser(userId: string): Promise<TopicListItem[]
     let unreadCount = 0;
     if (latest) {
       const lastRead = member?.lastReadMessageId ?? 0n;
-      const [{ count }] = await db
+      const countRows = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(messages)
         .where(
@@ -59,7 +59,7 @@ export async function listTopicsForUser(userId: string): Promise<TopicListItem[]
             gt(messages.id, lastRead),
           ),
         );
-      unreadCount = Number(count);
+      unreadCount = Number(countRows[0]?.count ?? 0);
     }
 
     let lastMessage: TopicListItem["lastMessage"] = null;

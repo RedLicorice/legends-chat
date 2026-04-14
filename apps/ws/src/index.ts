@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { Server, type Socket } from "socket.io";
+import { Server, type Socket, type DefaultEventsMap } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import {
   ACCESS_COOKIE,
@@ -29,22 +29,19 @@ import {
 interface SocketData {
   user: AccessTokenPayload;
 }
-type AuthedSocket = Socket<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>, SocketData>;
+type AuthedSocket = Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>;
 
 const httpServer = createServer((_req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
   res.end("legends-chat ws ok\n");
 });
 
-const io = new Server<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>, SocketData>(
-  httpServer,
-  {
-    cors: {
-      origin: process.env.WEB_URL ?? "http://localhost:3000",
-      credentials: true,
-    },
+const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>(httpServer, {
+  cors: {
+    origin: process.env.WEB_URL ?? "http://localhost:3000",
+    credentials: true,
   },
-);
+});
 
 io.adapter(createAdapter(pubClient, subClient));
 

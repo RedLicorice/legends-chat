@@ -21,12 +21,13 @@ export async function POST() {
 
   const since = new Date();
   since.setUTCHours(0, 0, 0, 0);
-  const [{ count }] = await db
+  const countRows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(inviteCodes)
     .where(and(eq(inviteCodes.createdByUserId, user.id), gte(inviteCodes.createdAt, since)));
+  const used = countRows[0]?.count ?? 0;
 
-  if (Number(count) >= dailyLimit) {
+  if (Number(used) >= dailyLimit) {
     return NextResponse.json({ error: "daily invite quota reached" }, { status: 429 });
   }
 
