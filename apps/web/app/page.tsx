@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { listTopicsForUser } from "@/lib/topics";
 import { SideMenu } from "@/components/SideMenu";
 import { TopicListItem } from "@/components/TopicListItem";
+import { PushSetup } from "@/components/PushSetup";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default async function HomePage() {
 
   return (
     <div className="flex">
+      <PushSetup />
       <SideMenu user={user} />
       <main className="flex h-screen flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-border px-6 py-4">

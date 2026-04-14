@@ -14,6 +14,7 @@ import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth.js";
 import { pubClient, subClient } from "./redis.js";
 import { purgeCountModeForTopic, startAutoDelete } from "./autodelete.js";
 import { getTopicAutoDelete } from "./messages.js";
+import { notifyTopicMembers } from "./push.js";
 import {
   ensureTopicMembership,
   getMessageTopicId,
@@ -98,6 +99,12 @@ io.on("connection", (socket: AuthedSocket) => {
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
+      notifyTopicMembers({
+        topicId: parsed.topicId,
+        senderUserId: user.sub,
+        preview: parsed.content.text,
+        messageId: msg.id,
+      }).catch((e) => console.error("[push] notify failed", e));
       const cfg = await getTopicAutoDelete(parsed.topicId);
       if (cfg?.mode === "count" && cfg.max) {
         purgeCountModeForTopic(io, parsed.topicId, cfg.max).catch((e) =>
