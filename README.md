@@ -49,23 +49,24 @@ packages/
   crypto/  encryption-at-rest helpers
 ```
 
-## Slice 1 status
+## Slice 1 status — complete
 
-What works:
 - Telegram bot login flow (invite-only by default, public toggle in `registration_config`)
 - JWT auth (access + refresh cookies, jti revocation set in Redis)
 - Topic list (sticky-first, unread badges, last-message preview)
-- Topic view: send/receive messages over Socket.IO with at-rest encryption
-- Ban + mute APIs with session revocation and pubsub-driven socket disconnect
+- Topic view over Socket.IO with at-rest XChaCha20-Poly1305 encryption
+- Reactions: quick picker, persisted, live-broadcast add/remove chips
+- Message reporting → moderation queue with dismiss / delete / mute / ban
+- Ban + mute with session revocation and pubsub-driven socket disconnect
+- Auto-delete worker: age mode (60s tick) and count mode (per-insert trim)
+- Web Push: VAPID subscribe, service worker, server-side delivery on new messages
 - Bot Telegram-side ban check with time-remaining message
-- Admin endpoint scaffolds for topics + invites
-- PWA manifest (icons not yet provided)
+- Admin endpoints for topics, invites, bans, mutes, and moderation actions
+- PWA manifest + service worker registration (icons still need to be dropped in `public/`)
 
-What's stubbed:
-- Reactions persistence (event handler is a no-op)
-- Bot API (slice 2)
-- Auto-delete worker (schema present, worker not yet built)
-- Web Push delivery (subscription model present, server not yet wired)
-- Moderation queue UI (endpoints in place)
-- Service worker registration
-```
+## Out of scope for slice 1
+
+- Internal bot API (slice 2)
+- E2EE per topic (deferred; data model and at-rest layer already shaped for it)
+- Reply threading UI, message edit, attachment uploads
+
