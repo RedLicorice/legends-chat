@@ -8,6 +8,24 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p logs
 
+# Load nvm so Node/pnpm are on PATH even in non-interactive shells.
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh"
+fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found on PATH. Install via nvm (see README) and try again." >&2
+  exit 1
+fi
+# Ensure pnpm resolves to the WSL-side binary, not /mnt/c/Program Files/nodejs/pnpm.
+PNPM_BIN="$(command -v pnpm || true)"
+if [[ -z "$PNPM_BIN" || "$PNPM_BIN" == /mnt/c/* ]]; then
+  echo "pnpm not found on the WSL side (found: ${PNPM_BIN:-none})." >&2
+  echo "Install it with: npm install -g pnpm@9" >&2
+  exit 1
+fi
+
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
