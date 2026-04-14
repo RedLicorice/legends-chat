@@ -27,15 +27,17 @@ stop_service() {
   rm -f "$pidfile"
 }
 
-echo "[1/2] stopping web / ws / bot"
+echo "[1/2] stopping web / ws / bot / ngrok"
 stop_service web
 stop_service ws
 stop_service bot
+stop_service ngrok
 
 # Sweeper: catch any stragglers that escaped their process group.
 pkill -f 'next dev' 2>/dev/null || true
 pkill -f 'next-server' 2>/dev/null || true
 pkill -f 'tsx watch src/index.ts' 2>/dev/null || true
+pkill -f 'scripts/ngrok.mjs' 2>/dev/null || true
 
 echo "[2/2] stopping postgres + redis"
 docker compose stop

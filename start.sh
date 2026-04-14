@@ -36,7 +36,7 @@ else
   exit 1
 fi
 
-echo "[1/4] postgres + redis"
+echo "[1/5] postgres + redis"
 docker compose up -d
 
 start_service() {
@@ -50,17 +50,54 @@ start_service() {
   echo $! >"logs/${name}.pid"
 }
 
-echo "[2/4] web"
+# --- optional ngrok tunnel ---
+NGROK_WEB_URL="http://localhost:3000"
+NGROK_WS_URL="http://localhost:3001"
+
+if [[ -n "${NGROK_AUTHTOKEN:-}" ]]; then
+  echo "[2/5] ngrok"
+  rm -f logs/ngrok.env
+  nohup node scripts/ngrok.mjs >"logs/ngrok.log" 2>&1 &
+  echo $! >"logs/ngrok.pid"
+
+  # Wait up to 15 s for the tunnel URLs to be written.
+  for _i in $(seq 1 30); do
+    sleep 0.5
+    [[ -f logs/ngrok.env ]] && break
+  done
+
+  if [[ -f logs/ngrok.env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    . logs/ngrok.env
+    set +a
+    NGROK_WEB_URL="${APP_PUBLIC_URL}"
+    NGROK_WS_URL="${NEXT_PUBLIC_WS_URL}"
+    echo "  web tunnel → ${NGROK_WEB_URL}"
+    echo "  ws  tunnel → ${NGROK_WS_URL}"
+  else
+    echo "  ngrok didn't start in time — continuing on localhost"
+  fi
+else
+  echo "[2/5] ngrok — skipped (NGROK_AUTHTOKEN not set)"
+fi
+
+echo "[3/5] web"
 start_service web @legends/web
-echo "[3/4] ws"
+echo "[4/5] ws"
 start_service ws @legends/ws
-echo "[4/4] bot"
+echo "[5/5] bot"
 start_service bot @legends/bot
 
 echo
 echo "All services launched."
-echo "  web → http://localhost:3000"
-echo "  ws  → http://localhost:3001"
+if [[ -n "${NGROK_AUTHTOKEN:-}" && -f logs/ngrok.env ]]; then
+  echo "  web → ${NGROK_WEB_URL}  (also http://localhost:3000)"
+  echo "  ws  → ${NGROK_WS_URL}  (also http://localhost:3001)"
+else
+  echo "  web → http://localhost:3000"
+  echo "  ws  → http://localhost:3001"
+fi
 echo "  logs → logs/{web,ws,bot}.log"
 echo
 echo "Stop with: ./stop.sh"
