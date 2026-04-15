@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@legends/shared";
+import { publicOrigin } from "@/lib/public-origin";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -28,19 +29,17 @@ export function middleware(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const origin = publicOrigin(req);
+
   // No access cookie. If we still have a refresh cookie, try to silently
   // renew before falling back to the login page.
   if (req.cookies.get(REFRESH_COOKIE)?.value) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/auth/refresh";
-    url.search = `?to=${encodeURIComponent(pathname + search)}`;
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(
+      new URL(`/auth/refresh?to=${encodeURIComponent(pathname + search)}`, origin),
+    );
   }
 
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = "";
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(new URL("/login", origin));
 }
 
 export const config = {

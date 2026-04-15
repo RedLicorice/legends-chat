@@ -5,6 +5,7 @@ import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { issueSession, setAuthCookies } from "@/lib/auth";
+import { publicOrigin } from "@/lib/public-origin";
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
@@ -47,5 +48,5 @@ export async function GET(req: NextRequest) {
       .catch((err) => console.warn("[auth/callback] publish failed", err));
   }
 
-  return NextResponse.redirect(new URL("/", req.url));
+  return NextResponse.redirect(new URL("/", publicOrigin(req)));
 }

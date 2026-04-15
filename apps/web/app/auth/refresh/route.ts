@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { refreshAccessCookie } from "@/lib/auth";
+import { publicOrigin } from "@/lib/public-origin";
 
 function safeRedirectTarget(to: string | null): string {
   if (!to) return "/";
@@ -11,9 +12,7 @@ function safeRedirectTarget(to: string | null): string {
 export async function GET(req: NextRequest) {
   const to = safeRedirectTarget(req.nextUrl.searchParams.get("to"));
   const ok = await refreshAccessCookie();
-  if (!ok) {
-    const url = new URL("/login", req.url);
-    return NextResponse.redirect(url);
-  }
-  return NextResponse.redirect(new URL(to, req.url));
+  const origin = publicOrigin(req);
+  if (!ok) return NextResponse.redirect(new URL("/login", origin));
+  return NextResponse.redirect(new URL(to, origin));
 }
