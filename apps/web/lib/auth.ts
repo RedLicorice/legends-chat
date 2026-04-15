@@ -30,18 +30,20 @@ const REFRESH_TTL = Number(process.env.JWT_REFRESH_TTL_SECONDS ?? 86_400);
 export async function issueSession(userId: string, role: Role): Promise<{ accessJwt: string; refreshJwt: string }> {
   const jti = randomUUID();
   const sid = randomUUID();
-  const accessJwt = await new SignJWT({ sub: userId, role, jti })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(`${ACCESS_TTL}s`)
-    .sign(accessSecret);
-
   const refreshJti = randomUUID();
-  const refreshJwt = await new SignJWT({ sub: userId, jti: refreshJti, sid })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(`${REFRESH_TTL}s`)
-    .sign(refreshSecret);
+
+  const [accessJwt, refreshJwt] = await Promise.all([
+    new SignJWT({ sub: userId, role, jti })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime(`${ACCESS_TTL}s`)
+      .sign(accessSecret),
+    new SignJWT({ sub: userId, jti: refreshJti, sid })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime(`${REFRESH_TTL}s`)
+      .sign(refreshSecret),
+  ]);
 
   await db.insert(sessions).values({
     id: sid,
