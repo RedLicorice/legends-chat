@@ -56,9 +56,15 @@ NGROK_WS_URL="http://localhost:3001"
 
 if [[ -n "${NGROK_AUTHTOKEN:-}" ]]; then
   echo "[2/5] ngrok"
-  rm -f logs/ngrok.env
-  nohup node scripts/ngrok.mjs >"logs/ngrok.log" 2>&1 &
-  echo $! >"logs/ngrok.pid"
+
+  # Guard: never start a second ngrok agent (same authtoken = kicks the first one offline).
+  if [[ -f logs/ngrok.pid ]] && kill -0 "$(cat logs/ngrok.pid)" 2>/dev/null; then
+    echo "  ngrok already running (pid $(cat logs/ngrok.pid)) — reusing existing tunnels"
+  else
+    rm -f logs/ngrok.env logs/ngrok.pid
+    nohup node scripts/ngrok.mjs >"logs/ngrok.log" 2>&1 &
+    echo $! >"logs/ngrok.pid"
+  fi
 
   # Wait up to 15 s for the tunnel URLs to be written.
   for _i in $(seq 1 30); do

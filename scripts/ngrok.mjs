@@ -24,10 +24,21 @@ if (!authtoken) {
 const webPort = parseInt(process.env.WEB_PORT ?? "3000", 10);
 const wsPort = parseInt(process.env.WS_PORT ?? "3001", 10);
 
+// Catch unhandled errors so they appear in logs/ngrok.log instead of
+// silently killing the process.
+process.on("uncaughtException", (err) => {
+  console.error("[ngrok] uncaught exception:", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[ngrok] unhandled rejection:", reason);
+  process.exit(1);
+});
+
 console.log(`[ngrok] connecting (web :${webPort}, ws :${wsPort})…`);
 
 const webListener = await ngrok.forward({ addr: webPort, authtoken });
-// Second tunnel reuses the same agent session (no second authtoken needed)
+// Second tunnel reuses the same agent session (no second authtoken needed).
 const wsListener = await ngrok.forward({ addr: wsPort });
 
 const webUrl = webListener.url();
@@ -44,14 +55,21 @@ console.log(`[ngrok] ws  → ${wsUrl}`);
 console.log(`[ngrok] URLs written to logs/ngrok.env`);
 
 // Keep the process alive to hold the tunnels open.
+// The setInterval prevents Node's event loop from draining if the @ngrok/ngrok
+// SDK doesn't maintain its own references after the initial connect.
+const keepAlive = setInterval(() => {}, 30_000);
+
 process.on("SIGTERM", async () => {
+  clearInterval(keepAlive);
   await ngrok.disconnect();
   process.exit(0);
 });
 process.on("SIGINT", async () => {
+  clearInterval(keepAlive);
   await ngrok.disconnect();
   process.exit(0);
 });
 
-// Block forever.
-await new Promise(() => {});
+// Also log if the session closes unexpectedly.
+webListener.on?.("close", () => console.error("[ngrok] web tunnel closed unexpectedly"));
+wsListener.on?.("close", () => console.error("[ngrok] ws tunnel closed unexpectedly"));
