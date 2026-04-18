@@ -56,15 +56,18 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
   const wsUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   useEffect(() => {
+    let active = true;
     const socket = io(wsUrl, { withCredentials: true, transports: ["polling", "websocket"] });
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      if (!active) return;
       setConnected(true);
       socket.emit(
         WS_EVENTS.TOPIC_JOIN,
         topic.id,
         (res: { ok: boolean; messages?: Message[]; reactions?: ReactionRow[]; error?: string }) => {
+          if (!active) return;
           if (res.ok) {
             if (res.messages) setMessages(res.messages);
             if (res.reactions) setReactions(res.reactions);
@@ -72,12 +75,13 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
         },
       );
     });
-    socket.on("disconnect", () => setConnected(false));
+    socket.on("disconnect", () => { if (active) setConnected(false); });
     socket.on(WS_EVENTS.MESSAGE_NEW, (msg: Message) => {
-      if (msg.topicId !== topic.id) return;
+      if (!active || msg.topicId !== topic.id) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
     });
     socket.on(WS_EVENTS.REACTION_ADD, (r: ReactionRow) => {
+      if (!active) return;
       setReactions((prev) =>
         prev.some((x) => x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)
           ? prev
@@ -85,17 +89,19 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
       );
     });
     socket.on(WS_EVENTS.REACTION_REMOVE, (r: ReactionRow) => {
+      if (!active) return;
       setReactions((prev) =>
         prev.filter((x) => !(x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)),
       );
     });
     socket.on(WS_EVENTS.MESSAGE_DELETE, (d: { id: string; topicId: string }) => {
-      if (d.topicId !== topic.id) return;
+      if (!active || d.topicId !== topic.id) return;
       setMessages((prev) => prev.filter((m) => m.id !== d.id));
       setReactions((prev) => prev.filter((r) => r.messageId !== d.id));
     });
 
     return () => {
+      active = false;
       socket.emit(WS_EVENTS.TOPIC_LEAVE, topic.id);
       socket.disconnect();
     };
@@ -205,7 +211,7 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
                     )}
                   >
                     <div className="whitespace-pre-wrap break-words">{m.text}</div>
-                    <div className={cn("mt-1 text-[10px]", mine ? "text-white/70" : "text-muted")}>
+                    <div suppressHydrationWarning className={cn("mt-1 text-[10px]", mine ? "text-white/70" : "text-muted")}>
                       {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </div>
                   </div>
@@ -283,7 +289,7 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
       </div>
 
       {mute ? (
-        <div className="border-t border-border bg-panel px-6 py-4 text-sm text-danger">
+        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 py-4 text-sm text-danger">
           You are muted: {mute.reason}
           {mute.expiresAt ? ` (until ${new Date(mute.expiresAt).toLocaleString()})` : " (permanent)"}
         </div>

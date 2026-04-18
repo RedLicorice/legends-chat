@@ -54,7 +54,10 @@ start_service() {
 NGROK_WEB_URL="http://localhost:3000"
 NGROK_WS_URL="http://localhost:3001"
 
-if [[ -n "${NGROK_AUTHTOKEN:-}" ]]; then
+if [[ "${NGROK_ENABLE:-true}" == "false" ]]; then
+  echo "[2/5] ngrok — disabled (NGROK_ENABLE=false)"
+  rm -f logs/ngrok.env logs/ngrok.pid
+elif [[ -n "${NGROK_AUTHTOKEN:-}" ]]; then
   echo "[2/5] ngrok"
 
   # Guard: never start a second ngrok agent (same authtoken = kicks the first one offline).
