@@ -31,19 +31,22 @@ export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    telegramUserId: bigint("telegram_user_id", { mode: "bigint" }).notNull(),
+    telegramUserId: bigint("telegram_user_id", { mode: "bigint" }),
     telegramUsername: text("telegram_username"),
     displayName: text("display_name").notNull(),
     avatarUrl: text("avatar_url"),
     role: userRole("role").notNull().default("user"),
+    isAnon: boolean("is_anon").notNull().default(false),
+    anonExpiresAt: timestamp("anon_expires_at", { withTimezone: true }),
     invitedByUserId: uuid("invited_by_user_id"),
     invitedByCodeId: uuid("invited_by_code_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
   (t) => ({
-    telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId),
+    telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId).where(sql`${t.telegramUserId} IS NOT NULL`),
     invitedByIdx: index("users_invited_by_idx").on(t.invitedByUserId),
+    anonExpiryIdx: index("users_anon_expiry_idx").on(t.anonExpiresAt).where(sql`${t.isAnon} = true`),
   }),
 );
 

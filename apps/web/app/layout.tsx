@@ -4,7 +4,6 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Legends Chat",
   description: "Community chat for legends",
-  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {

@@ -4,7 +4,7 @@ import { auditLog, inviteCodes, users } from "@legends/db/schema";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
 import { attachTelegramMessage, issueLoginToken, loginUrl } from "./login";
-import { createUser, findUserByTelegramId, getRegistrationPolicy } from "./registration";
+import { createAnonUser, createUser, findUserByTelegramId, getRegistrationPolicy } from "./registration";
 import {
   rescheduleOnStartup,
   scheduleExpiryCheck,
@@ -170,6 +170,36 @@ bot.on("message:text", async (ctx) => {
       : `Welcome aboard as ${created.code.role}! Generating your login link...`,
   );
   await sendLoginLink(ctx, created.user.id);
+});
+
+bot.command("anon", async (ctx) => {
+  const tgUser = ctx.from;
+  if (!tgUser) return;
+
+  const caller = await findUserByTelegramId(BigInt(tgUser.id));
+  if (!caller || caller.role !== "admin") {
+    await ctx.reply("This command is only available to admins.");
+    return;
+  }
+
+  const anon = await createAnonUser();
+  const issued = await issueLoginToken(anon.id);
+  const url = loginUrl(issued.token);
+  const isHttps = url.startsWith("https://");
+  const sent = await ctx.reply(
+    `🎭 <b>${escapeHtml(anon.displayName)}</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes. Identity expires 48 h after last use.</i>`,
+    {
+      parse_mode: "HTML",
+      ...(isHttps && {
+        reply_markup: {
+          inline_keyboard: [[{ text: `🎭 Log in as ${anon.displayName}`, url }]],
+        },
+      }),
+    },
+  );
+  const chatId = BigInt(sent.chat.id);
+  await attachTelegramMessage(issued.id, chatId, sent.message_id);
+  scheduleExpiryCheck(bot.api, issued.id, chatId, sent.message_id, issued.expiresAt);
 });
 
 bot.catch((err) => {

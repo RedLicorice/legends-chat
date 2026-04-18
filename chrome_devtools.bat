@@ -1,0 +1,2 @@
+@echo off
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir=c:/temp/chrome-debug-profile --remote-allow-origins=* --no-first-run --no-default-browser-check --disable-extensions

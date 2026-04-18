@@ -6,6 +6,7 @@ import {
   topicMembers,
   topics,
   userMutes,
+  users,
 } from "@legends/db/schema";
 import {
   decryptMessage,
@@ -55,6 +56,8 @@ export interface InsertedMessage {
   id: string;
   topicId: string;
   senderUserId: string | null;
+  senderDisplayName: string | null;
+  senderIsAnon: boolean;
   botId: string | null;
   replyToMessageId: string | null;
   text: string;
@@ -84,10 +87,24 @@ export async function insertMessage(args: {
       keyId: key.id,
     })
     .returning();
+
+  let senderDisplayName: string | null = null;
+  let senderIsAnon = false;
+  if (args.senderUserId) {
+    const [u] = await db
+      .select({ displayName: users.displayName, isAnon: users.isAnon })
+      .from(users)
+      .where(eq(users.id, args.senderUserId))
+      .limit(1);
+    if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; }
+  }
+
   return {
     id: row!.id.toString(),
     topicId: row!.topicId,
     senderUserId: row!.senderUserId,
+    senderDisplayName,
+    senderIsAnon,
     botId: row!.botId,
     replyToMessageId: row!.replyToMessageId?.toString() ?? null,
     text: args.text,
@@ -120,8 +137,22 @@ export async function listReactionsForTopic(topicId: string, limit = 200): Promi
 
 export async function listRecentMessages(topicId: string, limit = 50): Promise<InsertedMessage[]> {
   const rows = await db
-    .select()
+    .select({
+      id: messages.id,
+      topicId: messages.topicId,
+      senderUserId: messages.senderUserId,
+      botId: messages.botId,
+      replyToMessageId: messages.replyToMessageId,
+      contentCiphertext: messages.contentCiphertext,
+      contentNonce: messages.contentNonce,
+      keyId: messages.keyId,
+      createdAt: messages.createdAt,
+      editedAt: messages.editedAt,
+      senderDisplayName: users.displayName,
+      senderIsAnon: users.isAnon,
+    })
     .from(messages)
+    .leftJoin(users, eq(messages.senderUserId, users.id))
     .where(and(eq(messages.topicId, topicId), isNull(messages.deletedAt)))
     .orderBy(desc(messages.id))
     .limit(limit);
@@ -135,6 +166,8 @@ export async function listRecentMessages(topicId: string, limit = 50): Promise<I
       id: r.id.toString(),
       topicId: r.topicId,
       senderUserId: r.senderUserId,
+      senderDisplayName: r.senderDisplayName ?? null,
+      senderIsAnon: r.senderIsAnon ?? false,
       botId: r.botId,
       replyToMessageId: r.replyToMessageId?.toString() ?? null,
       text,

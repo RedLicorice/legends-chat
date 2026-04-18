@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+**/node_modules
+.next
+**/.next/cache
+logs
+*.log
+.env
+.env.*
+dist
+**/*.tsbuildinfo
+start.bat
+start.sh
+stop.bat
+stop.sh
+scripts

@@ -24,7 +24,7 @@ export default async function TopicPage({ params }: { params: Promise<{ slug: st
       <main className="flex h-screen flex-1 flex-col">
         <TopicView
           topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee }}
-          currentUser={{ id: user.id, displayName: user.displayName }}
+          currentUser={{ id: user.id, displayName: user.displayName, role: user.role }}
           mute={mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null}
         />
       </main>

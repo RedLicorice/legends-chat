@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
+import { and, eq, lt } from "drizzle-orm";
 import { Server, type Socket, type DefaultEventsMap } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
+import { users } from "@legends/db/schema";
+import { db } from "./db";
 import {
   ACCESS_COOKIE,
   REDIS_CHANNELS,
@@ -36,9 +39,15 @@ const httpServer = createServer((_req, res) => {
   res.end("legends-chat ws ok\n");
 });
 
+const allowedOrigins = [
+  process.env.WEB_URL,
+  process.env.APP_PUBLIC_URL,
+  "http://localhost:3000",
+].filter(Boolean) as string[];
+
 const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>(httpServer, {
   cors: {
-    origin: process.env.WEB_URL ?? "http://localhost:3000",
+    origin: allowedOrigins,
     credentials: true,
   },
 });
@@ -172,6 +181,23 @@ subClient.on("message", (channel, message) => {
 });
 
 startAutoDelete(io);
+
+// Purge expired anon identities once per hour.
+async function purgeExpiredAnonUsers() {
+  try {
+    const deleted = await db
+      .delete(users)
+      .where(and(eq(users.isAnon, true), lt(users.anonExpiresAt, new Date())))
+      .returning({ id: users.id });
+    if (deleted.length > 0) {
+      console.log(`[anon-cleanup] purged ${deleted.length} expired anon user(s)`);
+    }
+  } catch (err) {
+    console.error("[anon-cleanup] failed", err);
+  }
+}
+purgeExpiredAnonUsers();
+setInterval(purgeExpiredAnonUsers, 60 * 60 * 1000);
 
 const port = Number(process.env.WS_PORT ?? 3001);
 httpServer.listen(port, () => {

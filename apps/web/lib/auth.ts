@@ -114,11 +114,17 @@ export async function refreshAccessCookie(): Promise<boolean> {
   if (await isUserBanned(payload.sub)) return false;
 
   const [u] = await db
-    .select({ id: users.id, role: users.role })
+    .select({ id: users.id, role: users.role, isAnon: users.isAnon, anonExpiresAt: users.anonExpiresAt })
     .from(users)
     .where(eq(users.id, payload.sub))
     .limit(1);
   if (!u) return false;
+
+  // Anon users expire 48 h after their last refresh — extend the window each time.
+  if (u.isAnon) {
+    const newExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    await db.update(users).set({ anonExpiresAt: newExpiry }).where(eq(users.id, u.id));
+  }
 
   const newJti = randomUUID();
   const accessJwt = await new SignJWT({ sub: u.id, role: u.role, jti: newJti })
@@ -144,6 +150,7 @@ export interface CurrentUser {
   permissions: Set<string>;
   displayName: string;
   avatarUrl: string | null;
+  isAnon: boolean;
 }
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
@@ -175,6 +182,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     permissions: new Set(perms.map((p) => p.permission)),
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
+    isAnon: u.isAnon,
   };
 }
 

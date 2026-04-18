@@ -11,6 +11,8 @@ interface Message {
   id: string;
   topicId: string;
   senderUserId: string | null;
+  senderDisplayName: string | null;
+  senderIsAnon: boolean;
   botId: string | null;
   replyToMessageId: string | null;
   text: string;
@@ -35,7 +37,7 @@ const EMOJI_GLYPH: Record<string, string> = {
 
 interface TopicViewProps {
   topic: { id: string; slug: string; title: string; isE2ee: boolean };
-  currentUser: { id: string; displayName: string };
+  currentUser: { id: string; displayName: string; role: string };
   mute: { reason: string; expiresAt: string | null } | null;
 }
 
@@ -48,18 +50,13 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
   const socketRef = useRef<Socket | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
-  const wsUrl = useMemo(
-    () =>
-      typeof window !== "undefined"
-        ? (window as unknown as { __WS_URL?: string }).__WS_URL ??
-          process.env.NEXT_PUBLIC_WS_URL ??
-          "http://localhost:3001"
-        : "http://localhost:3001",
-    [],
-  );
+  // Connect to the same origin as the web app. Next.js proxies /socket.io/*
+  // to the WS server via rewrites, so the auth cookie is always sent
+  // same-origin regardless of environment (dev, ngrok, production).
+  const wsUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   useEffect(() => {
-    const socket = io(wsUrl, { withCredentials: true, transports: ["websocket", "polling"] });
+    const socket = io(wsUrl, { withCredentials: true, transports: ["polling", "websocket"] });
     socketRef.current = socket;
 
     socket.on("connect", () => {
@@ -187,10 +184,24 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
                 className={cn("group flex", mine ? "justify-end" : "justify-start")}
               >
                 <div className={cn("max-w-[78%]", mine ? "items-end" : "items-start")}>
+                  {!mine && m.senderDisplayName && (
+                    <div className={cn(
+                      "mb-0.5 text-xs font-medium",
+                      m.senderIsAnon && currentUser.role === "admin"
+                        ? "text-muted line-through"
+                        : "text-accent2",
+                    )}>
+                      {m.senderDisplayName}
+                      {m.senderIsAnon && currentUser.role === "admin" && (
+                        <span className="ml-1 text-[10px] text-muted">(anon)</span>
+                      )}
+                    </div>
+                  )}
                   <div
                     className={cn(
                       "rounded-2xl px-4 py-2 text-sm",
                       mine ? "bg-accent text-white" : "bg-panel2 text-text",
+                      !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
                     )}
                   >
                     <div className="whitespace-pre-wrap break-words">{m.text}</div>

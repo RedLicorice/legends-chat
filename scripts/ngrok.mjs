@@ -47,7 +47,7 @@ const wsUrl = wsListener.url();
 fs.mkdirSync(logsDir, { recursive: true });
 fs.writeFileSync(
   envFile,
-  [`APP_PUBLIC_URL=${webUrl}`, `NEXT_PUBLIC_WS_URL=${wsUrl}`, `WS_URL=${wsUrl}`].join("\n") + "\n",
+  [`APP_PUBLIC_URL=${webUrl}`, `WEB_URL=${webUrl}`, `NEXT_PUBLIC_WS_URL=${wsUrl}`, `WS_URL=${wsUrl}`].join("\n") + "\n",
 );
 
 console.log(`[ngrok] web → ${webUrl}`);

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { registrationConfig, users } from "@legends/db/schema";
 import { db } from "./db";
 
@@ -42,5 +42,26 @@ export async function createUser(identity: TelegramIdentity) {
     })
     .returning();
   return row!;
+}
+
+export async function createAnonUser(): Promise<{ id: string; displayName: string }> {
+  // Count existing anon users to pick the next sequential number.
+  const [countRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(users)
+    .where(like(users.displayName, "Anon#%"));
+  const n = ((countRow?.count ?? 0) + 1).toString().padStart(3, "0");
+  const displayName = `Anon#${n}`;
+
+  const anonExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  const [row] = await db
+    .insert(users)
+    .values({
+      displayName,
+      isAnon: true,
+      anonExpiresAt,
+    })
+    .returning();
+  return { id: row!.id, displayName: row!.displayName };
 }
 
