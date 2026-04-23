@@ -1,0 +1,9 @@
+Upcoming:
+- Notifications system: speaks for itself, like fb notifications. I hate badges.
+- Permanent accounts: once logged in through telegram, until registered or clicking "not again", user gets a repeating notification to link his email account
+- OTP: Use Authy for 2FA for critical operations, optional for user login
+
+Next Milestone:
+- Basic shop system gated by roles "shop:owner" and "shop:(shopname):owner", dynamic role "shop:(shopname):user" that owner can grant -> owner chooses who can see his shop
+- Store editor: add storefront image, add products, draw a map on image to link to products so owner gets clickable storefront
+- Store front integration: users who are shop owners with an active shop appear with special badge to users who can see the shop. Click the badge -> Open the shop.
