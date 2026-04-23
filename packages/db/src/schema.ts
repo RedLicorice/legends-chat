@@ -42,6 +42,7 @@ export const users = pgTable(
     invitedByCodeId: uuid("invited_by_code_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    presenceOptOut: boolean("presence_opt_out").notNull().default(false),
   },
   (t) => ({
     telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId).where(sql`${t.telegramUserId} IS NOT NULL`),
@@ -151,6 +152,10 @@ export const topics = pgTable(
     autoDeleteMode: autoDeleteMode("auto_delete_mode").notNull().default("none"),
     autoDeleteAgeSeconds: integer("auto_delete_age_seconds"),
     autoDeleteMaxMessages: integer("auto_delete_max_messages"),
+    isFeed: boolean("is_feed").notNull().default(false),
+    isHomeTopic: boolean("is_home_topic").notNull().default(false),
+    postRoles: jsonb("post_roles").$type<string[]>().default([]),
+    readRoles: jsonb("read_roles").$type<string[]>().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -311,6 +316,12 @@ export const userBans = pgTable(
   }),
 );
 
+export const systemSettings = pgTable("system_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const userMutes = pgTable(
   "user_mutes",
   {
@@ -330,5 +341,36 @@ export const userMutes = pgTable(
     activeIdx: index("user_mutes_active_idx")
       .on(t.userId)
       .where(sql`${t.liftedAt} IS NULL`),
+  }),
+);
+
+export const polls = pgTable("polls", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: bigint("message_id", { mode: "bigint" }).notNull().unique().references(() => messages.id),
+  question: text("question").notNull(),
+  isAnonymous: boolean("is_anonymous").notNull().default(false),
+  allowsMultiple: boolean("allows_multiple").notNull().default(false),
+  isClosed: boolean("is_closed").notNull().default(false),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const pollOptions = pgTable("poll_options", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  pollId: uuid("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  position: integer("position").notNull(),
+});
+
+export const pollVotes = pgTable(
+  "poll_votes",
+  {
+    pollId: uuid("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+    optionId: uuid("option_id").notNull().references(() => pollOptions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    votedAt: timestamp("voted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.pollId, t.optionId, t.userId] }),
   }),
 );

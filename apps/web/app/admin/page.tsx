@@ -19,7 +19,9 @@ export default async function AdminPage() {
       <main className="flex-1 p-8">
         <h1 className="mb-6 text-2xl font-semibold">Admin</h1>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card title="Topics" body="Create and configure community topics." />
+          <Link href="/admin/topics" className="block">
+            <Card title="Topics" body="Create and configure community topics." />
+          </Link>
           <Link href="/admin/invites" className="block">
             <Card title="Invites" body="Generate invite codes for new members." />
           </Link>

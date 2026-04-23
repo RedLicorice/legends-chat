@@ -112,12 +112,12 @@ export async function listPendingTokensWithTelegramRefs(): Promise<
     );
 }
 
-function appPublicUrl(): string {
+export function appPublicUrl(): string {
   // Prefer the URL written by scripts/ngrok.mjs — read at call time so the
   // bot picks up a freshly-started tunnel without needing a restart.
   if (existsSync(NGROK_ENV_FILE)) {
     const match = readFileSync(NGROK_ENV_FILE, "utf-8").match(/^APP_PUBLIC_URL=(.+)$/m);
-    if (match) return match[1].trim();
+    if (match?.[1]) return match[1].trim();
   }
   return process.env.APP_PUBLIC_URL ?? "http://localhost:3000";
 }

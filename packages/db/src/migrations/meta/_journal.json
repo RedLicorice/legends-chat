@@ -28,6 +28,36 @@
       "when": 1776400000000,
       "tag": "0003_anon_users",
       "breakpoints": true
+    }, {
+      "idx": 4,
+      "version": "7",
+      "when": 1745000000000,
+      "tag": "0004_presence_opt_out",
+      "breakpoints": true
+    }, {
+      "idx": 5,
+      "version": "7",
+      "when": 1745100000000,
+      "tag": "0005_system_settings",
+      "breakpoints": true
+    }, {
+      "idx": 6,
+      "version": "7",
+      "when": 1745200000000,
+      "tag": "0006_feed_topics",
+      "breakpoints": true
+    }, {
+      "idx": 7,
+      "version": "7",
+      "when": 1745300000000,
+      "tag": "0007_polls",
+      "breakpoints": true
+    }, {
+      "idx": 8,
+      "version": "7",
+      "when": 1745400000000,
+      "tag": "0008_topic_read_roles",
+      "breakpoints": true
     }
   ]
 }

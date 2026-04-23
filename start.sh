@@ -8,21 +8,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p logs
 
-# Load nvm so Node/pnpm are on PATH even in non-interactive shells.
-export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-  # shellcheck disable=SC1091
-  . "$NVM_DIR/nvm.sh"
-fi
 if ! command -v node >/dev/null 2>&1; then
-  echo "node not found on PATH. Install via nvm (see README) and try again." >&2
+  echo "node not found on PATH. Install Node 20+ (see README) and try again." >&2
   exit 1
 fi
-# Ensure pnpm resolves to the WSL-side binary, not /mnt/c/Program Files/nodejs/pnpm.
-PNPM_BIN="$(command -v pnpm || true)"
-if [[ -z "$PNPM_BIN" || "$PNPM_BIN" == /mnt/c/* ]]; then
-  echo "pnpm not found on the WSL side (found: ${PNPM_BIN:-none})." >&2
-  echo "Install it with: npm install -g pnpm@9" >&2
+# Resolve pnpm: prefer a global binary, fall back to corepack's shim.
+if command -v pnpm >/dev/null 2>&1; then
+  PNPM=(pnpm)
+elif command -v corepack >/dev/null 2>&1; then
+  PNPM=(corepack pnpm)
+else
+  echo "pnpm not found and corepack unavailable." >&2
+  echo "Install with: npm install -g pnpm@9  (or enable corepack: corepack enable)" >&2
   exit 1
 fi
 
@@ -45,8 +42,8 @@ start_service() {
     echo "  ${name} already running (pid $(cat "logs/${name}.pid")) — skipping"
     return
   fi
-  echo "  ${name}: pnpm --filter ${pkg} dev → logs/${name}.log"
-  nohup pnpm --filter "${pkg}" dev >"logs/${name}.log" 2>&1 &
+  echo "  ${name}: ${PNPM[*]} --filter ${pkg} dev → logs/${name}.log"
+  nohup "${PNPM[@]}" --filter "${pkg}" dev >"logs/${name}.log" 2>&1 &
   echo $! >"logs/${name}.pid"
 }
 
@@ -54,7 +51,7 @@ start_service() {
 NGROK_WEB_URL="http://localhost:3000"
 NGROK_WS_URL="http://localhost:3001"
 
-if [[ "${NGROK_ENABLE:-true}" == "false" ]]; then
+if [[ "${NGROK_ENABLE:-}" == "false" ]]; then
   echo "[2/5] ngrok — disabled (NGROK_ENABLE=false)"
   rm -f logs/ngrok.env logs/ngrok.pid
 elif [[ -n "${NGROK_AUTHTOKEN:-}" ]]; then
@@ -100,7 +97,7 @@ start_service bot @legends/bot
 
 echo
 echo "All services launched."
-if [[ -n "${NGROK_AUTHTOKEN:-}" && -f logs/ngrok.env ]]; then
+if [[ "${NGROK_ENABLE:-}" != "false" && -n "${NGROK_AUTHTOKEN:-}" && -f logs/ngrok.env ]]; then
   echo "  web → ${NGROK_WEB_URL}  (also http://localhost:3000)"
   echo "  ws  → ${NGROK_WS_URL}  (also http://localhost:3001)"
 else

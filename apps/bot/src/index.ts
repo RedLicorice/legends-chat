@@ -1,15 +1,32 @@
-import { Bot, session, type Context, type SessionFlavor } from "grammy";
+import { createServer } from "node:http";
+import { Bot, webhookCallback, session, type Context, type SessionFlavor } from "grammy";
 import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { auditLog, inviteCodes, users } from "@legends/db/schema";
+import { getSetting } from "@legends/db/system-settings";
+import { insertSystemMessage } from "@legends/db/system-messages";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
-import { attachTelegramMessage, issueLoginToken, loginUrl } from "./login";
+import { appPublicUrl, attachTelegramMessage, issueLoginToken, loginUrl } from "./login";
 import { createAnonUser, createUser, findUserByTelegramId, getRegistrationPolicy } from "./registration";
 import {
   rescheduleOnStartup,
   scheduleExpiryCheck,
   subscribeToConsumption,
 } from "./token-lifecycle";
+
+async function postWelcomeMessage(displayName: string): Promise<void> {
+  try {
+    const [topicId, template] = await Promise.all([
+      getSetting(db, "default_topic_id"),
+      getSetting(db, "welcome_message"),
+    ]);
+    if (!topicId || !template) return;
+    const text = template.replace(/\{nickname\}/g, displayName);
+    await insertSystemMessage(topicId, text);
+  } catch (err) {
+    console.error("[welcome] failed to post welcome message", err);
+  }
+}
 
 interface BotSession {
   awaitingInvite: boolean;
@@ -85,6 +102,7 @@ bot.command("start", async (ctx) => {
       targetType: "user",
       targetId: created.id,
     });
+    await postWelcomeMessage(created.displayName);
     await sendLoginLink(ctx, created.id);
     return;
   }
@@ -169,6 +187,7 @@ bot.on("message:text", async (ctx) => {
       ? "Welcome aboard! Generating your login link..."
       : `Welcome aboard as ${created.code.role}! Generating your login link...`,
   );
+  await postWelcomeMessage(created.user.displayName);
   await sendLoginLink(ctx, created.user.id);
 });
 
@@ -209,5 +228,36 @@ bot.catch((err) => {
 subscribeToConsumption(bot.api);
 rescheduleOnStartup(bot.api).catch((err) => console.error("[lifecycle] reschedule failed", err));
 
-console.log("legends-chat telegram bot starting...");
-bot.start();
+const BOT_MODE = process.env.BOT_MODE ?? "polling";
+const BOT_WEBHOOK_PORT = Number(process.env.BOT_WEBHOOK_PORT ?? 3002);
+const BOT_WEBHOOK_PATH = "/bot/webhook";
+
+console.log(`legends-chat telegram bot starting (mode: ${BOT_MODE})...`);
+
+if (BOT_MODE === "webhook") {
+  const publicUrl = appPublicUrl();
+  const webhookUrl = `${publicUrl}${BOT_WEBHOOK_PATH}`;
+
+  bot.api
+    .setWebhook(webhookUrl, { drop_pending_updates: false })
+    .then(() => {
+      console.log(`[bot] webhook registered → ${webhookUrl}`);
+      const handleUpdate = webhookCallback(bot, "http");
+      const server = createServer(async (req, res) => {
+        if (req.url === BOT_WEBHOOK_PATH && req.method === "POST") {
+          await handleUpdate(req, res);
+        } else {
+          res.writeHead(404).end("not found");
+        }
+      });
+      server.listen(BOT_WEBHOOK_PORT, () => {
+        console.log(`[bot] webhook server listening on port ${BOT_WEBHOOK_PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error("[bot] failed to set webhook", err);
+      process.exit(1);
+    });
+} else {
+  bot.start();
+}

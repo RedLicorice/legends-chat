@@ -21,11 +21,14 @@ export interface TopicListItem {
   description: string | null;
   isSticky: boolean;
   isE2ee: boolean;
+  isFeed: boolean;
+  isHomeTopic: boolean;
+  postRoles: string[];
   unreadCount: number;
   lastMessage: { id: string; preview: string; at: Date; senderId: string | null } | null;
 }
 
-export async function listTopicsForUser(userId: string): Promise<TopicListItem[]> {
+export async function listTopicsForUser(userId: string, userRole: string): Promise<TopicListItem[]> {
   const tRows = await db
     .select()
     .from(topics)
@@ -33,6 +36,8 @@ export async function listTopicsForUser(userId: string): Promise<TopicListItem[]
 
   const out: TopicListItem[] = [];
   for (const t of tRows) {
+    const readRoles = (t.readRoles as string[] | null) ?? [];
+    if (readRoles.length > 0 && userRole !== "admin" && !readRoles.includes(userRole)) continue;
     const [member] = await db
       .select()
       .from(topicMembers)
@@ -91,6 +96,9 @@ export async function listTopicsForUser(userId: string): Promise<TopicListItem[]
       description: t.description,
       isSticky: t.isSticky,
       isE2ee: t.isE2ee,
+      isFeed: t.isFeed,
+      isHomeTopic: t.isHomeTopic,
+      postRoles: (t.postRoles as string[] | null) ?? [],
       unreadCount,
       lastMessage,
     });
