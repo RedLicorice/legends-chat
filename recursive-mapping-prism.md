@@ -44,7 +44,9 @@ legends-chat/
 - `encryption_keys` — id, purpose (`messages` | `attachments`), algorithm, wrappedKey, createdAt, rotatedAt
 - `topics` — id, slug, title, description, isSticky, sortOrder, isE2ee, historyVisibleToNewMembers, autoDeleteMode (`none`|`age`|`count`), autoDeleteAgeSeconds, autoDeleteMaxMessages, isFeed, isHomeTopic, postRoles (jsonb), readRoles (jsonb), createdAt
 - `topic_members` — topicId, userId, joinedAt, lastReadMessageId
-- `messages` — id, topicId, senderUserId, botId, replyToMessageId, contentCiphertext (bytea), contentNonce (bytea), keyId, createdAt, editedAt, deletedAt
+- `messages` — id, topicId, senderUserId, botId, replyToMessageId, contentCiphertext (bytea), contentNonce (bytea), keyId, searchVector (tsvector — populated on insert for non-E2EE topics), createdAt, editedAt, deletedAt
+- `user_key_bundles` — userId (PK FK), identityPublicKey (SPKI base64 of P-256 ECDH key), keyBundle (jsonb — stores passphrase-encrypted backup blob), createdAt, updatedAt
+- `e2ee_sender_keys` — id, topicId, distributorUserId, recipientUserId, encryptedKey (base64 — ECDH-AES-GCM wrapped sender key), keyVersion, createdAt; unique on (topicId, distributorUserId, recipientUserId)
 - `message_reactions` — messageId, userId, emoji, createdAt
 - `message_flags` — id, messageId, reporterUserId, reason, status (`pending`|`dismissed`|`actioned`), reviewedByUserId, reviewedAt, createdAt
 - `user_bans` — id, userId, bannedByUserId, reason, sourceFlagId, createdAt, expiresAt, liftedByUserId, liftedAt
@@ -84,9 +86,17 @@ Events: `message:new`, `message:edit`, `message:delete`, `reaction:add`, `reacti
 
 Every message stored as XChaCha20-Poly1305 ciphertext+nonce. Per-message random nonce. AAD = topicId. Master key from env wraps row keys in `encryption_keys`. Key rotation = new row, old rows still decryptable via keyId FK.
 
-### E2EE (per topic, server-side toggle implemented)
+### E2EE (per topic — fully implemented)
 
-`isE2ee=true`: server stores ciphertext it cannot decrypt (no plaintext preview, no search). Admin toggles per topic from admin UI. Client-side key exchange/ratchet (libsignal sender keys or similar) is future work — when implemented, bots cannot be added to E2EE topics.
+**Key model**: simplified Signal sender key. Each user has a P-256 ECDH identity key pair registered with the server (`user_key_bundles`). Per topic, each sender generates a random AES-GCM-256 "sender key". On first send, the sender distributes their key to all current topic members: for each member, ECDH(senderPriv, recipientPub) → AES-GCM wraps sender key → stored in `e2ee_sender_keys`. New members who join later cannot decrypt history (no retroactive distribution).
+
+**Message format**: client encrypts message `{"e":1,"kid":"<senderUserId>","iv":"<base64>","ct":"<base64>"}` → this JSON is the plaintext that the server wraps with XChaCha20 (outer layer). Other clients receive the outer-decrypted JSON and do the inner AES-GCM decryption with the cached sender key.
+
+**Key storage**: private key stored in IndexedDB via Web Crypto API (extractable). If user has a permanent account, they can create a passphrase-backed PBKDF2+AES-GCM encrypted backup stored on the server in `user_key_bundles.keyBundle`.
+
+**Toggle behavior**: admin enabling E2EE on a topic that has messages triggers a wipe (user confirms in UI). Client-side setup modal (`E2EESetup`) shown on first entry to an E2EE topic if no key registered.
+
+**No search in E2EE topics**: `search_vector` is never populated for E2EE messages.
 
 ## Auto-delete worker
 
@@ -135,6 +145,12 @@ Events delivered to bot webhooks: `message`, `callback_query`, `member_joined`, 
 - Per-topic E2EE toggle, readRoles/postRoles gates enforced server-side
 - Admin sidebar navigation fixes
 
+### Slice 1.75 — ✅ Complete
+
+- **E2EE client-side key exchange**: P-256 ECDH identity keys, per-sender AES-GCM-256 sender keys per topic, ECDH-based key distribution to all current members, IndexedDB key storage, passphrase backup via PBKDF2+AES-GCM. `E2EESetup` modal on first E2EE topic entry. Wipe-on-enable with admin confirmation. Zero new npm dependencies (Web Crypto API only).
+- **Full-text search**: `search_vector tsvector` on messages, populated on insert for non-E2EE topics. `GET /api/search?q=...&topic=...` endpoint. `SearchModal` component, accessible via search button in topic header or Ctrl+K.
+- **Thread/reply UI**: reply button on messages, inline quote preview showing parent excerpt, `replyToMessageId` passed through WS on send. `ThreadPanel` side panel for viewing thread replies (opens when a message has 3+ replies via "View thread (N)" button). `GET /api/topics/[id]/messages?replyTo=<id>` endpoint for loading thread replies.
+
 ### Slice 2 — 🔲 Next
 
 **Internal bot API + bot management**
@@ -165,8 +181,8 @@ Events delivered to bot webhooks: `message`, `callback_query`, `member_joined`, 
 
 ### Future (not sliced yet)
 
-- **E2EE client-side key exchange**: libsignal sender keys or MLS, client-side encrypt before send, IndexedDB key storage. Bots excluded from E2EE topics. No server-side migration needed — storage layer already shaped for it.
-- **Federation / self-hosting**: Docker image + single-command deploy so communities can run their own instance. Inter-instance federation if demand exists.
+- **E2EE key rotation**: on new member join, current senders rotate sender keys and re-distribute to all members. Requires sender key versioning and per-message key version header.
+- **E2EE for bots**: bots excluded from E2EE topics (current constraint). Full bot E2EE would require bot-side key management outside scope.
 - **Search**: full-text search over non-E2EE messages (Postgres `tsvector` or Meilisearch sidecar).
 - **Thread/reply UI**: collapse reply chains inline, jump-to-parent.
 - **Attachment previews**: image/video inline, file type icons.

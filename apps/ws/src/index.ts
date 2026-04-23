@@ -4,10 +4,35 @@ import { Server, type Socket, type DefaultEventsMap } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { users } from "@legends/db/schema";
 import { db } from "./db";
+import { cacheClient } from "./redis";
+
+const ONLINE_KEY = "legends:online";
+const PRESENCE_TTL = 90; // seconds — heartbeat keeps it alive
+
+async function isPresenceOptOut(userId: string): Promise<boolean> {
+  const [u] = await db.select({ presenceOptOut: users.presenceOptOut }).from(users).where(eq(users.id, userId)).limit(1);
+  return u?.presenceOptOut ?? false;
+}
+
+async function markOnline(userId: string): Promise<void> {
+  await cacheClient.sadd(ONLINE_KEY, userId);
+  await cacheClient.expire(ONLINE_KEY, PRESENCE_TTL * 10);
+}
+
+async function markOffline(userId: string): Promise<void> {
+  await cacheClient.srem(ONLINE_KEY, userId);
+}
+
+async function getOnlineUsers(): Promise<string[]> {
+  return cacheClient.smembers(ONLINE_KEY);
+}
 import {
   ACCESS_COOKIE,
   REDIS_CHANNELS,
   WS_EVENTS,
+  createPollSchema,
+  pollCloseSchema,
+  pollVoteSchema,
   reactionToggleSchema,
   sendMessageSchema,
   topicReadSchema,
@@ -19,14 +44,19 @@ import { purgeCountModeForTopic, startAutoDelete } from "./autodelete";
 import { getTopicAutoDelete } from "./messages";
 import { notifyTopicMembers } from "./push";
 import {
+  castPollVote,
+  closePollById,
+  createPollMessage,
   ensureTopicMembership,
   getMessageTopicId,
+  getMyPollVotes,
   insertMessage,
   isUserMuted,
   listReactionsForTopic,
   listRecentMessages,
   setLastReadMessage,
   toggleReaction,
+  getTopicById,
 } from "./messages";
 
 interface SocketData {
@@ -67,19 +97,37 @@ io.use(async (socket, next) => {
   }
 });
 
-io.on("connection", (socket: AuthedSocket) => {
+io.on("connection", async (socket: AuthedSocket) => {
   const user = socket.data.user;
   socket.join(`user:${user.sub}`);
+
+  // Track online presence (skip if user opted out)
+  const optOut = await isPresenceOptOut(user.sub).catch(() => false);
+  if (!optOut) {
+    await markOnline(user.sub).catch(() => {});
+    // Broadcast to all rooms this user is in
+    socket.broadcast.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: true });
+  }
+
+  socket.on("disconnect", async () => {
+    if (!optOut) {
+      await markOffline(user.sub).catch(() => {});
+      io.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: false });
+    }
+  });
 
   socket.on(WS_EVENTS.TOPIC_JOIN, async (topicId: string, ack?: (res: unknown) => void) => {
     try {
       await ensureTopicMembership(user.sub, topicId);
       socket.join(`topic:${topicId}`);
-      const [recent, reactions] = await Promise.all([
-        listRecentMessages(topicId, 50),
+      const [recent, reactions, onlineIds] = await Promise.all([
+        listRecentMessages(topicId, 50, user.sub),
         listReactionsForTopic(topicId, 50),
+        optOut ? Promise.resolve([]) : getOnlineUsers(),
       ]);
-      ack?.({ ok: true, messages: recent, reactions });
+      const pollIds = recent.filter((m) => m.poll).map((m) => m.poll!.id);
+      const myPollVotes = await getMyPollVotes(user.sub, pollIds);
+      ack?.({ ok: true, messages: recent, reactions, onlineUserIds: optOut ? [] : onlineIds, myPollVotes });
     } catch (err) {
       ack?.({ ok: false, error: (err as Error).message });
     }
@@ -97,11 +145,15 @@ io.on("connection", (socket: AuthedSocket) => {
         ack?.({ ok: false, error: "MUTED", reason: muted.reason, expiresAt: muted.expiresAt });
         return;
       }
+      const topic = await getTopicById(parsed.topicId);
+      const isE2ee = topic?.isE2ee ?? false;
       const msg = await insertMessage({
         topicId: parsed.topicId,
         senderUserId: user.sub,
         text: parsed.content.text,
+        attachments: parsed.content.attachments as import("./messages").MessageAttachment[] | undefined,
         replyToMessageId: parsed.content.replyToMessageId ?? null,
+        searchText: isE2ee ? undefined : parsed.content.text,
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
@@ -128,6 +180,68 @@ io.on("connection", (socket: AuthedSocket) => {
       await setLastReadMessage(user.sub, parsed.topicId, parsed.lastReadMessageId);
     } catch (err) {
       console.error("topic:read failed", err);
+    }
+  });
+
+  socket.on(WS_EVENTS.POLL_CREATE, async (raw: unknown, ack?: (res: unknown) => void) => {
+    try {
+      if (user.role === "user") {
+        ack?.({ ok: false, error: "Insufficient permissions" });
+        return;
+      }
+      const parsed = createPollSchema.parse(raw);
+      const muted = await isUserMuted(user.sub);
+      if (muted) { ack?.({ ok: false, error: "MUTED" }); return; }
+      const msg = await createPollMessage({
+        topicId: parsed.topicId,
+        createdByUserId: user.sub,
+        question: parsed.question,
+        options: parsed.options,
+        isAnonymous: parsed.isAnonymous,
+        allowsMultiple: parsed.allowsMultiple,
+      });
+      io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
+      ack?.({ ok: true, message: msg });
+    } catch (err) {
+      ack?.({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  socket.on(WS_EVENTS.POLL_VOTE, async (raw: unknown, ack?: (res: unknown) => void) => {
+    try {
+      const parsed = pollVoteSchema.parse(raw);
+      const result = await castPollVote({ pollId: parsed.pollId, userId: user.sub, optionIds: parsed.optionIds });
+      if (!result.ok) { ack?.({ ok: false, error: result.error }); return; }
+      if (result.pollData?.topicId) {
+        io.to(`topic:${result.pollData.topicId}`).emit(WS_EVENTS.POLL_UPDATED, {
+          pollId: parsed.pollId,
+          options: result.pollData.options,
+          totalVotes: result.pollData.totalVotes,
+          isClosed: result.pollData.isClosed,
+        });
+      }
+      ack?.({ ok: true, myVotes: result.myVotes });
+    } catch (err) {
+      ack?.({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  socket.on(WS_EVENTS.POLL_CLOSE, async (raw: unknown, ack?: (res: unknown) => void) => {
+    try {
+      if (user.role === "user") { ack?.({ ok: false, error: "Insufficient permissions" }); return; }
+      const parsed = pollCloseSchema.parse(raw);
+      const result = await closePollById(parsed.pollId);
+      if (result.pollData?.topicId) {
+        io.to(`topic:${result.pollData.topicId}`).emit(WS_EVENTS.POLL_UPDATED, {
+          pollId: parsed.pollId,
+          options: result.pollData.options,
+          totalVotes: result.pollData.totalVotes,
+          isClosed: true,
+        });
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ ok: false, error: (err as Error).message });
     }
   });
 

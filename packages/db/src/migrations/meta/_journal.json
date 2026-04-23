@@ -58,6 +58,12 @@
       "when": 1745400000000,
       "tag": "0008_topic_read_roles",
       "breakpoints": true
+    }, {
+      "idx": 9,
+      "version": "7",
+      "when": 1745500000000,
+      "tag": "0009_e2ee_search",
+      "breakpoints": true
     }
   ]
 }

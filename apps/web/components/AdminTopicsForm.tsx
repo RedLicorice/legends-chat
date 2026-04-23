@@ -85,14 +85,14 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   );
   const router = useRouter();
 
-  async function save(id: string, patch: Partial<TopicRow>) {
+  async function save(id: string, patch: Partial<TopicRow>, extra?: Record<string, unknown>) {
     setSaving(id);
     setErrors((e) => ({ ...e, [id]: "" }));
     try {
       const res = await fetch(`/api/admin/topics/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({ ...patch, ...extra }),
       });
       if (!res.ok) throw new Error("save failed");
       setTopics((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -101,6 +101,18 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
       setErrors((e) => ({ ...e, [id]: "Save failed" }));
     } finally {
       setSaving(null);
+    }
+  }
+
+  async function toggleE2ee(id: string, enable: boolean) {
+    if (enable) {
+      const confirmed = window.confirm(
+        "Enabling E2EE will permanently delete all existing messages in this topic. This cannot be undone.\n\nContinue?",
+      );
+      if (!confirmed) return;
+      await save(id, { isE2ee: true }, { wipeMessages: true });
+    } else {
+      await save(id, { isE2ee: false });
     }
   }
 
@@ -155,7 +167,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                 <div className="text-xs text-muted">#{t.slug}</div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm">
-                {(["isFeed", "isHomeTopic", "isE2ee", "isSticky"] as const).map((key) => (
+                {(["isFeed", "isHomeTopic", "isSticky"] as const).map((key) => (
                   <label key={key} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -164,9 +176,19 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                       className="accent-accent"
                       disabled={dis}
                     />
-                    {{ isFeed: "Feed", isHomeTopic: "Home", isE2ee: "E2EE", isSticky: "Sticky" }[key]}
+                    {{ isFeed: "Feed", isHomeTopic: "Home", isSticky: "Sticky" }[key]}
                   </label>
                 ))}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={t.isE2ee}
+                    onChange={(e) => toggleE2ee(t.id, e.target.checked)}
+                    className="accent-accent"
+                    disabled={dis}
+                  />
+                  E2EE
+                </label>
               </div>
             </div>
 

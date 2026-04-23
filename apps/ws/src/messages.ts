@@ -1,8 +1,11 @@
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   encryptionKeys,
   messageReactions,
   messages,
+  pollOptions,
+  polls,
+  pollVotes,
   topicMembers,
   topics,
   userMutes,
@@ -52,17 +55,72 @@ async function getKeyData(keyId: string): Promise<Uint8Array> {
   return data;
 }
 
+export interface PollOption {
+  id: string;
+  text: string;
+  position: number;
+  voteCount: number;
+}
+
+export interface PollData {
+  id: string;
+  question: string;
+  options: PollOption[];
+  isAnonymous: boolean;
+  allowsMultiple: boolean;
+  isClosed: boolean;
+  totalVotes: number;
+  topicId?: string;
+}
+
+export interface MessageAttachment {
+  type: "image" | "gif";
+  url: string;
+  width?: number;
+  height?: number;
+  thumbnailUrl?: string;
+}
+
 export interface InsertedMessage {
   id: string;
   topicId: string;
   senderUserId: string | null;
   senderDisplayName: string | null;
+  senderAvatarUrl: string | null;
   senderIsAnon: boolean;
   botId: string | null;
   replyToMessageId: string | null;
   text: string;
+  attachments: MessageAttachment[];
   createdAt: Date;
   editedAt: Date | null;
+  poll?: PollData;
+}
+
+function encodeContent(text: string, attachments?: MessageAttachment[]): string {
+  if (!attachments || attachments.length === 0) return text;
+  return JSON.stringify({ v: 1, t: text, a: attachments });
+}
+
+function decodeContent(raw: string): { text: string; attachments: MessageAttachment[] } {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      "v" in parsed &&
+      (parsed as { v: unknown }).v === 1
+    ) {
+      const p = parsed as { t?: unknown; a?: unknown };
+      return {
+        text: typeof p.t === "string" ? p.t : "",
+        attachments: Array.isArray(p.a) ? (p.a as MessageAttachment[]) : [],
+      };
+    }
+  } catch {
+    // plain text
+  }
+  return { text: raw, attachments: [] };
 }
 
 export async function insertMessage(args: {
@@ -70,11 +128,14 @@ export async function insertMessage(args: {
   senderUserId: string | null;
   botId?: string | null;
   text: string;
+  attachments?: MessageAttachment[];
   replyToMessageId?: string | null;
+  searchText?: string;
 }): Promise<InsertedMessage> {
   const key = await currentDataKey();
   const aad = new TextEncoder().encode(args.topicId);
-  const { ciphertext, nonce } = encryptMessage(key.data, args.text, aad);
+  const encoded = encodeContent(args.text, args.attachments);
+  const { ciphertext, nonce } = encryptMessage(key.data, encoded, aad);
   const [row] = await db
     .insert(messages)
     .values({
@@ -88,15 +149,22 @@ export async function insertMessage(args: {
     })
     .returning();
 
+  if (args.searchText !== undefined && args.searchText.trim().length > 0) {
+    await db.execute(
+      sql`UPDATE messages SET search_vector = to_tsvector('english', ${args.searchText}) WHERE id = ${row!.id}`,
+    );
+  }
+
   let senderDisplayName: string | null = null;
+  let senderAvatarUrl: string | null = null;
   let senderIsAnon = false;
   if (args.senderUserId) {
     const [u] = await db
-      .select({ displayName: users.displayName, isAnon: users.isAnon })
+      .select({ displayName: users.displayName, isAnon: users.isAnon, avatarUrl: users.avatarUrl })
       .from(users)
       .where(eq(users.id, args.senderUserId))
       .limit(1);
-    if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; }
+    if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; senderAvatarUrl = u.avatarUrl; }
   }
 
   return {
@@ -104,10 +172,12 @@ export async function insertMessage(args: {
     topicId: row!.topicId,
     senderUserId: row!.senderUserId,
     senderDisplayName,
+    senderAvatarUrl,
     senderIsAnon,
     botId: row!.botId,
     replyToMessageId: row!.replyToMessageId?.toString() ?? null,
     text: args.text,
+    attachments: args.attachments ?? [],
     createdAt: row!.createdAt,
     editedAt: row!.editedAt,
   };
@@ -135,7 +205,7 @@ export async function listReactionsForTopic(topicId: string, limit = 200): Promi
   return rows.map((r) => ({ messageId: r.messageId.toString(), userId: r.userId, emojiKey: r.emojiKey }));
 }
 
-export async function listRecentMessages(topicId: string, limit = 50): Promise<InsertedMessage[]> {
+export async function listRecentMessages(topicId: string, limit = 50, viewerId?: string): Promise<InsertedMessage[]> {
   const rows = await db
     .select({
       id: messages.id,
@@ -149,6 +219,7 @@ export async function listRecentMessages(topicId: string, limit = 50): Promise<I
       createdAt: messages.createdAt,
       editedAt: messages.editedAt,
       senderDisplayName: users.displayName,
+      senderAvatarUrl: users.avatarUrl,
       senderIsAnon: users.isAnon,
     })
     .from(messages)
@@ -161,21 +232,168 @@ export async function listRecentMessages(topicId: string, limit = 50): Promise<I
   const out: InsertedMessage[] = [];
   for (const r of rows) {
     const key = await getKeyData(r.keyId);
-    const text = decryptMessage(key, r.contentCiphertext, r.contentNonce, aad);
+    const raw = decryptMessage(key, r.contentCiphertext, r.contentNonce, aad);
+    const { text, attachments } = decodeContent(raw);
     out.push({
       id: r.id.toString(),
       topicId: r.topicId,
       senderUserId: r.senderUserId,
       senderDisplayName: r.senderDisplayName ?? null,
+      senderAvatarUrl: r.senderAvatarUrl ?? null,
       senderIsAnon: r.senderIsAnon ?? false,
       botId: r.botId,
       replyToMessageId: r.replyToMessageId?.toString() ?? null,
       text,
+      attachments,
       createdAt: r.createdAt,
       editedAt: r.editedAt,
     });
   }
+
+  // Attach poll data for any poll messages
+  if (out.length > 0) {
+    const msgBigInts = out.map((m) => BigInt(m.id));
+    const pollRows = await db.select().from(polls).where(inArray(polls.messageId, msgBigInts));
+    if (pollRows.length > 0) {
+      const pollIds = pollRows.map((p) => p.id);
+      const [optRows, voteRows, myVoteRows] = await Promise.all([
+        db.select().from(pollOptions).where(inArray(pollOptions.pollId, pollIds)).orderBy(asc(pollOptions.position)),
+        db.select({ pollId: pollVotes.pollId, optionId: pollVotes.optionId }).from(pollVotes).where(inArray(pollVotes.pollId, pollIds)),
+        viewerId
+          ? db.select({ pollId: pollVotes.pollId, optionId: pollVotes.optionId }).from(pollVotes).where(and(inArray(pollVotes.pollId, pollIds), eq(pollVotes.userId, viewerId)))
+          : Promise.resolve([] as { pollId: string; optionId: string }[]),
+      ]);
+      const pollByMsgId = new Map<string, PollData>();
+      for (const poll of pollRows) {
+        const opts = optRows.filter((o) => o.pollId === poll.id);
+        const vcMap = new Map<string, number>();
+        for (const v of voteRows) {
+          if (v.pollId === poll.id) vcMap.set(v.optionId, (vcMap.get(v.optionId) ?? 0) + 1);
+        }
+        const totalVotes = Array.from(vcMap.values()).reduce((a, b) => a + b, 0);
+        pollByMsgId.set(poll.messageId.toString(), {
+          id: poll.id,
+          question: poll.question,
+          options: opts.map((o) => ({ id: o.id, text: o.text, position: o.position, voteCount: vcMap.get(o.id) ?? 0 })),
+          isAnonymous: poll.isAnonymous,
+          allowsMultiple: poll.allowsMultiple,
+          isClosed: poll.isClosed,
+          totalVotes,
+        });
+      }
+      for (const msg of out) {
+        const pd = pollByMsgId.get(msg.id);
+        if (pd) msg.poll = pd;
+      }
+    }
+  }
+
   return out;
+}
+
+export async function createPollMessage(args: {
+  topicId: string;
+  createdByUserId: string;
+  question: string;
+  options: string[];
+  isAnonymous: boolean;
+  allowsMultiple: boolean;
+}): Promise<InsertedMessage> {
+  const msg = await insertMessage({
+    topicId: args.topicId,
+    senderUserId: args.createdByUserId,
+    text: `📊 ${args.question}`,
+  });
+  const [poll] = await db
+    .insert(polls)
+    .values({
+      messageId: BigInt(msg.id),
+      question: args.question,
+      isAnonymous: args.isAnonymous,
+      allowsMultiple: args.allowsMultiple,
+      createdByUserId: args.createdByUserId,
+    })
+    .returning();
+  const optionRows = args.options.map((text, i) => ({ pollId: poll!.id, text, position: i }));
+  const insertedOptions = await db.insert(pollOptions).values(optionRows).returning();
+  return {
+    ...msg,
+    poll: {
+      id: poll!.id,
+      question: args.question,
+      options: insertedOptions.map((o) => ({ id: o.id, text: o.text, position: o.position, voteCount: 0 })),
+      isAnonymous: args.isAnonymous,
+      allowsMultiple: args.allowsMultiple,
+      isClosed: false,
+      totalVotes: 0,
+    },
+  };
+}
+
+export async function castPollVote(args: {
+  pollId: string;
+  userId: string;
+  optionIds: string[];
+}): Promise<{ ok: boolean; error?: string; myVotes: string[]; pollData: PollData | null }> {
+  const [poll] = await db.select().from(polls).where(eq(polls.id, args.pollId)).limit(1);
+  if (!poll) return { ok: false, error: "Poll not found", myVotes: [], pollData: null };
+  if (poll.isClosed) return { ok: false, error: "Poll is closed", myVotes: [], pollData: null };
+  if (!poll.allowsMultiple && args.optionIds.length > 1) {
+    return { ok: false, error: "Only one option allowed", myVotes: [], pollData: null };
+  }
+  // Replace votes
+  await db.delete(pollVotes).where(and(eq(pollVotes.pollId, args.pollId), eq(pollVotes.userId, args.userId)));
+  if (args.optionIds.length > 0) {
+    await db.insert(pollVotes).values(args.optionIds.map((optionId) => ({ pollId: args.pollId, optionId, userId: args.userId })));
+  }
+  const pollData = await getPollData(args.pollId);
+  return { ok: true, myVotes: args.optionIds, pollData };
+}
+
+export async function getPollData(pollId: string): Promise<PollData | null> {
+  const [poll] = await db
+    .select({ poll: polls, topicId: messages.topicId })
+    .from(polls)
+    .leftJoin(messages, eq(polls.messageId, messages.id))
+    .where(eq(polls.id, pollId))
+    .limit(1);
+  if (!poll) return null;
+  const opts = await db.select().from(pollOptions).where(eq(pollOptions.pollId, pollId)).orderBy(asc(pollOptions.position));
+  const voteRows = await db.select({ optionId: pollVotes.optionId }).from(pollVotes).where(eq(pollVotes.pollId, pollId));
+  const vcMap = new Map<string, number>();
+  for (const v of voteRows) vcMap.set(v.optionId, (vcMap.get(v.optionId) ?? 0) + 1);
+  const totalVotes = Array.from(vcMap.values()).reduce((a, b) => a + b, 0);
+  return {
+    id: poll.poll.id,
+    question: poll.poll.question,
+    options: opts.map((o) => ({ id: o.id, text: o.text, position: o.position, voteCount: vcMap.get(o.id) ?? 0 })),
+    isAnonymous: poll.poll.isAnonymous,
+    allowsMultiple: poll.poll.allowsMultiple,
+    isClosed: poll.poll.isClosed,
+    totalVotes,
+    topicId: poll.topicId ?? undefined,
+  };
+}
+
+export async function getMyPollVotes(userId: string, pollIds: string[]): Promise<Record<string, string[]>> {
+  if (pollIds.length === 0) return {};
+  const rows = await db
+    .select({ pollId: pollVotes.pollId, optionId: pollVotes.optionId })
+    .from(pollVotes)
+    .where(and(eq(pollVotes.userId, userId), inArray(pollVotes.pollId, pollIds)));
+  const result: Record<string, string[]> = {};
+  for (const row of rows) {
+    const existing = result[row.pollId];
+    if (!existing) { result[row.pollId] = [row.optionId]; }
+    else { existing.push(row.optionId); }
+  }
+  return result;
+}
+
+export async function closePollById(pollId: string): Promise<{ ok: boolean; pollData: PollData | null }> {
+  await db.update(polls).set({ isClosed: true }).where(eq(polls.id, pollId));
+  const pollData = await getPollData(pollId);
+  return { ok: true, pollData };
 }
 
 export async function isUserMuted(userId: string): Promise<{ reason: string; expiresAt: Date | null } | null> {
@@ -213,6 +431,11 @@ export async function setLastReadMessage(userId: string, topicId: string, messag
 
 export async function listTopics() {
   return db.select().from(topics).orderBy(desc(topics.isSticky), asc(topics.sortOrder));
+}
+
+export async function getTopicById(topicId: string) {
+  const [row] = await db.select().from(topics).where(eq(topics.id, topicId)).limit(1);
+  return row ?? null;
 }
 
 export async function getTopicAutoDelete(

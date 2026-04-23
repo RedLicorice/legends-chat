@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { topics } from "@legends/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
+import { messages, topics } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
@@ -18,6 +18,7 @@ export async function PATCH(
     isFeed?: boolean;
     isHomeTopic?: boolean;
     isE2ee?: boolean;
+    wipeMessages?: boolean;
     postRoles?: string[];
     readRoles?: string[];
     title?: string;
@@ -37,7 +38,12 @@ export async function PATCH(
     }
     patch.isHomeTopic = body.isHomeTopic;
   }
-  if (typeof body.isE2ee === "boolean") patch.isE2ee = body.isE2ee;
+  if (typeof body.isE2ee === "boolean") {
+    if (body.isE2ee && body.wipeMessages) {
+      await db.update(messages).set({ deletedAt: new Date() }).where(and(eq(messages.topicId, id), isNull(messages.deletedAt)));
+    }
+    patch.isE2ee = body.isE2ee;
+  }
   if (Array.isArray(body.postRoles)) patch.postRoles = body.postRoles;
   if (Array.isArray(body.readRoles)) patch.readRoles = body.readRoles;
   if (typeof body.title === "string") patch.title = body.title;

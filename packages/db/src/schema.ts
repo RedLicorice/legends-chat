@@ -22,6 +22,12 @@ const bytea = customType<{ data: Uint8Array; default: false }>({
   },
 });
 
+const tsvector = customType<{ data: string; default: false }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
 export const userRole = pgEnum("user_role", ["user", "moderator", "admin"]);
 export const autoDeleteMode = pgEnum("auto_delete_mode", ["none", "age", "count"]);
 export const flagStatus = pgEnum("flag_status", ["pending", "dismissed", "actioned"]);
@@ -196,6 +202,7 @@ export const messages = pgTable(
     keyId: uuid("key_id")
       .notNull()
       .references(() => encryptionKeys.id),
+    searchVector: tsvector("search_vector"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -372,5 +379,37 @@ export const pollVotes = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.pollId, t.optionId, t.userId] }),
+  }),
+);
+
+export const userKeyBundles = pgTable("user_key_bundles", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  identityPublicKey: text("identity_public_key").notNull(),
+  keyBundle: jsonb("key_bundle").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const e2eeSenderKeys = pgTable(
+  "e2ee_sender_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    topicId: uuid("topic_id")
+      .notNull()
+      .references(() => topics.id, { onDelete: "cascade" }),
+    distributorUserId: uuid("distributor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientUserId: uuid("recipient_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedKey: text("encrypted_key").notNull(),
+    keyVersion: integer("key_version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqIdx: uniqueIndex("e2ee_sender_keys_uniq_idx").on(t.topicId, t.distributorUserId, t.recipientUserId),
   }),
 );

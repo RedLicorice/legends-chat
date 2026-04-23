@@ -2,22 +2,63 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flag, Lock, Send, SmilePlus } from "lucide-react";
+import { BarChart2, CornerDownLeft, Flag, ImagePlus, Lock, Menu, MessageSquareText, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
+import { MarkdownContent } from "@/components/MarkdownContent";
+import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { io, type Socket } from "socket.io-client";
 import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
+import { GifPicker } from "@/components/GifPicker";
+import { EmojiPickerPopover } from "@/components/EmojiPickerPopover";
+import { PollCreator } from "@/components/PollCreator";
+import { PollMessage } from "@/components/PollMessage";
+import { UserViewModal } from "@/components/UserViewModal";
+import { SearchModal } from "@/components/SearchModal";
+import { ThreadPanel } from "@/components/ThreadPanel";
+import { E2EESetup } from "@/components/E2EESetup";
+import type {
+  E2EEPayload,
+} from "@/lib/e2ee";
+
+interface Attachment {
+  type: "image" | "gif";
+  url: string;
+  width?: number;
+  height?: number;
+  thumbnailUrl?: string;
+}
+
+interface PollOption {
+  id: string;
+  text: string;
+  position: number;
+  voteCount: number;
+}
+
+interface PollData {
+  id: string;
+  question: string;
+  options: PollOption[];
+  isAnonymous: boolean;
+  allowsMultiple: boolean;
+  isClosed: boolean;
+  totalVotes: number;
+}
 
 interface Message {
   id: string;
   topicId: string;
   senderUserId: string | null;
   senderDisplayName: string | null;
+  senderAvatarUrl: string | null;
   senderIsAnon: boolean;
   botId: string | null;
   replyToMessageId: string | null;
   text: string;
+  attachments: Attachment[];
   createdAt: string | Date;
   editedAt: string | Date | null;
+  poll?: PollData;
 }
 
 interface ReactionRow {
@@ -26,33 +67,148 @@ interface ReactionRow {
   emojiKey: string;
 }
 
-const QUICK_EMOJI = ["thumbs_up", "heart", "joy", "fire", "tada"];
+// Legacy map for reactions stored with named keys before emoji-mart migration.
 const EMOJI_GLYPH: Record<string, string> = {
-  thumbs_up: "👍",
-  heart: "❤️",
-  joy: "😂",
-  fire: "🔥",
-  tada: "🎉",
+  thumbs_up: "👍", heart: "❤️", joy: "😂", fire: "🔥",
+  tada: "🎉", wow: "😮", cry: "😢", thumbs_down: "👎",
 };
 
-interface TopicViewProps {
-  topic: { id: string; slug: string; title: string; isE2ee: boolean };
-  currentUser: { id: string; displayName: string; role: string };
-  mute: { reason: string; expiresAt: string | null } | null;
+interface Member {
+  id: string;
+  displayName: string;
+  avatarUrl: string | null;
+  role: string;
+  isAnon: boolean;
+  joinedAt: string;
 }
 
-export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
+interface TopicViewProps {
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
+  currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
+  mute: { reason: string; expiresAt: string | null } | null;
+  onMenuOpen?: () => void;
+}
+
+function friendlyTime(date: Date | string): string {
+  const d = new Date(date);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return `Yesterday ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays < 7) {
+    return d.toLocaleDateString([], { weekday: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function Avatar({ name, url, size = 8, online }: { name: string | null; url: string | null; size?: number; online?: boolean }) {
+  const cls = `h-${size} w-${size} shrink-0 overflow-hidden rounded-full bg-accent2`;
+  return (
+    <div className="relative shrink-0">
+      {url ? (
+        <div className={cls}><img src={url} alt="" className="h-full w-full object-cover" /></div>
+      ) : (
+        <div className={cn(cls, "flex items-center justify-center text-xs font-semibold text-white")}>
+          {(name ?? "?").slice(0, 1).toUpperCase()}
+        </div>
+      )}
+      {online && (
+        <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-panel bg-green-500" />
+      )}
+    </div>
+  );
+}
+
+export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewProps) {
+  const draftKey = `legends-draft-${topic.id}`;
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [reactions, setReactions] = useState<ReactionRow[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [showComposeEmoji, setShowComposeEmoji] = useState(false);
+  const [showUsers, setShowUsers] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [membersSearch, setMembersSearch] = useState("");
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [myPollVotes, setMyPollVotes] = useState<Record<string, string[]>>({});
+  const [showPollCreator, setShowPollCreator] = useState(false);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [threadFor, setThreadFor] = useState<Message | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
+  const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
+  const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
+  const senderKeyCache = useRef<Map<string, Uint8Array<ArrayBuffer>>>(new Map());
+  const e2eeKeyPairRef = useRef<CryptoKeyPair | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const editorRef = useRef<RichTextEditorHandle | null>(null);
+  const composeEmojiRef = useRef<HTMLButtonElement | null>(null);
+  const reactionBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
-  // Connect to the same origin as the web app. Next.js proxies /socket.io/*
-  // to the WS server via rewrites, so the auth cookie is always sent
-  // same-origin regardless of environment (dev, ngrok, production).
+  const canCreatePoll = currentUser.role !== "user";
+
+  const canPost = topic.postRoles.length === 0 || topic.postRoles.includes(currentUser.role);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(draftKey);
+    if (saved) setDraft(saved);
+  }, [draftKey]);
+
+  useEffect(() => { localStorage.setItem(draftKey, draft); }, [draft, draftKey]);
+
+  // E2EE initialization
+  useEffect(() => {
+    if (!topic.isE2ee) return;
+    void (async () => {
+      try {
+        const { getOrCreateIdentityKeyPair, exportPublicKey } = await import("@/lib/e2ee");
+        // Check if key is registered on server
+        const res = await fetch("/api/user/keys");
+        const data = await res.json() as { registered: boolean; identityPublicKey?: string };
+        if (!data.registered) { setE2eeSetupNeeded(true); return; }
+        // Load or create local key pair
+        const kp = await getOrCreateIdentityKeyPair();
+        e2eeKeyPairRef.current = kp;
+        const localPub = await exportPublicKey(kp.publicKey);
+        if (localPub !== data.identityPublicKey) {
+          // Local key doesn't match server — need to fetch backup to restore or re-setup
+          setE2eeSetupNeeded(true);
+          return;
+        }
+        setE2eeReady(true);
+      } catch {
+        setE2eeReady(false);
+      }
+    })();
+  }, [topic.isE2ee]);
+
+  // Ctrl+K for search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   const wsUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   useEffect(() => {
@@ -66,11 +222,13 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
       socket.emit(
         WS_EVENTS.TOPIC_JOIN,
         topic.id,
-        (res: { ok: boolean; messages?: Message[]; reactions?: ReactionRow[]; error?: string }) => {
+        (res: { ok: boolean; messages?: Message[]; reactions?: ReactionRow[]; onlineUserIds?: string[]; myPollVotes?: Record<string, string[]>; error?: string }) => {
           if (!active) return;
           if (res.ok) {
             if (res.messages) setMessages(res.messages);
             if (res.reactions) setReactions(res.reactions);
+            if (res.onlineUserIds && !currentUser.presenceOptOut) setOnlineUsers(new Set(res.onlineUserIds));
+            if (res.myPollVotes) setMyPollVotes(res.myPollVotes);
           }
         },
       );
@@ -79,6 +237,14 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
     socket.on(WS_EVENTS.MESSAGE_NEW, (msg: Message) => {
       if (!active || msg.topicId !== topic.id) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+    });
+    socket.on(WS_EVENTS.POLL_UPDATED, (d: { pollId: string; options: PollOption[]; totalVotes: number; isClosed: boolean }) => {
+      if (!active) return;
+      setMessages((prev) => prev.map((m) =>
+        m.poll?.id === d.pollId
+          ? { ...m, poll: { ...m.poll, options: d.options, totalVotes: d.totalVotes, isClosed: d.isClosed } }
+          : m,
+      ));
     });
     socket.on(WS_EVENTS.REACTION_ADD, (r: ReactionRow) => {
       if (!active) return;
@@ -99,6 +265,14 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
       setMessages((prev) => prev.filter((m) => m.id !== d.id));
       setReactions((prev) => prev.filter((r) => r.messageId !== d.id));
     });
+    socket.on(WS_EVENTS.PRESENCE_UPDATE, (d: { userId: string; online: boolean }) => {
+      if (!active || currentUser.presenceOptOut) return;
+      setOnlineUsers((prev) => {
+        const next = new Set(prev);
+        if (d.online) next.add(d.userId); else next.delete(d.userId);
+        return next;
+      });
+    });
 
     return () => {
       active = false;
@@ -115,13 +289,34 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
     if (last) socketRef.current?.emit(WS_EVENTS.TOPIC_READ, { topicId: topic.id, lastReadMessageId: last.id });
   }, [messages, topic.id]);
 
-  const toggleReaction = useCallback(
-    (messageId: string, emojiKey: string) => {
-      socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
-      setPickerFor(null);
-    },
-    [],
-  );
+  useEffect(() => {
+    if (!showUsers || members.length > 0) return;
+    setMembersLoading(true);
+    fetch(`/api/topics/${topic.id}/members`)
+      .then((r) => r.json())
+      .then((data) => setMembers(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setMembersLoading(false));
+  }, [showUsers, topic.id, members.length]);
+
+  const toggleReaction = useCallback((messageId: string, emojiKey: string) => {
+    socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
+    setPickerFor(null);
+  }, []);
+
+  const submitPoll = useCallback((data: { question: string; options: string[]; isAnonymous: boolean; allowsMultiple: boolean }) => {
+    socketRef.current?.emit(WS_EVENTS.POLL_CREATE, { topicId: topic.id, ...data });
+  }, [topic.id]);
+
+  const votePoll = useCallback((pollId: string, optionIds: string[]) => {
+    socketRef.current?.emit(WS_EVENTS.POLL_VOTE, { pollId, optionIds }, (res: { ok: boolean; myVotes: string[] }) => {
+      if (res.ok) setMyPollVotes((prev) => ({ ...prev, [pollId]: res.myVotes }));
+    });
+  }, []);
+
+  const closePoll = useCallback((pollId: string) => {
+    socketRef.current?.emit(WS_EVENTS.POLL_CLOSE, { pollId });
+  }, []);
 
   const reportMessage = useCallback(async (messageId: string) => {
     const reason = window.prompt("Why are you reporting this message?")?.trim();
@@ -131,21 +326,24 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ messageId, reason }),
     });
-    if (res.ok) {
-      window.alert("Reported. A moderator will review.");
-    } else {
-      window.alert("Failed to report.");
-    }
+    window.alert(res.ok ? "Reported. A moderator will review." : "Failed to report.");
   }, []);
+
+  const replyCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of messages) {
+      if (m.replyToMessageId) {
+        counts.set(m.replyToMessageId, (counts.get(m.replyToMessageId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [messages]);
 
   const reactionsByMessage = useMemo(() => {
     const map = new Map<string, Map<string, string[]>>();
     for (const r of reactions) {
       let perEmoji = map.get(r.messageId);
-      if (!perEmoji) {
-        perEmoji = new Map();
-        map.set(r.messageId, perEmoji);
-      }
+      if (!perEmoji) { perEmoji = new Map(); map.set(r.messageId, perEmoji); }
       const users = perEmoji.get(r.emojiKey) ?? [];
       users.push(r.userId);
       perEmoji.set(r.emojiKey, users);
@@ -153,83 +351,396 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
     return map;
   }, [reactions]);
 
-  function send() {
+  // Decrypt E2EE message text; falls back to "(encrypted)" if key not available.
+  function decryptE2EEText(text: string, senderId: string | null): string {
+    if (!senderId) return "(encrypted)";
+    const senderKey = senderKeyCache.current.get(senderId);
+    if (!senderKey) return "(encrypted — key not loaded)";
+    // Return placeholder; actual decryption is async — handled via useEffect below.
+    return "(encrypted)";
+  }
+
+  // Eagerly load sender keys for visible messages when E2EE is ready
+  useEffect(() => {
+    if (!topic.isE2ee || !e2eeReady || !e2eeKeyPairRef.current) return;
+    const senderIds = [...new Set(messages.map((m) => m.senderUserId).filter(Boolean) as string[])];
+    const missing = senderIds.filter((id) => !senderKeyCache.current.has(id));
+    if (missing.length === 0) return;
+    void (async () => {
+      try {
+        const {
+          decryptSenderKey,
+          importPublicKey,
+          getSenderKey,
+          storeSenderKey,
+        } = await import("@/lib/e2ee");
+        for (const sid of missing) {
+          // Check local cache first
+          const local = await getSenderKey(topic.id, sid);
+          if (local) { senderKeyCache.current.set(sid, local as Uint8Array<ArrayBuffer>); continue; }
+          // Fetch from server
+          const res = await fetch(`/api/topics/${topic.id}/e2ee?distributorId=${sid}`);
+          if (!res.ok) continue;
+          const dist = await res.json() as { encryptedKey: string; distributorPublicKey: string | null };
+          if (!dist.distributorPublicKey) continue;
+          const distPubKey = await importPublicKey(dist.distributorPublicKey);
+          const sk = await decryptSenderKey(dist.encryptedKey, e2eeKeyPairRef.current!.privateKey, distPubKey);
+          await storeSenderKey(topic.id, sid, sk);
+          senderKeyCache.current.set(sid, sk);
+        }
+        // Force re-render to show decrypted messages
+        setMessages((prev) => [...prev]);
+      } catch {
+        // Key loading failed silently
+      }
+    })();
+  }, [topic.isE2ee, topic.id, e2eeReady, messages]);
+
+  // Actually decrypt a message text (sync — uses cached keys)
+  function getDecryptedText(msg: Message): string {
+    if (!topic.isE2ee) return msg.text;
+    if (!msg.text.startsWith("{")) return msg.text;
+    try {
+      const payload = JSON.parse(msg.text) as E2EEPayload;
+      if (payload.e !== 1) return msg.text;
+      const senderKey = senderKeyCache.current.get(payload.kid);
+      if (!senderKey) return "(encrypted — loading key…)";
+      // Sync decryption isn't possible with Web Crypto; return placeholder with async trigger above
+      return "(encrypted)";
+    } catch {
+      return msg.text;
+    }
+  }
+
+  // Async decrypt map — populated when keys load
+  const [decryptedTexts, setDecryptedTexts] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (!topic.isE2ee || !e2eeReady) return;
+    const needsDecrypt = messages.filter((m) => {
+      if (!m.text.startsWith("{")) return false;
+      try { const p = JSON.parse(m.text) as { e?: number }; return p.e === 1; } catch { return false; }
+    });
+    if (needsDecrypt.length === 0) return;
+    void (async () => {
+      const { decryptE2EEMessage } = await import("@/lib/e2ee");
+      const updates = new Map<string, string>();
+      for (const m of needsDecrypt) {
+        try {
+          const payload = JSON.parse(m.text) as E2EEPayload;
+          const senderKey = senderKeyCache.current.get(payload.kid);
+          if (!senderKey) continue;
+          const plain = await decryptE2EEMessage(m.text, senderKey);
+          updates.set(m.id, plain);
+        } catch {
+          updates.set(m.id, "(decryption failed)");
+        }
+      }
+      if (updates.size > 0) {
+        setDecryptedTexts((prev) => {
+          const next = new Map(prev);
+          for (const [k, v] of updates) next.set(k, v);
+          return next;
+        });
+      }
+    })();
+  }, [topic.isE2ee, topic.id, e2eeReady, messages, senderKeyCache]);
+
+  function getDisplayText(msg: Message): string {
+    if (!topic.isE2ee) return msg.text;
+    return decryptedTexts.get(msg.id) ?? getDecryptedText(msg);
+  }
+
+  async function uploadFile(file: File): Promise<Attachment | null> {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) return null;
+      return { type: "image", url: data.url };
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function addGif(gif: { url: string; thumbnailUrl: string; width: number; height: number }) {
+    setPendingAttachments((prev) => [
+      ...prev,
+      { type: "gif", url: gif.url, thumbnailUrl: gif.thumbnailUrl, width: gif.width, height: gif.height },
+    ]);
+    setShowGifPicker(false);
+  }
+
+  function removePendingAttachment(i: number) {
+    setPendingAttachments((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  async function handlePaste(e: React.ClipboardEvent) {
+    const items = Array.from(e.clipboardData.items);
+    const imageItem = items.find((item) => item.type.startsWith("image/"));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    const att = await uploadFile(file);
+    if (att) setPendingAttachments((prev) => [...prev, att]);
+  }
+
+  async function send() {
     const text = draft.trim();
-    if (!text || mute) return;
+    if ((!text && pendingAttachments.length === 0) || mute) return;
+
+    let finalText = text;
+    if (topic.isE2ee && e2eeReady && e2eeKeyPairRef.current) {
+      try {
+        const {
+          generateSenderKey,
+          getSenderKey,
+          storeSenderKey,
+          encryptE2EEMessage,
+          exportPublicKey,
+          importPublicKey,
+          encryptSenderKeyForRecipient,
+        } = await import("@/lib/e2ee");
+
+        // Ensure own sender key exists
+        const existingSenderKey = await getSenderKey(topic.id, currentUser.id);
+        let mySenderKey: Uint8Array<ArrayBuffer>;
+        if (!existingSenderKey) {
+          mySenderKey = generateSenderKey();
+          await storeSenderKey(topic.id, currentUser.id, mySenderKey);
+          senderKeyCache.current.set(currentUser.id, mySenderKey);
+          // Distribute to all topic members
+          const membersRes = await fetch(`/api/topics/${topic.id}/e2ee/distribute`);
+          if (membersRes.ok) {
+            const memberKeys = await membersRes.json() as { userId: string; identityPublicKey: string }[];
+            const distributions = [];
+            for (const m of memberKeys) {
+              try {
+                const recipPubKey = await importPublicKey(m.identityPublicKey);
+                const encryptedKey = await encryptSenderKeyForRecipient(
+                  mySenderKey,
+                  e2eeKeyPairRef.current.privateKey,
+                  recipPubKey,
+                );
+                distributions.push({ recipientUserId: m.userId, encryptedKey });
+              } catch { /* skip member if key import fails */ }
+            }
+            // Also encrypt for self if not already in list
+            if (!memberKeys.some((m) => m.userId === currentUser.id)) {
+              const encSelf = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, e2eeKeyPairRef.current.publicKey);
+              distributions.push({ recipientUserId: currentUser.id, encryptedKey: encSelf });
+            }
+            if (distributions.length > 0) {
+              await fetch(`/api/topics/${topic.id}/e2ee/distribute`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ distributions }),
+              });
+            }
+            void exportPublicKey; // satisfy linter
+          }
+        } else {
+          mySenderKey = existingSenderKey;
+        }
+
+        finalText = await encryptE2EEMessage(text, currentUser.id, mySenderKey);
+      } catch (err) {
+        console.error("[e2ee] encrypt failed", err);
+        return;
+      }
+    }
+
     socketRef.current?.emit(
       WS_EVENTS.MESSAGE_SEND,
-      { topicId: topic.id, content: { text } },
+      {
+        topicId: topic.id,
+        content: {
+          text: finalText,
+          attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
+          replyToMessageId: replyingTo?.id,
+        },
+      },
       (res: { ok: boolean; error?: string }) => {
         if (!res.ok) console.warn("send failed", res.error);
       },
     );
     setDraft("");
+    setPendingAttachments([]);
+    setReplyingTo(null);
+    localStorage.removeItem(draftKey);
   }
+
+  const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !mute && !uploading && canPost;
+
+  const filteredMembers = useMemo(() => {
+    const q = membersSearch.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) => m.displayName.toLowerCase().includes(q));
+  }, [members, membersSearch]);
 
   return (
     <>
-      <header className="flex items-center gap-3 border-b border-border px-6 py-4">
+      {e2eeSetupNeeded && (
+        <E2EESetup
+          userId={currentUser.id}
+          hasPermanentAccount={!currentUser.role.includes("anon")}
+          existingBackup={e2eeBackup}
+          onReady={async () => {
+            setE2eeSetupNeeded(false);
+            const { getOrCreateIdentityKeyPair } = await import("@/lib/e2ee");
+            e2eeKeyPairRef.current = await getOrCreateIdentityKeyPair();
+            setE2eeReady(true);
+          }}
+          onSkip={() => { setE2eeSetupNeeded(false); }}
+        />
+      )}
+      {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
+
+      <header className="flex items-center gap-3 border-b border-border px-4 py-4 md:px-6">
+        <button
+          type="button"
+          onClick={onMenuOpen}
+          className="shrink-0 rounded-md p-1 hover:bg-panel2 transition md:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
         {topic.isE2ee && <Lock className="h-4 w-4 text-accent2" />}
-        <div>
+        <div className="flex-1">
           <h1 className="text-lg font-semibold">{topic.title}</h1>
           <p className="text-xs text-muted">{connected ? "connected" : "connecting…"}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowSearch(true)}
+          title="Search (Ctrl+K)"
+          className="rounded-lg p-2 transition hover:bg-panel2 text-muted hover:text-text"
+        >
+          <Search className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowUsers((v) => !v)}
+          title="Members"
+          className={cn("rounded-lg p-2 transition hover:bg-panel2", showUsers && "bg-panel2 text-accent")}
+        >
+          <Users className="h-5 w-5" />
+        </button>
       </header>
 
-      <div ref={scrollerRef} className="flex-1 space-y-2 overflow-y-auto px-6 py-4">
+      <AnimatePresence>
+        {showUsers && (
+          <motion.div
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 16 }}
+            className="absolute right-0 top-[65px] z-20 flex h-[calc(100%-65px)] w-72 flex-col border-l border-border bg-panel shadow-xl"
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <span className="text-sm font-semibold">Members</span>
+              <button type="button" onClick={() => setShowUsers(false)} className="text-muted hover:text-text">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-3 py-2">
+              <input
+                value={membersSearch}
+                onChange={(e) => setMembersSearch(e.target.value)}
+                placeholder="Search…"
+                className="w-full rounded-lg bg-panel2 px-3 py-1.5 text-sm outline-none placeholder:text-muted"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 pb-2">
+              {membersLoading ? (
+                <p className="px-2 py-4 text-center text-xs text-muted">Loading…</p>
+              ) : filteredMembers.length === 0 ? (
+                <p className="px-2 py-4 text-center text-xs text-muted">No members found.</p>
+              ) : (
+                filteredMembers.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-panel2">
+                    <Avatar name={m.displayName} url={m.avatarUrl} size={8} online={onlineUsers.has(m.id)} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{m.displayName}</div>
+                      <div className="text-xs text-muted">{m.role}</div>
+                    </div>
+                    {onlineUsers.has(m.id) && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="flex flex-1 overflow-hidden">
+      <div ref={scrollerRef} className={cn("flex-1 overflow-y-auto px-4 py-4", topic.isFeed ? "space-y-4" : "space-y-1")}>
         <AnimatePresence initial={false}>
-          {messages.map((m) => {
+          {messages.map((m, i) => {
             const mine = m.senderUserId === currentUser.id;
             const perEmoji = reactionsByMessage.get(m.id);
-            return (
-              <motion.div
-                key={m.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className={cn("group flex", mine ? "justify-end" : "justify-start")}
-              >
-                <div className={cn("max-w-[78%]", mine ? "items-end" : "items-start")}>
-                  {!mine && m.senderDisplayName && (
-                    <div className={cn(
-                      "mb-0.5 text-xs font-medium",
-                      m.senderIsAnon && currentUser.role === "admin"
-                        ? "text-muted line-through"
-                        : "text-accent2",
-                    )}>
-                      {m.senderDisplayName}
-                      {m.senderIsAnon && currentUser.role === "admin" && (
-                        <span className="ml-1 text-[10px] text-muted">(anon)</span>
-                      )}
+            const prevMsg = messages[i - 1];
+            const isNewGroup =
+              !prevMsg ||
+              prevMsg.senderUserId !== m.senderUserId ||
+              new Date(m.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 5 * 60 * 1000;
+            const showSender = !mine && isNewGroup;
+
+            if (topic.isFeed) {
+              return (
+                <motion.div
+                  key={m.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="group rounded-2xl border border-border bg-panel p-5"
+                >
+                  <div className="mb-3 flex items-center gap-3">
+                    <Avatar
+                      name={m.senderDisplayName}
+                      url={m.senderAvatarUrl}
+                      size={9}
+                      online={!currentUser.presenceOptOut && !!m.senderUserId && onlineUsers.has(m.senderUserId)}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{m.senderDisplayName ?? "System"}</div>
+                      <div suppressHydrationWarning className="text-xs text-muted">{friendlyTime(m.createdAt)}</div>
                     </div>
-                  )}
-                  <div
-                    className={cn(
-                      "rounded-2xl px-4 py-2 text-sm",
-                      mine ? "bg-accent text-white" : "bg-panel2 text-text",
-                      !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
-                    )}
-                  >
-                    <div className="whitespace-pre-wrap break-words">{m.text}</div>
-                    <div suppressHydrationWarning className={cn("mt-1 text-[10px]", mine ? "text-white/70" : "text-muted")}>
-                      {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    <div className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100">
+                      <button
+                        ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
+                        type="button" className="text-muted hover:text-text"
+                        onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)}>
+                        <SmilePlus className="h-4 w-4" />
+                      </button>
+                      <button type="button" className="text-muted hover:text-danger" onClick={() => reportMessage(m.id)}>
+                        <Flag className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
 
+                  {m.attachments.length > 0 && (
+                    <div className="mb-3 flex flex-col gap-2">
+                      {m.attachments.map((att, ai) => (
+                        <img key={ai} src={att.thumbnailUrl ?? att.url} alt="" className="max-h-96 w-full rounded-xl object-contain" loading="lazy" />
+                      ))}
+                    </div>
+                  )}
+
+                  {m.text.trim() && (
+                    <MarkdownContent content={getDisplayText(m)} className="text-sm" />
+                  )}
+
                   {perEmoji && perEmoji.size > 0 && (
-                    <div className={cn("mt-1 flex flex-wrap gap-1", mine ? "justify-end" : "justify-start")}>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
                       {Array.from(perEmoji.entries()).map(([key, users]) => {
                         const reacted = users.includes(currentUser.id);
                         return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => toggleReaction(m.id, key)}
-                            className={cn(
-                              "flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
-                              reacted ? "border-accent bg-accent/20" : "border-border bg-panel",
-                            )}
-                          >
+                          <button key={key} type="button" onClick={() => toggleReaction(m.id, key)}
+                            className={cn("flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs", reacted ? "border-accent bg-accent/20" : "border-border bg-panel2")}>
                             <span>{EMOJI_GLYPH[key] ?? key}</span>
                             <span className="text-muted">{users.length}</span>
                           </button>
@@ -238,48 +749,150 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
                     </div>
                   )}
 
-                  <div
-                    className={cn(
-                      "mt-1 flex gap-2 opacity-0 transition group-hover:opacity-100",
-                      mine ? "justify-end" : "justify-start",
+                  {pickerFor === m.id && (
+                    <EmojiPickerPopover
+                      anchorRef={{ current: reactionBtnRefs.current.get(m.id) ?? null }}
+                      onSelect={(glyph) => toggleReaction(m.id, glyph)}
+                      onClose={() => setPickerFor(null)}
+                    />
+                  )}
+                </motion.div>
+              );
+            }
+
+            return (
+              <motion.div
+                key={m.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className={cn("group flex gap-2", mine ? "flex-row-reverse" : "flex-row")}
+              >
+                {!mine ? (
+                  <div className="mt-1 w-8 shrink-0">
+                    {isNewGroup && (
+                      <button
+                        type="button"
+                        onClick={() => m.senderUserId && setViewingUserId(m.senderUserId)}
+                        className="rounded-full focus:outline-none"
+                      >
+                        <Avatar name={m.senderDisplayName} url={m.senderAvatarUrl} size={8}
+                          online={!currentUser.presenceOptOut && !!m.senderUserId && onlineUsers.has(m.senderUserId)} />
+                      </button>
                     )}
-                  >
+                  </div>
+                ) : (
+                  <div className="mt-1 w-8 shrink-0">
+                    {isNewGroup && (
+                      <Avatar name={currentUser.displayName} url={m.senderAvatarUrl ?? currentUser.avatarUrl} size={8} />
+                    )}
+                  </div>
+                )}
+
+                <div className={cn("max-w-[72%]", mine ? "items-end" : "items-start", "flex flex-col")}>
+                  {showSender && m.senderDisplayName && (
                     <button
                       type="button"
-                      className="text-muted hover:text-text"
-                      onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)}
-                      title="React"
+                      onClick={() => m.senderUserId && setViewingUserId(m.senderUserId)}
+                      className={cn("mb-1 text-left text-xs font-medium hover:underline", m.senderIsAnon && currentUser.role === "admin" ? "text-muted line-through" : "text-accent2")}
                     >
+                      {m.senderDisplayName}
+                      {m.senderIsAnon && currentUser.role === "admin" && <span className="ml-1 text-[10px] text-muted">(anon)</span>}
+                    </button>
+                  )}
+
+                  {m.replyToMessageId && (() => {
+                    const parent = messages.find((p) => p.id === m.replyToMessageId);
+                    return (
+                      <div className={cn("mb-1 rounded-lg border-l-2 border-accent2 bg-panel2/50 px-2 py-1 text-xs text-muted max-w-full", mine && "border-white/40 bg-white/10")}>
+                        <span className="font-medium">{parent?.senderDisplayName ?? "Unknown"}: </span>
+                        <span className="opacity-70 truncate">{parent ? getDisplayText(parent).slice(0, 60) : "(message)"}</span>
+                      </div>
+                    );
+                  })()}
+
+                  {m.poll ? (
+                    <div className="w-64 max-w-full">
+                      <PollMessage
+                        poll={m.poll}
+                        myVotes={myPollVotes[m.poll.id] ?? []}
+                        isMine={mine}
+                        canClose={mine || currentUser.role !== "user"}
+                        onVote={votePoll}
+                        onClose={closePoll}
+                      />
+                      <div suppressHydrationWarning className={cn("mt-1 text-[10px]", mine ? "text-right text-muted" : "text-muted")}>
+                        {friendlyTime(m.createdAt)}
+                      </div>
+                    </div>
+                  ) : (
+                  <div className={cn("rounded-2xl px-4 py-2 text-sm", mine ? "bg-accent text-white" : "bg-panel2 text-text",
+                    !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
+                    m.text.trim() === "" && m.attachments.length > 0 && "p-1")}>
+                    {m.attachments.length > 0 && (
+                      <div className={cn("flex flex-col gap-1", m.text.trim() && "mb-2")}>
+                        {m.attachments.map((att, ai) => (
+                          <img key={ai} src={att.thumbnailUrl ?? att.url} alt="" className="max-h-64 max-w-full rounded-xl object-contain" loading="lazy" />
+                        ))}
+                      </div>
+                    )}
+                    {m.text.trim() && (
+                      <MarkdownContent content={getDisplayText(m)} className={cn("text-sm", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
+                    )}
+                    <div suppressHydrationWarning className={cn("mt-1 text-[10px]", mine ? "text-white/70" : "text-muted")}>
+                      {friendlyTime(m.createdAt)}
+                    </div>
+                  </div>
+                  )}
+
+                  {(replyCounts.get(m.id) ?? 0) >= 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setThreadFor(m)}
+                      className={cn("mt-1 flex items-center gap-1.5 text-xs text-accent hover:underline", mine && "self-end")}
+                    >
+                      <MessageSquareText className="h-3 w-3" />
+                      View thread ({replyCounts.get(m.id)})
+                    </button>
+                  )}
+
+                  {perEmoji && perEmoji.size > 0 && (
+                    <div className={cn("mt-1 flex flex-wrap gap-1", mine ? "justify-end" : "justify-start")}>
+                      {Array.from(perEmoji.entries()).map(([key, users]) => {
+                        const reacted = users.includes(currentUser.id);
+                        return (
+                          <button key={key} type="button" onClick={() => toggleReaction(m.id, key)}
+                            className={cn("flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs", reacted ? "border-accent bg-accent/20" : "border-border bg-panel")}>
+                            <span>{EMOJI_GLYPH[key] ?? key}</span>
+                            <span className="text-muted">{users.length}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className={cn("mt-1 flex gap-2 opacity-0 transition group-hover:opacity-100", mine ? "justify-end" : "justify-start")}>
+                    <button
+                      ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
+                      type="button" className="text-muted hover:text-text"
+                      onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)} title="React">
                       <SmilePlus className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      className="text-muted hover:text-danger"
-                      onClick={() => reportMessage(m.id)}
-                      title="Report"
-                    >
+                    <button type="button" className="text-muted hover:text-text"
+                      onClick={() => setReplyingTo(m)} title="Reply">
+                      <CornerDownLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" className="text-muted hover:text-danger" onClick={() => reportMessage(m.id)} title="Report">
                       <Flag className="h-3.5 w-3.5" />
                     </button>
                   </div>
 
                   {pickerFor === m.id && (
-                    <div
-                      className={cn(
-                        "mt-1 flex gap-1 rounded-xl border border-border bg-panel p-1",
-                        mine ? "justify-end" : "justify-start",
-                      )}
-                    >
-                      {QUICK_EMOJI.map((key) => (
-                        <button
-                          key={key}
-                          type="button"
-                          className="rounded-lg px-2 py-1 text-base hover:bg-panel2"
-                          onClick={() => toggleReaction(m.id, key)}
-                        >
-                          {EMOJI_GLYPH[key]}
-                        </button>
-                      ))}
-                    </div>
+                    <EmojiPickerPopover
+                      anchorRef={{ current: reactionBtnRefs.current.get(m.id) ?? null }}
+                      onSelect={(glyph) => toggleReaction(m.id, glyph)}
+                      onClose={() => setPickerFor(null)}
+                    />
                   )}
                 </div>
               </motion.div>
@@ -288,36 +901,136 @@ export function TopicView({ topic, currentUser, mute }: TopicViewProps) {
         </AnimatePresence>
       </div>
 
+      {threadFor && (
+        <ThreadPanel
+          rootMessage={threadFor}
+          topicId={topic.id}
+          currentUserId={currentUser.id}
+          isE2ee={topic.isE2ee}
+          onClose={() => setThreadFor(null)}
+          onReply={(msgId) => {
+            const msg = messages.find((m) => m.id === msgId);
+            if (msg) setReplyingTo(msg);
+            setThreadFor(null);
+          }}
+        />
+      )}
+      </div>
+
       {mute ? (
         <div suppressHydrationWarning className="border-t border-border bg-panel px-6 py-4 text-sm text-danger">
           You are muted: {mute.reason}
           {mute.expiresAt ? ` (until ${new Date(mute.expiresAt).toLocaleString()})` : " (permanent)"}
         </div>
+      ) : !canPost ? (
+        <div className="border-t border-border bg-panel px-6 py-4 text-sm text-muted">
+          Only {topic.postRoles.join(", ")} can post in this channel.
+        </div>
       ) : (
         <div className="border-t border-border bg-panel p-3">
-          <div className="flex items-center gap-2 rounded-xl bg-panel2 px-3 py-2">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              placeholder="Write a message…"
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
-            />
-            <button
-              type="button"
-              onClick={send}
-              className="rounded-lg bg-accent p-2 text-white transition hover:opacity-90 disabled:opacity-40"
-              disabled={!draft.trim()}
-            >
-              <Send className="h-4 w-4" />
-            </button>
+          {replyingTo && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
+              <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent2" />
+              <span className="text-xs text-muted flex-1 truncate">
+                Replying to <span className="font-medium text-text">{replyingTo.senderDisplayName ?? "Unknown"}</span>:{" "}
+                {getDisplayText(replyingTo).slice(0, 60)}
+              </span>
+              <button type="button" onClick={() => setReplyingTo(null)} className="text-muted hover:text-text shrink-0">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          {pendingAttachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2 px-1">
+              {pendingAttachments.map((att, i) => (
+                <div key={i} className="relative">
+                  <img src={att.thumbnailUrl ?? att.url} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                  <button type="button" onClick={() => removePendingAttachment(i)}
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-danger text-white">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="relative">
+            {showGifPicker && <GifPicker onSelect={addGif} onClose={() => setShowGifPicker(false)} />}
+            {showComposeEmoji && (
+              <EmojiPickerPopover
+                anchorRef={composeEmojiRef}
+                onSelect={(glyph) => { editorRef.current?.insertText(glyph); }}
+                onClose={() => setShowComposeEmoji(false)}
+              />
+            )}
+
+            <div className="rounded-xl bg-panel2 px-3 py-2 flex flex-col gap-2">
+              <RichTextEditor
+                ref={editorRef}
+                value={draft}
+                onChange={setDraft}
+                onSubmit={() => void send()}
+                placeholder={uploading ? "Uploading…" : topic.isFeed ? "Write a post… (Ctrl+Enter to send)" : "Write a message…"}
+                compact={!topic.isFeed}
+                disabled={uploading}
+              />
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                  className="text-muted hover:text-text disabled:opacity-50" title="Attach image">
+                  <ImagePlus className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={() => setShowGifPicker((v) => !v)}
+                  className={cn("text-muted hover:text-text", showGifPicker && "text-accent")} title="GIF">
+                  <Sticker className="h-4 w-4" />
+                </button>
+                <button ref={composeEmojiRef} type="button" onClick={() => setShowComposeEmoji((v) => !v)}
+                  className={cn("text-muted hover:text-text", showComposeEmoji && "text-accent")} title="Emoji">
+                  <SmilePlus className="h-4 w-4" />
+                </button>
+                {canCreatePoll && (
+                  <button type="button" onClick={() => setShowPollCreator(true)}
+                    className={cn("text-muted hover:text-text", showPollCreator && "text-accent")} title="Create poll">
+                    <BarChart2 className="h-4 w-4" />
+                  </button>
+                )}
+                <div className="flex-1" />
+                <button type="button" onClick={() => void send()} disabled={!canSend}
+                  className={cn(
+                    "transition disabled:opacity-40",
+                    topic.isFeed
+                      ? "rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90"
+                      : "rounded-lg bg-accent p-1.5 text-white hover:opacity-90",
+                  )}>
+                  {topic.isFeed ? "Post" : <Send className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                e.target.value = "";
+                const att = await uploadFile(file);
+                if (att) setPendingAttachments((prev) => [...prev, att]);
+              }} />
           </div>
         </div>
+      )}
+
+      {showPollCreator && (
+        <PollCreator
+          onSubmit={submitPoll}
+          onClose={() => setShowPollCreator(false)}
+        />
+      )}
+
+      {viewingUserId && viewingUserId !== currentUser.id && (
+        <UserViewModal
+          userId={viewingUserId}
+          viewerPermissions={currentUser.permissions}
+          onClose={() => setViewingUserId(null)}
+        />
       )}
     </>
   );
