@@ -7,6 +7,9 @@ const PUBLIC_PATHS = [
   "/auth/callback",
   "/auth/refresh",
   "/api/health",
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/user/email-link/verify",
   "/manifest.webmanifest",
   "/sw.js",
 ];
