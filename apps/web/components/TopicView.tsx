@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { BarChart2, CornerDownLeft, Flag, ImagePlus, Lock, Menu, MessageSquareText, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
+import { NotificationBell } from "@/components/NotificationBell";
 import { io, type Socket } from "socket.io-client";
 import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
@@ -45,6 +46,8 @@ interface PollData {
   totalVotes: number;
 }
 
+interface InlineKeyboardButton { text: string; callbackData: string }
+
 interface Message {
   id: string;
   topicId: string;
@@ -52,10 +55,12 @@ interface Message {
   senderDisplayName: string | null;
   senderAvatarUrl: string | null;
   senderIsAnon: boolean;
+  senderRole: string | null;
   botId: string | null;
   replyToMessageId: string | null;
   text: string;
   attachments: Attachment[];
+  inlineKeyboard?: InlineKeyboardButton[][] | null;
   createdAt: string | Date;
   editedAt: string | Date | null;
   poll?: PollData;
@@ -154,6 +159,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
   const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const senderKeyCache = useRef<Map<string, Uint8Array<ArrayBuffer>>>(new Map());
   const e2eeKeyPairRef = useRef<CryptoKeyPair | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -180,16 +186,14 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
     void (async () => {
       try {
         const { getOrCreateIdentityKeyPair, exportPublicKey } = await import("@/lib/e2ee");
-        // Check if key is registered on server
         const res = await fetch("/api/user/keys");
-        const data = await res.json() as { registered: boolean; identityPublicKey?: string };
+        const data = await res.json() as { registered: boolean; identityPublicKey?: string; backup?: string | null };
         if (!data.registered) { setE2eeSetupNeeded(true); return; }
-        // Load or create local key pair
         const kp = await getOrCreateIdentityKeyPair();
         e2eeKeyPairRef.current = kp;
         const localPub = await exportPublicKey(kp.publicKey);
         if (localPub !== data.identityPublicKey) {
-          // Local key doesn't match server — need to fetch backup to restore or re-setup
+          setE2eeBackup(data.backup ?? null);
           setE2eeSetupNeeded(true);
           return;
         }
@@ -215,6 +219,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
     let active = true;
     const socket = io(wsUrl, { withCredentials: true, transports: ["polling", "websocket"] });
     socketRef.current = socket;
+    setSocket(socket);
 
     socket.on("connect", () => {
       if (!active) return;
@@ -276,6 +281,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
 
     return () => {
       active = false;
+      setSocket(null);
       socket.emit(WS_EVENTS.TOPIC_LEAVE, topic.id);
       socket.disconnect();
     };
@@ -302,6 +308,15 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
   const toggleReaction = useCallback((messageId: string, emojiKey: string) => {
     socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
     setPickerFor(null);
+  }, []);
+
+  const handleKeyboardCallback = useCallback((msg: Message, callbackData: string) => {
+    if (!msg.botId) return;
+    socketRef.current?.emit(WS_EVENTS.BOT_KEYBOARD_CALLBACK, {
+      botId: msg.botId,
+      messageId: msg.id,
+      callbackData,
+    });
   }, []);
 
   const submitPoll = useCallback((data: { question: string; options: string[]; isAnonymous: boolean; allowsMultiple: boolean }) => {
@@ -351,34 +366,33 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
     return map;
   }, [reactions]);
 
-  // Decrypt E2EE message text; falls back to "(encrypted)" if key not available.
-  function decryptE2EEText(text: string, senderId: string | null): string {
-    if (!senderId) return "(encrypted)";
-    const senderKey = senderKeyCache.current.get(senderId);
-    if (!senderKey) return "(encrypted — key not loaded)";
-    // Return placeholder; actual decryption is async — handled via useEffect below.
-    return "(encrypted)";
-  }
+  // Async decrypt map — populated when keys load
+  const [decryptedTexts, setDecryptedTexts] = useState<Map<string, string>>(new Map());
 
-  // Eagerly load sender keys for visible messages when E2EE is ready
+  // Load sender keys then decrypt all E2EE messages in one pass
   useEffect(() => {
     if (!topic.isE2ee || !e2eeReady || !e2eeKeyPairRef.current) return;
-    const senderIds = [...new Set(messages.map((m) => m.senderUserId).filter(Boolean) as string[])];
-    const missing = senderIds.filter((id) => !senderKeyCache.current.has(id));
-    if (missing.length === 0) return;
     void (async () => {
       try {
         const {
           decryptSenderKey,
+          decryptE2EEMessage,
           importPublicKey,
           getSenderKey,
           storeSenderKey,
         } = await import("@/lib/e2ee");
+
+        // 1. Collect senders that need key loading
+        const e2eeMsgs = messages.filter((m) => {
+          if (!m.text.startsWith("{")) return false;
+          try { const p = JSON.parse(m.text) as { e?: number }; return p.e === 1; } catch { return false; }
+        });
+        const senderIds = [...new Set(e2eeMsgs.map((m) => m.senderUserId).filter(Boolean) as string[])];
+        const missing = senderIds.filter((id) => !senderKeyCache.current.has(id));
+
         for (const sid of missing) {
-          // Check local cache first
           const local = await getSenderKey(topic.id, sid);
           if (local) { senderKeyCache.current.set(sid, local as Uint8Array<ArrayBuffer>); continue; }
-          // Fetch from server
           const res = await fetch(`/api/topics/${topic.id}/e2ee?distributorId=${sid}`);
           if (!res.ok) continue;
           const dist = await res.json() as { encryptedKey: string; distributorPublicKey: string | null };
@@ -388,67 +402,38 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
           await storeSenderKey(topic.id, sid, sk);
           senderKeyCache.current.set(sid, sk);
         }
-        // Force re-render to show decrypted messages
-        setMessages((prev) => [...prev]);
-      } catch {
-        // Key loading failed silently
-      }
-    })();
-  }, [topic.isE2ee, topic.id, e2eeReady, messages]);
 
-  // Actually decrypt a message text (sync — uses cached keys)
-  function getDecryptedText(msg: Message): string {
-    if (!topic.isE2ee) return msg.text;
-    if (!msg.text.startsWith("{")) return msg.text;
-    try {
-      const payload = JSON.parse(msg.text) as E2EEPayload;
-      if (payload.e !== 1) return msg.text;
-      const senderKey = senderKeyCache.current.get(payload.kid);
-      if (!senderKey) return "(encrypted — loading key…)";
-      // Sync decryption isn't possible with Web Crypto; return placeholder with async trigger above
-      return "(encrypted)";
-    } catch {
-      return msg.text;
-    }
-  }
-
-  // Async decrypt map — populated when keys load
-  const [decryptedTexts, setDecryptedTexts] = useState<Map<string, string>>(new Map());
-
-  useEffect(() => {
-    if (!topic.isE2ee || !e2eeReady) return;
-    const needsDecrypt = messages.filter((m) => {
-      if (!m.text.startsWith("{")) return false;
-      try { const p = JSON.parse(m.text) as { e?: number }; return p.e === 1; } catch { return false; }
-    });
-    if (needsDecrypt.length === 0) return;
-    void (async () => {
-      const { decryptE2EEMessage } = await import("@/lib/e2ee");
-      const updates = new Map<string, string>();
-      for (const m of needsDecrypt) {
-        try {
-          const payload = JSON.parse(m.text) as E2EEPayload;
-          const senderKey = senderKeyCache.current.get(payload.kid);
-          if (!senderKey) continue;
-          const plain = await decryptE2EEMessage(m.text, senderKey);
-          updates.set(m.id, plain);
-        } catch {
-          updates.set(m.id, "(decryption failed)");
+        // 2. Decrypt all messages that now have keys
+        const updates = new Map<string, string>();
+        for (const m of e2eeMsgs) {
+          if (decryptedTexts.has(m.id)) continue;
+          try {
+            const payload = JSON.parse(m.text) as E2EEPayload;
+            const senderKey = senderKeyCache.current.get(payload.kid);
+            if (!senderKey) continue;
+            const plain = await decryptE2EEMessage(m.text, senderKey);
+            updates.set(m.id, plain);
+          } catch {
+            updates.set(m.id, "(decryption failed)");
+          }
         }
-      }
-      if (updates.size > 0) {
-        setDecryptedTexts((prev) => {
-          const next = new Map(prev);
-          for (const [k, v] of updates) next.set(k, v);
-          return next;
-        });
+        if (updates.size > 0) {
+          setDecryptedTexts((prev) => {
+            const next = new Map(prev);
+            for (const [k, v] of updates) next.set(k, v);
+            return next;
+          });
+        }
+      } catch {
+        // silent
       }
     })();
-  }, [topic.isE2ee, topic.id, e2eeReady, messages, senderKeyCache]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topic.isE2ee, topic.id, e2eeReady, messages]);
 
   function getDisplayText(msg: Message): string {
     if (!topic.isE2ee) return msg.text;
-    return decryptedTexts.get(msg.id) ?? getDecryptedText(msg);
+    return decryptedTexts.get(msg.id) ?? "(encrypted…)";
   }
 
   async function uploadFile(file: File): Promise<Attachment | null> {
@@ -500,47 +485,49 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
           getSenderKey,
           storeSenderKey,
           encryptE2EEMessage,
-          exportPublicKey,
           importPublicKey,
           encryptSenderKeyForRecipient,
         } = await import("@/lib/e2ee");
 
-        // Ensure own sender key exists
+        // Fetch current members + already-distributed list
+        const distRes = await fetch(`/api/topics/${topic.id}/e2ee/distribute`);
+        const distData = distRes.ok
+          ? await distRes.json() as { members: { userId: string; identityPublicKey: string }[]; alreadyDistributed: string[] }
+          : { members: [], alreadyDistributed: [] };
+
+        const memberIds = new Set(distData.members.map((m) => m.userId));
+        const distributed = new Set(distData.alreadyDistributed);
+        // Need new distribution if any member (who has a key) hasn't received ours yet
+        const needsRotation = distData.members.some((m) => !distributed.has(m.userId));
+
         const existingSenderKey = await getSenderKey(topic.id, currentUser.id);
         let mySenderKey: Uint8Array<ArrayBuffer>;
-        if (!existingSenderKey) {
+
+        if (!existingSenderKey || needsRotation) {
+          // Generate fresh sender key (covers both first-send and rotation)
           mySenderKey = generateSenderKey();
           await storeSenderKey(topic.id, currentUser.id, mySenderKey);
           senderKeyCache.current.set(currentUser.id, mySenderKey);
-          // Distribute to all topic members
-          const membersRes = await fetch(`/api/topics/${topic.id}/e2ee/distribute`);
-          if (membersRes.ok) {
-            const memberKeys = await membersRes.json() as { userId: string; identityPublicKey: string }[];
-            const distributions = [];
-            for (const m of memberKeys) {
-              try {
-                const recipPubKey = await importPublicKey(m.identityPublicKey);
-                const encryptedKey = await encryptSenderKeyForRecipient(
-                  mySenderKey,
-                  e2eeKeyPairRef.current.privateKey,
-                  recipPubKey,
-                );
-                distributions.push({ recipientUserId: m.userId, encryptedKey });
-              } catch { /* skip member if key import fails */ }
-            }
-            // Also encrypt for self if not already in list
-            if (!memberKeys.some((m) => m.userId === currentUser.id)) {
-              const encSelf = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, e2eeKeyPairRef.current.publicKey);
-              distributions.push({ recipientUserId: currentUser.id, encryptedKey: encSelf });
-            }
-            if (distributions.length > 0) {
-              await fetch(`/api/topics/${topic.id}/e2ee/distribute`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ distributions }),
-              });
-            }
-            void exportPublicKey; // satisfy linter
+
+          const distributions: { recipientUserId: string; encryptedKey: string }[] = [];
+          for (const m of distData.members) {
+            try {
+              const recipPubKey = await importPublicKey(m.identityPublicKey);
+              const encryptedKey = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, recipPubKey);
+              distributions.push({ recipientUserId: m.userId, encryptedKey });
+            } catch { /* skip member if key import fails */ }
+          }
+          // Encrypt for self if not already a member with a registered key
+          if (!memberIds.has(currentUser.id)) {
+            const encSelf = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, e2eeKeyPairRef.current.publicKey);
+            distributions.push({ recipientUserId: currentUser.id, encryptedKey: encSelf });
+          }
+          if (distributions.length > 0) {
+            await fetch(`/api/topics/${topic.id}/e2ee/distribute`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ distributions }),
+            });
           }
         } else {
           mySenderKey = existingSenderKey;
@@ -620,6 +607,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
         >
           <Search className="h-5 w-5" />
         </button>
+        <NotificationBell socket={socket} />
         <button
           type="button"
           onClick={() => setShowUsers((v) => !v)}
@@ -791,14 +779,29 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
 
                 <div className={cn("max-w-[72%]", mine ? "items-end" : "items-start", "flex flex-col")}>
                   {showSender && m.senderDisplayName && (
-                    <button
-                      type="button"
-                      onClick={() => m.senderUserId && setViewingUserId(m.senderUserId)}
-                      className={cn("mb-1 text-left text-xs font-medium hover:underline", m.senderIsAnon && currentUser.role === "admin" ? "text-muted line-through" : "text-accent2")}
-                    >
-                      {m.senderDisplayName}
-                      {m.senderIsAnon && currentUser.role === "admin" && <span className="ml-1 text-[10px] text-muted">(anon)</span>}
-                    </button>
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => m.senderUserId && setViewingUserId(m.senderUserId)}
+                        className={cn("text-left text-xs font-medium hover:underline", m.senderIsAnon && currentUser.role === "admin" ? "text-muted line-through" : "text-accent2")}
+                      >
+                        {m.senderDisplayName}
+                        {m.senderIsAnon && currentUser.role === "admin" && <span className="ml-1 text-[10px] text-muted">(anon)</span>}
+                      </button>
+                      {(m.senderRole && m.senderRole !== "user") && (
+                        <span className={cn(
+                          "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                          m.senderRole === "admin" && "bg-accent/20 text-accent",
+                          m.senderRole === "moderator" && "bg-accent2/20 text-accent2",
+                          m.botId && "bg-muted/20 text-muted",
+                        )}>
+                          {m.botId ? "bot" : m.senderRole}
+                        </span>
+                      )}
+                      {m.botId && (
+                        <span className="rounded bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted">bot</span>
+                      )}
+                    </div>
                   )}
 
                   {m.replyToMessageId && (() => {
@@ -838,6 +841,24 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
                     )}
                     {m.text.trim() && (
                       <MarkdownContent content={getDisplayText(m)} className={cn("text-sm", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
+                    )}
+                    {m.inlineKeyboard && m.inlineKeyboard.length > 0 && (
+                      <div className="mt-2 flex flex-col gap-1">
+                        {m.inlineKeyboard.map((row, ri) => (
+                          <div key={ri} className="flex flex-wrap gap-1">
+                            {row.map((btn, bi) => (
+                              <button
+                                key={bi}
+                                type="button"
+                                onClick={() => handleKeyboardCallback(m, btn.callbackData)}
+                                className={cn("rounded-lg border px-3 py-1 text-xs font-medium transition hover:bg-accent hover:text-white hover:border-accent", mine ? "border-white/40 text-white/90" : "border-border text-text")}
+                              >
+                                {btn.text}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
                     )}
                     <div suppressHydrationWarning className={cn("mt-1 text-[10px]", mine ? "text-white/70" : "text-muted")}>
                       {friendlyTime(m.createdAt)}

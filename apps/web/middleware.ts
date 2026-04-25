@@ -16,7 +16,8 @@ export function middleware(req: NextRequest) {
   if (
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/emoji")
+    pathname.startsWith("/emoji") ||
+    pathname.startsWith("/socket.io")
   ) {
     return NextResponse.next();
   }

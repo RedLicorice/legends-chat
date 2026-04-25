@@ -13,6 +13,18 @@ import {
   scheduleExpiryCheck,
   subscribeToConsumption,
 } from "./token-lifecycle";
+import { pubClient } from "./redis";
+import { REDIS_CHANNELS } from "@legends/shared";
+
+async function publishNewMember(userId: string, displayName: string, username: string | null): Promise<void> {
+  try {
+    const topicId = await getSetting(db, "default_topic_id");
+    if (!topicId) return;
+    await pubClient.publish(REDIS_CHANNELS.BOT_NEW_MEMBER, JSON.stringify({ userId, displayName, username, topicId }));
+  } catch (err) {
+    console.error("[bot] publishNewMember failed", err);
+  }
+}
 
 async function postWelcomeMessage(displayName: string): Promise<void> {
   try {
@@ -103,6 +115,7 @@ bot.command("start", async (ctx) => {
       targetId: created.id,
     });
     await postWelcomeMessage(created.displayName);
+    void publishNewMember(created.id, created.displayName, tgUser.username ?? null);
     await sendLoginLink(ctx, created.id);
     return;
   }
@@ -188,6 +201,7 @@ bot.on("message:text", async (ctx) => {
       : `Welcome aboard as ${created.code.role}! Generating your login link...`,
   );
   await postWelcomeMessage(created.user.displayName);
+  void publishNewMember(created.user.id, created.user.displayName, tgUser.username ?? null);
   await sendLoginLink(ctx, created.user.id);
 });
 

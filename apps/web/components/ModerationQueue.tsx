@@ -31,10 +31,12 @@ export function ModerationQueue({
   flags,
   canBan,
   canMute,
+  onRefresh,
 }: {
   flags: FlagView[];
   canBan: boolean;
   canMute: boolean;
+  onRefresh?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -51,6 +53,7 @@ export function ModerationQueue({
       setError((await res.text()) || "action failed");
       return;
     }
+    onRefresh?.();
     startTransition(() => router.refresh());
   }
 

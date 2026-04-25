@@ -13,7 +13,35 @@ function timeAgo(date: Date): string {
   return `${d}d`;
 }
 
-export function TopicListItem({ topic }: { topic: Item }) {
+export function TopicListItem({ topic, compact }: { topic: Item; compact?: boolean }) {
+  if (compact) {
+    return (
+      <Link
+        href={`/t/${topic.slug}`}
+        className="flex items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-panel2"
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-panel2 text-sm font-semibold">
+          {topic.title.slice(0, 1).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            {topic.isSticky && <Pin className="h-3 w-3 text-accent" />}
+            {topic.isE2ee && <Lock className="h-3 w-3 text-accent2" />}
+            <div className="truncate text-sm font-medium">{topic.title}</div>
+            {topic.unreadCount > 0 && (
+              <div className="ml-auto rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                {topic.unreadCount > 99 ? "99+" : topic.unreadCount}
+              </div>
+            )}
+          </div>
+          <div className="truncate text-xs text-muted">
+            {topic.lastMessage?.preview ?? topic.description ?? ""}
+          </div>
+        </div>
+      </Link>
+    );
+  }
+
   return (
     <Link
       href={`/t/${topic.slug}`}

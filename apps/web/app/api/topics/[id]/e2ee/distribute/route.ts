@@ -63,7 +63,9 @@ export async function POST(
 }
 
 // GET /api/topics/[id]/e2ee/distribute
-// Returns public keys of all topic members so client can encrypt sender key for each.
+// Returns { members: [{userId, identityPublicKey}], alreadyDistributed: string[] }
+// members = all topic members with registered keys
+// alreadyDistributed = recipientUserIds that already have a distribution from the current user
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -73,18 +75,25 @@ export async function GET(
 
   const { id: topicId } = await params;
 
-  const members = await db
+  const memberRows = await db
     .select({ userId: topicMembers.userId })
     .from(topicMembers)
     .where(eq(topicMembers.topicId, topicId));
 
-  const memberIds = members.map((m) => m.userId);
-  if (memberIds.length === 0) return NextResponse.json([]);
+  const memberIds = memberRows.map((m) => m.userId);
+  if (memberIds.length === 0) return NextResponse.json({ members: [], alreadyDistributed: [] });
 
-  const bundles = await db
-    .select({ userId: userKeyBundles.userId, identityPublicKey: userKeyBundles.identityPublicKey })
-    .from(userKeyBundles)
-    .where(inArray(userKeyBundles.userId, memberIds));
+  const [bundles, existingDists] = await Promise.all([
+    db
+      .select({ userId: userKeyBundles.userId, identityPublicKey: userKeyBundles.identityPublicKey })
+      .from(userKeyBundles)
+      .where(inArray(userKeyBundles.userId, memberIds)),
+    db
+      .select({ recipientUserId: e2eeSenderKeys.recipientUserId })
+      .from(e2eeSenderKeys)
+      .where(and(eq(e2eeSenderKeys.topicId, topicId), eq(e2eeSenderKeys.distributorUserId, user.id))),
+  ]);
 
-  return NextResponse.json(bundles);
+  const alreadyDistributed = existingDists.map((r) => r.recipientUserId);
+  return NextResponse.json({ members: bundles, alreadyDistributed });
 }

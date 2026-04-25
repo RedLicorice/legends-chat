@@ -22,7 +22,6 @@ if (!authtoken) {
 }
 
 const webPort = parseInt(process.env.WEB_PORT ?? "3000", 10);
-const wsPort = parseInt(process.env.WS_PORT ?? "3001", 10);
 
 // Catch unhandled errors so they appear in logs/ngrok.log instead of
 // silently killing the process.
@@ -35,23 +34,21 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-console.log(`[ngrok] connecting (web :${webPort}, ws :${wsPort})…`);
+console.log(`[ngrok] connecting (web :${webPort})…`);
 
 const webListener = await ngrok.forward({ addr: webPort, authtoken });
-// Second tunnel reuses the same agent session (no second authtoken needed).
-const wsListener = await ngrok.forward({ addr: wsPort });
 
 const webUrl = webListener.url();
-const wsUrl = wsListener.url();
+// WS traffic proxied through Next.js (/socket.io/* rewrite) — same URL.
+const wsUrl = webUrl;
 
 fs.mkdirSync(logsDir, { recursive: true });
 fs.writeFileSync(
   envFile,
-  [`APP_PUBLIC_URL=${webUrl}`, `WEB_URL=${webUrl}`, `NEXT_PUBLIC_WS_URL=${wsUrl}`, `WS_URL=${wsUrl}`].join("\n") + "\n",
+  [`APP_PUBLIC_URL=${webUrl}`, `WEB_URL=${webUrl}`, `NEXT_PUBLIC_WS_URL=${wsUrl}`, `WS_URL=http://localhost:3001`].join("\n") + "\n",
 );
 
 console.log(`[ngrok] web → ${webUrl}`);
-console.log(`[ngrok] ws  → ${wsUrl}`);
 console.log(`[ngrok] URLs written to logs/ngrok.env`);
 
 // Keep the process alive to hold the tunnels open.
@@ -72,4 +69,3 @@ process.on("SIGINT", async () => {
 
 // Also log if the session closes unexpectedly.
 webListener.on?.("close", () => console.error("[ngrok] web tunnel closed unexpectedly"));
-wsListener.on?.("close", () => console.error("[ngrok] ws tunnel closed unexpectedly"));

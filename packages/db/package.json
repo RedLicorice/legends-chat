@@ -7,7 +7,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./system-settings": "./src/system-settings.ts",
+    "./system-messages": "./src/system-messages.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

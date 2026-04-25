@@ -64,3 +64,16 @@ export async function PATCH(
   if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ topic: updated });
 }
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await getCurrentUser();
+  if (!user || !user.permissions.has(PERMISSIONS.ADMIN_CONFIG)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  const { id } = await params;
+  await db.delete(topics).where(eq(topics.id, id));
+  return NextResponse.json({ ok: true });
+}

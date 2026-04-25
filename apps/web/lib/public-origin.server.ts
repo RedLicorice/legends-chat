@@ -10,7 +10,7 @@ function ngrokPublicUrl(): string | null {
   try {
     if (!existsSync(NGROK_ENV_FILE)) return null;
     const match = readFileSync(NGROK_ENV_FILE, "utf-8").match(/^APP_PUBLIC_URL=(.+)$/m);
-    return match ? match[1].trim() : null;
+    return match ? (match[1] ?? "").trim() || null : null;
   } catch {
     return null;
   }

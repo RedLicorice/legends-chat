@@ -1,11 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { authLoginTokens, users } from "@legends/db/schema";
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "@legends/shared";
 import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
-import { issueSession, setAuthCookies } from "@/lib/auth";
+import { issueSession } from "@/lib/auth";
 import { publicOriginServer } from "@/lib/public-origin.server";
+
+const ACCESS_TTL = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 900);
+const REFRESH_TTL = Number(process.env.JWT_REFRESH_TTL_SECONDS ?? 86_400);
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
@@ -33,7 +37,6 @@ export async function GET(req: NextRequest) {
   if (!u) return NextResponse.json({ error: "user not found" }, { status: 404 });
 
   const { accessJwt, refreshJwt } = await issueSession(u.id, u.role);
-  await setAuthCookies(accessJwt, refreshJwt);
 
   // Tell the bot so it can edit its own message. Best-effort, non-blocking-ish.
   if (row.telegramChatId !== null && row.telegramMessageId !== null) {
@@ -48,5 +51,9 @@ export async function GET(req: NextRequest) {
       .catch((err) => console.warn("[auth/callback] publish failed", err));
   }
 
-  return NextResponse.redirect(new URL("/", publicOriginServer(req)));
+  const secure = process.env.NODE_ENV === "production";
+  const res = NextResponse.redirect(new URL("/", publicOriginServer(req)));
+  res.cookies.set(ACCESS_COOKIE, accessJwt, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: ACCESS_TTL });
+  res.cookies.set(REFRESH_COOKIE, refreshJwt, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: REFRESH_TTL });
+  return res;
 }

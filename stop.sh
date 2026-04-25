@@ -1,45 +1,31 @@
 #!/usr/bin/env bash
 # Legends Chat - stop all services
-#   - kills the pids written by start.sh
-#   - stops the containers (volume preserved; use `docker compose down -v` to wipe data)
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-stop_service() {
-  local name=$1
-  local pidfile="logs/${name}.pid"
-  if [[ ! -f "$pidfile" ]]; then
-    echo "  ${name}: no pidfile"
-    return
-  fi
-  local pid
-  pid=$(cat "$pidfile")
-  if kill -0 "$pid" 2>/dev/null; then
-    # Kill the whole process group so tsx/next and their children die together.
-    kill -- "-${pid}" 2>/dev/null || kill "$pid" 2>/dev/null || true
-    # Fallback: tree kill by pattern for stray next-server workers.
-    pkill -P "$pid" 2>/dev/null || true
-    echo "  ${name}: stopped (pid ${pid})"
-  else
-    echo "  ${name}: not running"
-  fi
-  rm -f "$pidfile"
-}
+echo "[1/3] stopping web / ws / bot (pm2)"
+if command -v pm2 >/dev/null 2>&1; then
+  pm2 delete legends-web legends-ws legends-bot 2>/dev/null || true
+fi
 
-echo "[1/2] stopping web / ws / bot / ngrok"
-stop_service web
-stop_service ws
-stop_service bot
-stop_service ngrok
-
-# Sweeper: catch any stragglers that escaped their process group.
+# Belt-and-suspenders: kill any stray dev processes pm2 may have missed.
 pkill -f 'next dev' 2>/dev/null || true
 pkill -f 'next-server' 2>/dev/null || true
 pkill -f 'tsx watch src/index.ts' 2>/dev/null || true
+
+echo "[2/3] stopping ngrok"
+if [[ -f logs/ngrok.pid ]]; then
+  pid=$(cat logs/ngrok.pid)
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    echo "  ngrok: stopped (pid ${pid})"
+  fi
+  rm -f logs/ngrok.pid logs/ngrok.env
+fi
 pkill -f 'scripts/ngrok.mjs' 2>/dev/null || true
 
-echo "[2/2] stopping postgres + redis"
+echo "[3/3] stopping postgres + redis"
 docker compose stop
 
 echo

@@ -150,7 +150,9 @@ export interface CurrentUser {
   permissions: Set<string>;
   displayName: string;
   avatarUrl: string | null;
+  email: string | null;
   isAnon: boolean;
+  presenceOptOut: boolean;
 }
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
@@ -182,7 +184,9 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     permissions: new Set(perms.map((p) => p.permission)),
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
+    email: u.email ?? null,
     isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
   };
 }
 

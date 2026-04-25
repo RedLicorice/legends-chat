@@ -9,8 +9,9 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const [row] = await db.select().from(userKeyBundles).where(eq(userKeyBundles.userId, user.id)).limit(1);
-  if (!row) return NextResponse.json({ registered: false });
-  return NextResponse.json({ registered: true, identityPublicKey: row.identityPublicKey });
+  if (!row) return NextResponse.json({ registered: false, backup: null });
+  const backup = (row.keyBundle as { backup?: string }).backup ?? null;
+  return NextResponse.json({ registered: true, identityPublicKey: row.identityPublicKey, backup });
 }
 
 export async function POST(req: Request) {

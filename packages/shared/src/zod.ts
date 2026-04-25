@@ -1,8 +1,18 @@
 import { z } from "zod";
 
+export const attachmentSchema = z.object({
+  type: z.enum(["image", "gif"]),
+  url: z.string().min(1).max(2048),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  thumbnailUrl: z.string().min(1).max(2048).optional(),
+});
+export type Attachment = z.infer<typeof attachmentSchema>;
+
 export const messageContentSchema = z.object({
-  text: z.string().min(1).max(8000),
+  text: z.string().max(8000).default(""),
   replyToMessageId: z.string().optional(),
+  attachments: z.array(attachmentSchema).max(10).optional(),
   inlineKeyboard: z
     .array(
       z.array(
@@ -14,6 +24,8 @@ export const messageContentSchema = z.object({
       ),
     )
     .optional(),
+}).refine((v) => v.text.trim().length > 0 || (v.attachments && v.attachments.length > 0), {
+  message: "message must have text or at least one attachment",
 });
 export type MessageContent = z.infer<typeof messageContentSchema>;
 
@@ -40,6 +52,25 @@ export const banDurationSchema = z
   .describe("seconds=null means permanent");
 
 export const flagReasonSchema = z.string().trim().min(3).max(500);
+
+export const createPollSchema = z.object({
+  topicId: z.string().uuid(),
+  question: z.string().trim().min(1).max(300),
+  options: z.array(z.string().trim().min(1).max(100)).min(2).max(10),
+  isAnonymous: z.boolean().default(false),
+  allowsMultiple: z.boolean().default(false),
+});
+export type CreatePollInput = z.infer<typeof createPollSchema>;
+
+export const pollVoteSchema = z.object({
+  pollId: z.string().uuid(),
+  optionIds: z.array(z.string().uuid()).max(10),
+});
+export type PollVoteInput = z.infer<typeof pollVoteSchema>;
+
+export const pollCloseSchema = z.object({
+  pollId: z.string().uuid(),
+});
 
 export const createTopicSchema = z.object({
   slug: z

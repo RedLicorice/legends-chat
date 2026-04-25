@@ -1,4 +1,23 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(corepack pnpm *)",
+      "Bash(pm2 status *)",
+      "Bash(pm2 logs *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/socket.io/?EIO=4)",
+      "Bash(curl -s http://localhost:3000/api/user/profile -w \"\\\\n%{http_code}\")",
+      "Bash(curl -s -L http://localhost:3000/ -o /dev/null -w \"%{http_code} %{url_effective}\")",
+      "Bash(curl -s http://localhost:3000/login -w \"\\\\n%{http_code}\")",
+      "mcp__chrome-devtools__list_pages",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers',{}\\), indent=2\\)\\)\")",
+      "Bash(curl -s http://localhost:9222/json/version)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('Browser','?'\\)\\)\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(test -f /home/mrlucifer/repos/legends-chat/apps/web/app/api/topics/[id]/members/route.ts)",
+      "Bash(echo \"exit: $?\")"
+    ]
+  },
   "enabledMcpjsonServers": [
     "chrome-devtools"
   ]

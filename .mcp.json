@@ -6,7 +6,7 @@
       "args": [
         "chrome-devtools-mcp@latest",
         "--executablePath",
-        "/root/chrome/chrome/linux-147.0.7727.57/chrome-linux64/chrome",
+        "/usr/bin/chromium",
         "--chromeArg", "--no-sandbox",
         "--chromeArg", "--disable-setuid-sandbox"
       ],

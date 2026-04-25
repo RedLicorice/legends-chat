@@ -81,6 +81,8 @@ export interface MessageAttachment {
   thumbnailUrl?: string;
 }
 
+export interface InlineKeyboardButton { text: string; callbackData: string }
+
 export interface InsertedMessage {
   id: string;
   topicId: string;
@@ -88,10 +90,12 @@ export interface InsertedMessage {
   senderDisplayName: string | null;
   senderAvatarUrl: string | null;
   senderIsAnon: boolean;
+  senderRole: string | null;
   botId: string | null;
   replyToMessageId: string | null;
   text: string;
   attachments: MessageAttachment[];
+  inlineKeyboard?: InlineKeyboardButton[][] | null;
   createdAt: Date;
   editedAt: Date | null;
   poll?: PollData;
@@ -158,13 +162,14 @@ export async function insertMessage(args: {
   let senderDisplayName: string | null = null;
   let senderAvatarUrl: string | null = null;
   let senderIsAnon = false;
+  let senderRole: string | null = null;
   if (args.senderUserId) {
     const [u] = await db
-      .select({ displayName: users.displayName, isAnon: users.isAnon, avatarUrl: users.avatarUrl })
+      .select({ displayName: users.displayName, isAnon: users.isAnon, avatarUrl: users.avatarUrl, role: users.role })
       .from(users)
       .where(eq(users.id, args.senderUserId))
       .limit(1);
-    if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; senderAvatarUrl = u.avatarUrl; }
+    if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; senderAvatarUrl = u.avatarUrl; senderRole = u.role; }
   }
 
   return {
@@ -174,10 +179,12 @@ export async function insertMessage(args: {
     senderDisplayName,
     senderAvatarUrl,
     senderIsAnon,
+    senderRole,
     botId: row!.botId,
     replyToMessageId: row!.replyToMessageId?.toString() ?? null,
     text: args.text,
     attachments: args.attachments ?? [],
+    inlineKeyboard: null,
     createdAt: row!.createdAt,
     editedAt: row!.editedAt,
   };
@@ -216,11 +223,13 @@ export async function listRecentMessages(topicId: string, limit = 50, viewerId?:
       contentCiphertext: messages.contentCiphertext,
       contentNonce: messages.contentNonce,
       keyId: messages.keyId,
+      inlineKeyboard: messages.inlineKeyboard,
       createdAt: messages.createdAt,
       editedAt: messages.editedAt,
       senderDisplayName: users.displayName,
       senderAvatarUrl: users.avatarUrl,
       senderIsAnon: users.isAnon,
+      senderRole: users.role,
     })
     .from(messages)
     .leftJoin(users, eq(messages.senderUserId, users.id))
@@ -241,10 +250,12 @@ export async function listRecentMessages(topicId: string, limit = 50, viewerId?:
       senderDisplayName: r.senderDisplayName ?? null,
       senderAvatarUrl: r.senderAvatarUrl ?? null,
       senderIsAnon: r.senderIsAnon ?? false,
+      senderRole: r.senderRole ?? null,
       botId: r.botId,
       replyToMessageId: r.replyToMessageId?.toString() ?? null,
       text,
       attachments,
+      inlineKeyboard: r.inlineKeyboard as InlineKeyboardButton[][] | null | undefined,
       createdAt: r.createdAt,
       editedAt: r.editedAt,
     });

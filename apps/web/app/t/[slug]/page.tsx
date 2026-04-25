@@ -30,6 +30,7 @@ export default async function TopicPage({ params }: { params: Promise<{ slug: st
       currentSlug={slug}
       topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, isFeed: topic.isFeed, postRoles: (topic.postRoles as string[] | null) ?? [] }}
       mute={mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null}
+      hasEmail={!!user.email}
     />
   );
 }

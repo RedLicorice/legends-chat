@@ -4,14 +4,14 @@
 
 PWA chat app for a single community (one workspace, many "topic" rooms — Telegram-forum style). Auth is delegated to a Telegram bot via one-time invite/login codes. Roles: User / Moderator / Admin. Bots are first-class with a Telegram-inspired API. Hosting is containerized and horizontally scalable.
 
-E2EE is now implemented as a per-topic admin toggle. The at-rest encryption layer was always there; the toggle controls whether the server decrypts for previews/search (non-E2EE) or stores only ciphertext the server cannot read (E2EE). Client-side key management is future work.
+E2EE is fully implemented end-to-end. The at-rest encryption layer was always there; the per-topic toggle controls whether the server decrypts for previews/search (non-E2EE) or stores only ciphertext the server cannot read (E2EE). Client-side key exchange, key rotation, and passphrase backup are all live.
 
 ## Decisions locked in
 
 - **Stack**: Next.js 15 (App Router) PWA, TypeScript, Tailwind, Postgres + Drizzle ORM, Socket.IO over HTTPS, Redis (pub/sub for WS fanout + ephemeral state), Web Push (VAPID).
 - **Telegram bot**: separate Node process using **grammY**, sharing types and Drizzle schema via workspace package. Supports both polling and webhook mode (`BOT_MODE=webhook`); webhook URL auto-registers from `APP_PUBLIC_URL`/ngrok at startup.
 - **Hosting**: Docker Compose for dev (postgres + redis); production = horizontally scalable containers.
-- **E2EE**: per-topic toggle in admin. `isE2ee=true` topics store ciphertext the server never decrypts; server shows "(encrypted)" as preview, unread count still tracked server-side. Client-side ratchet/key-exchange deferred to future work.
+- **E2EE**: per-topic toggle in admin. `isE2ee=true` topics store ciphertext the server never decrypts; server shows "(encrypted)" as preview, unread count still tracked server-side. Full client-side key exchange and rotation implemented (see Encryption section).
 - **Onboarding**: Telegram bot is gated. New user DMs `/start` → bot reads `registration_config` (invites-only / public / closed) → if invites: asks for code → code validated → account created → bot returns login deep link. Existing user `/start` → fresh login link. All registration modes configurable from admin settings.
 - **Topics**: forum-style rooms. Per-topic: sticky flag, feed mode (one-way broadcast), home topic, E2EE toggle, read-role gate, post-role gate, retention policy (none / age / count), manual purge. Unread count tracked server-side via `last_read_message_id` per (user, topic).
 - **Role/permission gates**: `readRoles` and `postRoles` are jsonb arrays on each topic. Empty = everyone. Non-empty = only listed roles may read/post. Enforced at both list and view level server-side. Admins bypass read gates.
@@ -88,7 +88,7 @@ Every message stored as XChaCha20-Poly1305 ciphertext+nonce. Per-message random 
 
 ### E2EE (per topic — fully implemented)
 
-**Key model**: simplified Signal sender key. Each user has a P-256 ECDH identity key pair registered with the server (`user_key_bundles`). Per topic, each sender generates a random AES-GCM-256 "sender key". On first send, the sender distributes their key to all current topic members: for each member, ECDH(senderPriv, recipientPub) → AES-GCM wraps sender key → stored in `e2ee_sender_keys`. New members who join later cannot decrypt history (no retroactive distribution).
+**Key model**: simplified Signal sender key. Each user has a P-256 ECDH identity key pair registered with the server (`user_key_bundles`). Per topic, each sender generates a random AES-GCM-256 "sender key". On send, the client fetches `GET /api/topics/[id]/e2ee/distribute` which returns all members with registered keys plus the set the caller has already distributed to. If any member lacks a distribution, the client generates a **new** sender key and distributes to **all** current members (lazy rotation). For each recipient: ECDH(senderPriv, recipientPub) → AES-GCM wraps sender key → stored in `e2ee_sender_keys` via `POST /distribute`. New members who join after the last rotation cannot decrypt history — they trigger a fresh rotation on the next send from any member.
 
 **Message format**: client encrypts message `{"e":1,"kid":"<senderUserId>","iv":"<base64>","ct":"<base64>"}` → this JSON is the plaintext that the server wraps with XChaCha20 (outer layer). Other clients receive the outer-decrypted JSON and do the inner AES-GCM decryption with the cached sender key.
 
@@ -147,28 +147,35 @@ Events delivered to bot webhooks: `message`, `callback_query`, `member_joined`, 
 
 ### Slice 1.75 — ✅ Complete
 
-- **E2EE client-side key exchange**: P-256 ECDH identity keys, per-sender AES-GCM-256 sender keys per topic, ECDH-based key distribution to all current members, IndexedDB key storage, passphrase backup via PBKDF2+AES-GCM. `E2EESetup` modal on first E2EE topic entry. Wipe-on-enable with admin confirmation. Zero new npm dependencies (Web Crypto API only).
+- **E2EE client-side key exchange + rotation**: P-256 ECDH identity keys, per-sender AES-GCM-256 sender keys per topic, ECDH-based distribution to all current members on send. Lazy rotation: sender detects undistributed members via `GET /distribute` (`alreadyDistributed` set), generates new key, re-distributes to all. IndexedDB key storage, passphrase-backup via PBKDF2+AES-GCM with server-side blob. `E2EESetup` modal on first E2EE topic entry; backup restore flow when local key mismatches server. Wipe-on-enable with admin confirmation. Zero new npm dependencies (Web Crypto API only).
 - **Full-text search**: `search_vector tsvector` on messages, populated on insert for non-E2EE topics. `GET /api/search?q=...&topic=...` endpoint. `SearchModal` component, accessible via search button in topic header or Ctrl+K.
 - **Thread/reply UI**: reply button on messages, inline quote preview showing parent excerpt, `replyToMessageId` passed through WS on send. `ThreadPanel` side panel for viewing thread replies (opens when a message has 3+ replies via "View thread (N)" button). `GET /api/topics/[id]/messages?replyTo=<id>` endpoint for loading thread replies.
 
-### Slice 2 — 🔲 Next
+### Slice 2 — ✅ Complete
 
 **Internal bot API + bot management**
 
-- `apps/web/app/api/bot/v1/` endpoints (sendMessage, editMessage, deleteMessage, answerCallbackQuery, setWebhook)
-- `topic_bots` join table — scopes bots to topics, rejects E2EE topics
-- Bot management UI: create bot, rotate token, set webhook URL, assign to topics
-- Webhook delivery worker: fan-out relevant Socket.IO events to registered bot webhooks
-- Inline keyboard rendering + `bot:keyboard:callback` Socket.IO handler
-- Bot API auth middleware (Bearer token → `bots` table lookup)
+- `apps/web/app/api/bot/v1/` endpoints: `GET /getMe`, `POST /sendMessage`, `POST /editMessage`, `POST /deleteMessage`, `POST /answerCallbackQuery`, `POST /setWebhook`, `GET /getUpdates`
+- `topic_bots` join table — scopes bots to topics; E2EE topics reject bot assignment
+- `messages.inline_keyboard` jsonb column — bot-defined button rows, stored plaintext (not encrypted)
+- Bot management UI (`/admin/bots`): create bot, rotate token (shown once), edit name/webhook, activate/deactivate, delete, assign/remove from topics
+- Bot auth middleware: SHA-256(`Bearer <token>`) → `bots.tokenHash` lookup
+- Webhook delivery: WS server calls bot webhookUrl on `message:send` (non-E2EE topics) and `bot:keyboard:callback`; payload is Telegram-inspired Update JSON
+- Bot-originated WS broadcasts via Redis pub/sub (`legends:bot:message:new/edit/delete`) — web publishes, WS subscribes and emits to topic room
+- Inline keyboard rendering in TopicView: button rows below bot messages, click emits `BOT_KEYBOARD_CALLBACK` WS event → webhook `callback_query` update delivered to bot
 
-### Slice 3 — 🔲 Planned
+### Slice 3 — ✅ Complete
 
-**Notifications + account linking + 2FA**
+**Notifications + account linking + 2FA + Bot SDK + bots**
 
-- **Notification system**: in-app FB-style notification feed (no badges — dot or banner only). Triggers: mentions, replies, topic activity based on user prefs. Notification table + Socket.IO `notification:new` event + mark-read flow.
-- **Permanent accounts / email linking**: after Telegram login, prompt user to link an email address for account recovery. Repeating reminder (dismissable with "not again") until linked or dismissed. Email OTP flow for verification.
-- **OTP / 2FA via Authy (TOTP)**: optional for user login, required for critical operations (ban, role change, invite code generation for non-user roles). TOTP secret stored encrypted; QR enroll flow in user settings.
+- **Notification system**: in-app notification bell with numeric unread badge. Triggers: mentions (`@handle`), reply-to. `notifications` table + Socket.IO `notification:new` event + mark-all-read on bell open. `NotificationBell` component.
+- **Permanent accounts / email linking**: after Telegram login, `EmailLinkBanner` prompts user to link email. Multi-step: enter email → OTP verification → done. Dismissable permanently. Email OTP via nodemailer (SMTP) or console log in dev.
+- **OTP / 2FA via TOTP (Authy-compatible)**: `TotpPanel` in user settings. TOTP secret AES-256-GCM encrypted at rest (`TOTP_ENCRYPTION_KEY`). QR code enroll flow, confirm code, disable with code. HMAC-SHA1 TOTP implementation in `apps/web/lib/totp.ts`.
+- **Bot SDK** (`packages/bot-sdk`): `LegendsBotClient` (HTTP), `LegendsBot` (event-driven, polling + webhook modes). Typed Update/Context API.
+- **Jane bot** (`apps/bots/jane`): welcomes new members with `@mention` tag on `new_member` event.
+- **Chaos bot** (`apps/bots/chaos`): two autonomous instances (`BOT_INSTANCE=alpha|beta`) posting random messages to configured topics on random intervals.
+- `new_member` webhook update type: fires on registration (Telegram or email); dispatched via Redis pub/sub → WS server → all bots assigned to the default topic.
+- `just bot-jane`, `just bot-chaos-alpha`, `just bot-chaos-beta` targets added.
 
 ### Slice 4 — 🔲 Planned
 
@@ -181,8 +188,6 @@ Events delivered to bot webhooks: `message`, `callback_query`, `member_joined`, 
 
 ### Future (not sliced yet)
 
-- **E2EE key rotation**: on new member join, current senders rotate sender keys and re-distribute to all members. Requires sender key versioning and per-message key version header.
 - **E2EE for bots**: bots excluded from E2EE topics (current constraint). Full bot E2EE would require bot-side key management outside scope.
-- **Search**: full-text search over non-E2EE messages (Postgres `tsvector` or Meilisearch sidecar).
-- **Thread/reply UI**: collapse reply chains inline, jump-to-parent.
+- **Thread enhancements**: collapse reply chains inline, jump-to-parent.
 - **Attachment previews**: image/video inline, file type icons.

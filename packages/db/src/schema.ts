@@ -41,6 +41,9 @@ export const users = pgTable(
     telegramUsername: text("telegram_username"),
     displayName: text("display_name").notNull(),
     avatarUrl: text("avatar_url"),
+    email: text("email"),
+    passwordHash: text("password_hash"),
+    emailLinkDismissedAt: timestamp("email_link_dismissed_at", { withTimezone: true }),
     role: userRole("role").notNull().default("user"),
     isAnon: boolean("is_anon").notNull().default(false),
     anonExpiresAt: timestamp("anon_expires_at", { withTimezone: true }),
@@ -203,6 +206,7 @@ export const messages = pgTable(
       .notNull()
       .references(() => encryptionKeys.id),
     searchVector: tsvector("search_vector"),
+    inlineKeyboard: jsonb("inline_keyboard").$type<{ text: string; callbackData: string }[][]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -242,6 +246,23 @@ export const bots = pgTable("bots", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const topicBots = pgTable(
+  "topic_bots",
+  {
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    topicId: uuid("topic_id")
+      .notNull()
+      .references(() => topics.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.botId, t.topicId] }),
+    topicIdx: index("topic_bots_topic_idx").on(t.topicId),
+  }),
+);
 
 export const pushSubscriptions = pgTable(
   "push_subscriptions",
@@ -390,6 +411,22 @@ export const userKeyBundles = pgTable("user_key_bundles", {
   keyBundle: jsonb("key_bundle").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  payload: jsonb("payload").notNull().default({}),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const totpSecrets = pgTable("totp_secrets", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  encryptedSecret: text("encrypted_secret").notNull(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const e2eeSenderKeys = pgTable(

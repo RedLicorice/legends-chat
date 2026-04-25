@@ -11,6 +11,8 @@ export const WS_EVENTS = {
   TYPING_STOP: "typing:stop",
   USER_BANNED: "user:banned",
   USER_MUTED: "user:muted",
+  POLL_UPDATED: "poll:updated",
+  NOTIFICATION_NEW: "notification:new",
 
   // client -> server
   MESSAGE_SEND: "message:send",
@@ -22,16 +24,24 @@ export const WS_EVENTS = {
   TOPIC_LEAVE: "topic:leave",
   TYPING: "typing",
   BOT_KEYBOARD_CALLBACK: "bot:keyboard:callback",
+  POLL_CREATE: "poll:create",
+  POLL_VOTE: "poll:vote",
+  POLL_CLOSE: "poll:close",
 } as const;
 
 export type WsEvent = (typeof WS_EVENTS)[keyof typeof WS_EVENTS];
 
 export const REDIS_CHANNELS = {
+  NOTIFICATION_NEW: "legends:notification:new",
   USER_BANNED: "legends:user:banned",
   USER_MUTED: "legends:user:muted",
   USER_UNMUTED: "legends:user:unmuted",
   USER_UNBANNED: "legends:user:unbanned",
   LOGIN_TOKEN_CONSUMED: "legends:login:token:consumed",
+  BOT_MESSAGE_NEW: "legends:bot:message:new",
+  BOT_MESSAGE_EDIT: "legends:bot:message:edit",
+  BOT_MESSAGE_DELETE: "legends:bot:message:delete",
+  BOT_NEW_MEMBER: "legends:bot:new_member",
 } as const;
 
 export const REDIS_KEYS = {

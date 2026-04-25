@@ -58,6 +58,9 @@ import {
   toggleReaction,
   getTopicById,
 } from "./messages";
+import { deliverCallbackQueryToWebhooks, deliverMessageToWebhooks, deliverNewMemberToWebhooks } from "./webhook";
+import { dispatchMessageNotifications } from "./notifications";
+import { randomUUID } from "node:crypto";
 
 interface SocketData {
   user: AccessTokenPayload;
@@ -157,6 +160,20 @@ io.on("connection", async (socket: AuthedSocket) => {
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
+      dispatchMessageNotifications(io, {
+        messageId: msg.id,
+        topicId: parsed.topicId,
+        topicTitle: topic?.title ?? "",
+        senderUserId: user.sub,
+        senderName: msg.senderDisplayName ?? "Unknown",
+        text: parsed.content.text,
+        replyToMessageId: parsed.content.replyToMessageId ?? null,
+      }).catch((e) => console.error("[notifications] dispatch failed", e));
+      if (!isE2ee) {
+        deliverMessageToWebhooks(parsed.topicId, topic?.title ?? "", msg).catch((e) =>
+          console.error("[webhook] delivery failed", e),
+        );
+      }
       notifyTopicMembers({
         topicId: parsed.topicId,
         senderUserId: user.sub,
@@ -274,20 +291,57 @@ io.on("connection", async (socket: AuthedSocket) => {
       ack?.({ ok: false, error: (err as Error).message });
     }
   });
+
+  socket.on(WS_EVENTS.BOT_KEYBOARD_CALLBACK, async (raw: unknown, ack?: (res: unknown) => void) => {
+    try {
+      const { botId, messageId, callbackData } = raw as { botId: string; messageId: string; callbackData: string };
+      if (!botId || !messageId || !callbackData) { ack?.({ ok: false, error: "invalid payload" }); return; }
+      const topicId = await getMessageTopicId(messageId);
+      if (!topicId) { ack?.({ ok: false, error: "message not found" }); return; }
+      const callbackQueryId = randomUUID();
+      ack?.({ ok: true, callbackQueryId });
+      deliverCallbackQueryToWebhooks(topicId, botId, callbackQueryId, messageId, user.sub, null, callbackData)
+        .catch((e) => console.error("[webhook] callback delivery failed", e));
+    } catch (err) {
+      ack?.({ ok: false, error: (err as Error).message });
+    }
+  });
 });
 
 // React to ban/mute pubsub from the web app: force-disconnect affected users.
-subClient.subscribe(REDIS_CHANNELS.USER_BANNED, REDIS_CHANNELS.USER_MUTED, (err) => {
-  if (err) console.error("redis subscribe failed", err);
-});
+subClient.subscribe(
+  REDIS_CHANNELS.USER_BANNED,
+  REDIS_CHANNELS.USER_MUTED,
+  REDIS_CHANNELS.BOT_MESSAGE_NEW,
+  REDIS_CHANNELS.BOT_MESSAGE_EDIT,
+  REDIS_CHANNELS.BOT_MESSAGE_DELETE,
+  REDIS_CHANNELS.BOT_NEW_MEMBER,
+  (err) => { if (err) console.error("redis subscribe failed", err); },
+);
 
 subClient.on("message", (channel, message) => {
   try {
-    const { userId } = JSON.parse(message) as { userId: string };
     if (channel === REDIS_CHANNELS.USER_BANNED) {
+      const { userId } = JSON.parse(message) as { userId: string };
       io.to(`user:${userId}`).disconnectSockets(true);
     } else if (channel === REDIS_CHANNELS.USER_MUTED) {
+      const { userId } = JSON.parse(message) as { userId: string };
       io.to(`user:${userId}`).emit(WS_EVENTS.USER_MUTED, { userId });
+    } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_NEW) {
+      const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: unknown };
+      io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
+    } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_EDIT) {
+      const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: unknown };
+      io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_EDIT, msg);
+    } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_DELETE) {
+      const { topicId, id } = JSON.parse(message) as { topicId: string; id: string };
+      io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_DELETE, { id, topicId });
+    } else if (channel === REDIS_CHANNELS.BOT_NEW_MEMBER) {
+      const { userId, displayName, username, topicId } = JSON.parse(message) as {
+        userId: string; displayName: string; username: string | null; topicId: string;
+      };
+      deliverNewMemberToWebhooks(userId, displayName, username, topicId)
+        .catch((e) => console.error("[webhook] new_member delivery failed", e));
     }
   } catch (e) {
     console.error("pubsub parse failed", e);

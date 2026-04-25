@@ -1,0 +1,29 @@
+import { eq } from "drizzle-orm";
+import { NextResponse } from "next/server";
+import { users } from "@legends/db/schema";
+import { db } from "@/lib/db";
+import { verifyPassword } from "@/lib/password";
+import { issueSession, setAuthCookies } from "@/lib/auth";
+
+export async function POST(req: Request) {
+  const body = await req.json() as { email: string; password: string };
+  const email = body.email?.trim().toLowerCase();
+  const password = body.password;
+
+  if (!email || !password) return NextResponse.json({ error: "Email and password required." }, { status: 400 });
+
+  const [user] = await db
+    .select({ id: users.id, role: users.role, passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+
+  if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+    return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
+  }
+
+  const { accessJwt, refreshJwt } = await issueSession(user.id, user.role);
+  await setAuthCookies(accessJwt, refreshJwt);
+
+  return NextResponse.json({ ok: true });
+}

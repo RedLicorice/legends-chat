@@ -64,6 +64,24 @@
       "when": 1745500000000,
       "tag": "0009_e2ee_search",
       "breakpoints": true
+    }, {
+      "idx": 10,
+      "version": "7",
+      "when": 1745600000000,
+      "tag": "0010_bots",
+      "breakpoints": true
+    }, {
+      "idx": 11,
+      "version": "7",
+      "when": 1745700000000,
+      "tag": "0011_email_auth",
+      "breakpoints": true
+    }, {
+      "idx": 12,
+      "version": "7",
+      "when": 1745800000000,
+      "tag": "0012_notifications_totp",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Plus, Trash2 } from "lucide-react";
 
 interface TopicRow {
   id: string;
@@ -40,7 +41,7 @@ function RolesCheckboxes({
   return (
     <div className="flex flex-wrap gap-3">
       {ALL_ROLES.map((role) => (
-        <label key={role} className="flex items-center gap-1.5 cursor-pointer text-sm">
+        <label key={role} className="flex cursor-pointer items-center gap-1.5 text-sm">
           <input
             type="checkbox"
             className="accent-accent"
@@ -54,7 +55,7 @@ function RolesCheckboxes({
           {role}
         </label>
       ))}
-      <label className="flex items-center gap-1.5 cursor-pointer text-sm">
+      <label className="flex cursor-pointer items-center gap-1.5 text-sm">
         <input
           type="checkbox"
           className="accent-accent"
@@ -70,10 +71,13 @@ function RolesCheckboxes({
 
 type RetentionDraft = Record<string, { ageValue: string; ageUnit: "hours" | "days"; maxMessages: string }>;
 
+const EMPTY_CREATE = { slug: "", title: "", description: "" };
+
 export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   const [topics, setTopics] = useState(initial);
   const [saving, setSaving] = useState<string | null>(null);
   const [purging, setPurging] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [retentionDraft, setRetentionDraft] = useState<RetentionDraft>(() =>
     Object.fromEntries(
@@ -83,6 +87,10 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
       }),
     ),
   );
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const router = useRouter();
 
   async function save(id: string, patch: Partial<TopicRow>, extra?: Record<string, unknown>) {
@@ -153,11 +161,140 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
     }
   }
 
+  async function deleteTopic(id: string, title: string) {
+    if (!window.confirm(`Delete topic "${title}"? This cannot be undone.`)) return;
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/admin/topics/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      setTopics((prev) => prev.filter((t) => t.id !== id));
+      router.refresh();
+    } catch {
+      setErrors((e) => ({ ...e, [id]: "Delete failed" }));
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  async function createTopic() {
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch("/api/admin/topics", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug: createForm.slug.trim(),
+          title: createForm.title.trim(),
+          description: createForm.description.trim() || undefined,
+          isSticky: false,
+          sortOrder: 0,
+          isE2ee: false,
+          historyVisibleToNewMembers: true,
+          autoDeleteMode: "none",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCreateError(data.error?.formErrors?.[0] ?? "Create failed");
+        return;
+      }
+      const t = data.topic;
+      setTopics((prev) => [
+        ...prev,
+        {
+          id: t.id,
+          slug: t.slug,
+          title: t.title,
+          description: t.description,
+          isSticky: t.isSticky,
+          sortOrder: t.sortOrder,
+          isFeed: t.isFeed,
+          isHomeTopic: t.isHomeTopic,
+          isE2ee: t.isE2ee,
+          postRoles: (t.postRoles as string[] | null) ?? [],
+          readRoles: (t.readRoles as string[] | null) ?? [],
+          autoDeleteMode: t.autoDeleteMode,
+          autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
+          autoDeleteMaxMessages: t.autoDeleteMaxMessages,
+        },
+      ]);
+      setRetentionDraft((d) => ({ ...d, [t.id]: { ageValue: "24", ageUnit: "hours", maxMessages: "1000" } }));
+      setCreateForm(EMPTY_CREATE);
+      setShowCreate(false);
+      router.refresh();
+    } catch {
+      setCreateError("Create failed");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Create form */}
+      {showCreate ? (
+        <div className="rounded-xl border border-accent bg-panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">New topic</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Title</label>
+              <input
+                value={createForm.title}
+                onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="General"
+                className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Slug</label>
+              <input
+                value={createForm.slug}
+                onChange={(e) => setCreateForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") }))}
+                placeholder="general"
+                className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent font-mono"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Description (optional)</label>
+            <input
+              value={createForm.description}
+              onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+              placeholder="What this channel is for"
+              className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          {createError && <p className="text-xs text-danger">{createError}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={createTopic}
+              disabled={creating || !createForm.slug || !createForm.title}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {creating ? "Creating…" : "Create topic"}
+            </button>
+            <button
+              onClick={() => { setShowCreate(false); setCreateForm(EMPTY_CREATE); setCreateError(null); }}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-panel2"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-panel2"
+        >
+          <Plus className="h-4 w-4" /> New topic
+        </button>
+      )}
+
+      {/* Topic list */}
       {topics.map((t) => {
         const draft = retentionDraft[t.id]!;
-        const dis = saving === t.id;
+        const dis = saving === t.id || deleting === t.id;
         return (
           <div key={t.id} className="rounded-xl border border-border bg-panel p-5 space-y-4">
             {/* Header + toggles */}
@@ -168,7 +305,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm">
                 {(["isFeed", "isHomeTopic", "isSticky"] as const).map((key) => (
-                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                  <label key={key} className="flex cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={t[key] as boolean}
@@ -179,7 +316,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                     {{ isFeed: "Feed", isHomeTopic: "Home", isSticky: "Sticky" }[key]}
                   </label>
                 ))}
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
                     checked={t.isE2ee}
@@ -189,6 +326,15 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                   />
                   E2EE
                 </label>
+                <button
+                  onClick={() => deleteTopic(t.id, t.title)}
+                  disabled={dis}
+                  className="flex items-center gap-1 rounded-lg border border-danger px-2 py-1 text-xs text-danger hover:bg-danger hover:text-white disabled:opacity-50"
+                  title="Delete topic"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deleting === t.id ? "Deleting…" : "Delete"}
+                </button>
               </div>
             </div>
 
@@ -239,7 +385,10 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                     <select
                       value={draft.ageUnit}
                       onChange={(e) =>
-                        setRetentionDraft((d) => ({ ...d, [t.id]: { ...d[t.id]!, ageUnit: e.target.value as "hours" | "days" } }))
+                        setRetentionDraft((d) => ({
+                          ...d,
+                          [t.id]: { ...d[t.id]!, ageUnit: e.target.value as "hours" | "days" },
+                        }))
                       }
                       className="rounded-lg border border-border bg-panel2 px-3 py-1.5 text-sm"
                     >
