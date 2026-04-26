@@ -29,6 +29,7 @@ export async function PATCH(
     autoDeleteMode?: "none" | "age" | "count";
     autoDeleteAgeSeconds?: number | null;
     autoDeleteMaxMessages?: number | null;
+    visibilityPermission?: string | null;
   };
 
   const patch: Record<string, unknown> = {};
@@ -57,6 +58,7 @@ export async function PATCH(
   }
   if ("autoDeleteAgeSeconds" in body) patch.autoDeleteAgeSeconds = body.autoDeleteAgeSeconds ?? null;
   if ("autoDeleteMaxMessages" in body) patch.autoDeleteMaxMessages = body.autoDeleteMaxMessages ?? null;
+  if ("visibilityPermission" in body) patch.visibilityPermission = body.visibilityPermission ?? null;
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });

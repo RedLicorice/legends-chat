@@ -28,7 +28,6 @@ const tsvector = customType<{ data: string; default: false }>({
   },
 });
 
-export const userRole = pgEnum("user_role", ["user", "moderator", "admin"]);
 export const autoDeleteMode = pgEnum("auto_delete_mode", ["none", "age", "count"]);
 export const flagStatus = pgEnum("flag_status", ["pending", "dismissed", "actioned"]);
 export const encryptionPurpose = pgEnum("encryption_purpose", ["messages", "attachments"]);
@@ -44,7 +43,7 @@ export const users = pgTable(
     email: text("email"),
     passwordHash: text("password_hash"),
     emailLinkDismissedAt: timestamp("email_link_dismissed_at", { withTimezone: true }),
-    role: userRole("role").notNull().default("user"),
+    role: text("role").notNull().default("user"),
     isAnon: boolean("is_anon").notNull().default(false),
     anonExpiresAt: timestamp("anon_expires_at", { withTimezone: true }),
     invitedByUserId: uuid("invited_by_user_id"),
@@ -60,10 +59,18 @@ export const users = pgTable(
   }),
 );
 
+export const roles = pgTable("roles", {
+  name: text("name").primaryKey().notNull(),
+  label: text("label").notNull(),
+  isSystem: boolean("is_system").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const rolesPermissions = pgTable(
   "roles_permissions",
   {
-    role: userRole("role").notNull(),
+    role: text("role").notNull(),
     permission: text("permission").notNull(),
   },
   (t) => ({
@@ -79,7 +86,7 @@ export const registrationConfig = pgTable("registration_config", {
 });
 
 export const inviteQuotaConfig = pgTable("invite_quota_config", {
-  role: userRole("role").primaryKey(),
+  role: text("role").primaryKey(),
   dailyLimit: integer("daily_limit").notNull().default(0),
 });
 
@@ -88,7 +95,7 @@ export const inviteCodes = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     code: text("code").notNull(),
-    role: userRole("role").notNull().default("user"),
+    role: text("role").notNull().default("user"),
     maxUses: integer("max_uses"),
     usesCount: integer("uses_count").notNull().default(0),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
@@ -162,6 +169,7 @@ export const topics = pgTable(
     autoDeleteAgeSeconds: integer("auto_delete_age_seconds"),
     autoDeleteMaxMessages: integer("auto_delete_max_messages"),
     iconUrl: text("icon_url"),
+    visibilityPermission: text("visibility_permission"),
     isFeed: boolean("is_feed").notNull().default(false),
     isHomeTopic: boolean("is_home_topic").notNull().default(false),
     postRoles: jsonb("post_roles").$type<string[]>().default([]),

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Plus, RefreshCw } from "lucide-react";
 
-type Role = "user" | "moderator" | "admin";
+type Role = string;
 
 interface InviteRow {
   id: string;

@@ -18,9 +18,9 @@ export const PERMISSIONS = {
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
-export type Role = "user" | "moderator" | "admin";
+export type Role = string;
 
-export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, Permission[]> = {
   user: [
     PERMISSIONS.MESSAGES_DELETE_OWN,
     PERMISSIONS.MESSAGES_FLAG,
@@ -43,7 +43,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: Object.values(PERMISSIONS),
 };
 
-export const DEFAULT_INVITE_DAILY_LIMIT: Record<Role, number> = {
+export const DEFAULT_INVITE_DAILY_LIMIT: Record<string, number> = {
   user: 1,
   moderator: 10,
   admin: 100,

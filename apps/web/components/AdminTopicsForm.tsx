@@ -21,9 +21,8 @@ interface TopicRow {
   autoDeleteMode: "none" | "age" | "count";
   autoDeleteAgeSeconds: number | null;
   autoDeleteMaxMessages: number | null;
+  visibilityPermission: string | null;
 }
-
-const ALL_ROLES = ["user", "moderator", "admin"];
 
 function secondsToDisplay(s: number | null): { value: string; unit: "hours" | "days" } {
   if (!s) return { value: "24", unit: "hours" };
@@ -33,16 +32,18 @@ function secondsToDisplay(s: number | null): { value: string; unit: "hours" | "d
 
 function RolesCheckboxes({
   roles,
+  allRoles,
   onSave,
   disabled,
 }: {
   roles: string[];
+  allRoles: string[];
   onSave: (roles: string[]) => void;
   disabled: boolean;
 }) {
   return (
     <div className="flex flex-wrap gap-3">
-      {ALL_ROLES.map((role) => (
+      {allRoles.map((role) => (
         <label key={role} className="flex cursor-pointer items-center gap-1.5 text-sm">
           <input
             type="checkbox"
@@ -77,6 +78,8 @@ const EMPTY_CREATE = { slug: "", title: "", description: "" };
 
 export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   const [topics, setTopics] = useState(initial);
+  const [allRoles, setAllRoles] = useState<string[]>(["user", "moderator", "admin"]);
+  const [allPermissions, setAllPermissions] = useState<string[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
   const [purging, setPurging] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -94,6 +97,19 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    fetch("/api/admin/roles")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { name: string; permissions: string[] }[] | null) => {
+        if (!data) return;
+        setAllRoles(data.map((r) => r.name));
+        const perms = new Set<string>();
+        for (const r of data) r.permissions.forEach((p) => perms.add(p));
+        setAllPermissions(Array.from(perms).sort());
+      })
+      .catch(() => {});
+  }, []);
 
   async function save(id: string, patch: Partial<TopicRow>, extra?: Record<string, unknown>) {
     setSaving(id);
@@ -220,6 +236,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           autoDeleteMode: t.autoDeleteMode,
           autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
           autoDeleteMaxMessages: t.autoDeleteMaxMessages,
+          visibilityPermission: t.visibilityPermission ?? null,
         },
       ]);
       setRetentionDraft((d) => ({ ...d, [t.id]: { ageValue: "24", ageUnit: "hours", maxMessages: "1000" } }));
@@ -363,15 +380,32 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
             {/* Permissions */}
             <div className="space-y-3 border-t border-border pt-3">
               <div>
+                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Visibility permission</div>
+                <select
+                  value={t.visibilityPermission ?? ""}
+                  onChange={(e) => save(t.id, { visibilityPermission: e.target.value || null })}
+                  disabled={dis}
+                  className="rounded-lg border border-border bg-panel2 px-3 py-1.5 text-sm outline-none focus:border-accent"
+                >
+                  <option value="">— visible to all —</option>
+                  {allPermissions.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted">
+                  Users without this permission cannot see this topic (treated as 404). Leave blank to show to everyone.
+                </p>
+              </div>
+              <div>
                 <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Who can read</div>
-                <RolesCheckboxes roles={t.readRoles} onSave={(r) => save(t.id, { readRoles: r })} disabled={dis} />
+                <RolesCheckboxes roles={t.readRoles} allRoles={allRoles} onSave={(r) => save(t.id, { readRoles: r })} disabled={dis} />
                 <p className="mt-1 text-xs text-muted">
                   {t.readRoles.length === 0 ? "Everyone can read." : `Only ${t.readRoles.join(", ")} can read.`}
                 </p>
               </div>
               <div>
                 <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Who can post</div>
-                <RolesCheckboxes roles={t.postRoles} onSave={(r) => save(t.id, { postRoles: r })} disabled={dis} />
+                <RolesCheckboxes roles={t.postRoles} allRoles={allRoles} onSave={(r) => save(t.id, { postRoles: r })} disabled={dis} />
                 <p className="mt-1 text-xs text-muted">
                   {t.postRoles.length === 0 ? "Everyone can post." : `Only ${t.postRoles.join(", ")} can post.`}
                 </p>

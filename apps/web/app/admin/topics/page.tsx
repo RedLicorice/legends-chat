@@ -35,6 +35,7 @@ export default async function AdminTopicsPage() {
           autoDeleteMode: t.autoDeleteMode,
           autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
           autoDeleteMaxMessages: t.autoDeleteMaxMessages,
+          visibilityPermission: t.visibilityPermission ?? null,
         }))} />
     </main>
   );

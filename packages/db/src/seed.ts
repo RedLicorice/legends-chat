@@ -8,6 +8,7 @@ import {
   inviteCodes,
   inviteQuotaConfig,
   registrationConfig,
+  roles,
   rolesPermissions,
   systemSettings,
   topics,
@@ -33,11 +34,21 @@ async function main() {
     .values({ key: "registration_mode", value: "open", updatedAt: new Date() })
     .onConflictDoUpdate({ target: systemSettings.key, set: { value: "open", updatedAt: new Date() } });
 
-  // 2. role permissions (truncate-and-reinsert so changes propagate)
+  // 2. system roles (upsert name+label, keep custom roles untouched)
+  const systemRoles = [
+    { name: "user", label: "User", isSystem: true, sortOrder: 0 },
+    { name: "moderator", label: "Moderator", isSystem: true, sortOrder: 10 },
+    { name: "admin", label: "Admin", isSystem: true, sortOrder: 20 },
+  ];
+  for (const r of systemRoles) {
+    await db.insert(roles).values(r).onConflictDoUpdate({ target: roles.name, set: { label: r.label, isSystem: r.isSystem, sortOrder: r.sortOrder } });
+  }
+
+  // 2b. role permissions (truncate-and-reinsert so changes propagate)
   await db.delete(rolesPermissions);
   for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
     for (const p of perms) {
-      await db.insert(rolesPermissions).values({ role: role as "user" | "moderator" | "admin", permission: p });
+      await db.insert(rolesPermissions).values({ role, permission: p });
     }
   }
 
@@ -45,7 +56,7 @@ async function main() {
   for (const [role, limit] of Object.entries(DEFAULT_INVITE_DAILY_LIMIT)) {
     await db
       .insert(inviteQuotaConfig)
-      .values({ role: role as "user" | "moderator" | "admin", dailyLimit: limit })
+      .values({ role, dailyLimit: limit })
       .onConflictDoUpdate({
         target: inviteQuotaConfig.role,
         set: { dailyLimit: limit },

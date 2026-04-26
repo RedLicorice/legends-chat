@@ -48,7 +48,7 @@ export async function PATCH(req: Request) {
       if (typeof limit !== "number" || limit < 0) continue;
       await db
         .insert(inviteQuotaConfig)
-        .values({ role: role as "user" | "moderator" | "admin", dailyLimit: Math.floor(limit) })
+        .values({ role, dailyLimit: Math.floor(limit) })
         .onConflictDoUpdate({ target: inviteQuotaConfig.role, set: { dailyLimit: Math.floor(limit) } });
     }
   }

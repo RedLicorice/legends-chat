@@ -29,7 +29,7 @@ export interface TopicListItem {
   lastMessage: { id: string; preview: string; at: Date; senderId: string | null } | null;
 }
 
-export async function listTopicsForUser(userId: string, userRole: string): Promise<TopicListItem[]> {
+export async function listTopicsForUser(userId: string, userRole: string, userPermissions: Set<string>): Promise<TopicListItem[]> {
   const tRows = await db
     .select()
     .from(topics)
@@ -37,6 +37,7 @@ export async function listTopicsForUser(userId: string, userRole: string): Promi
 
   const out: TopicListItem[] = [];
   for (const t of tRows) {
+    if (t.visibilityPermission && !userPermissions.has(t.visibilityPermission)) continue;
     const readRoles = (t.readRoles as string[] | null) ?? [];
     if (readRoles.length > 0 && userRole !== "admin" && !readRoles.includes(userRole)) continue;
     const [member] = await db

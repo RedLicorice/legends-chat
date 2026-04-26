@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  const topics = await listTopicsForUser(user.id, user.role);
+  const topics = await listTopicsForUser(user.id, user.role, user.permissions);
 
   const homeTopic = topics.find((t) => t.isHomeTopic);
   if (homeTopic) redirect(`/t/${homeTopic.slug}`);

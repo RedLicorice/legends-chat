@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
-  MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film,
+  MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -298,6 +298,7 @@ export function AdminNav({ permissions }: { permissions: string[] }) {
     <nav className="space-y-0.5">
       {isStaff && <NavLink href="/admin" icon={<Shield className="h-4 w-4" />} label="Admin Home" />}
       {isAdmin && <NavLink href="/admin/topics" icon={<MessageSquare className="h-4 w-4" />} label="Topics" />}
+      {isAdmin && <NavLink href="/admin/roles" icon={<ShieldCheck className="h-4 w-4" />} label="Roles" />}
       {isAdmin && <NavLink href="/admin/users" icon={<Users className="h-4 w-4" />} label="Users" />}
       {has(PERMISSIONS.BOTS_MANAGE) && <NavLink href="/admin/bots" icon={<Bot className="h-4 w-4" />} label="Bots" />}
 

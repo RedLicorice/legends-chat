@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const accessTokenPayloadSchema = z.object({
   sub: z.string().uuid(),
-  role: z.enum(["user", "moderator", "admin"]),
+  role: z.string(),
   jti: z.string(),
   iat: z.number(),
   exp: z.number(),

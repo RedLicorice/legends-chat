@@ -16,12 +16,13 @@ export default async function TopicPage({ params }: { params: Promise<{ slug: st
 
   const [topic, topicList, mute, giphySetting] = await Promise.all([
     db.select().from(topics).where(eq(topics.slug, slug)).limit(1).then((r) => r[0]),
-    listTopicsForUser(user.id, user.role),
+    listTopicsForUser(user.id, user.role, user.permissions),
     getUserMute(user.id),
     getSetting(db, "giphy_enabled"),
   ]);
   if (!topic) notFound();
 
+  if (topic.visibilityPermission && !user.permissions.has(topic.visibilityPermission)) notFound();
   const readRoles = (topic.readRoles as string[] | null) ?? [];
   if (readRoles.length > 0 && user.role !== "admin" && !readRoles.includes(user.role)) notFound();
 

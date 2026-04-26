@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   const needsInvite = regConfig?.invitesEnabled ?? false;
 
   let inviteCodeId: string | null = null;
-  let grantedRole: "user" | "moderator" | "admin" = "user";
+  let grantedRole = "user";
 
   if (needsInvite) {
     const code = body.inviteCode?.trim().toUpperCase();
