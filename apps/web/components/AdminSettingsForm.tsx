@@ -22,6 +22,15 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [giphyEnabled, setGiphyEnabled] = useState(settings.giphy_enabled === "true");
   const [giphyApiKey, setGiphyApiKey] = useState(settings.giphy_api_key ?? "");
   const [sidebarCompactDefault, setSidebarCompactDefault] = useState<string>(settings.sidebar_compact_default ?? "minimal");
+  const [p2pMaxParticipants, setP2pMaxParticipants] = useState(settings.p2p_max_participants ?? "5");
+  const [stunServers, setStunServers] = useState(
+    settings.stun_servers
+      ? (JSON.parse(settings.stun_servers) as { urls: string }[]).map((s) => s.urls).join("\n")
+      : "stun:stun.l.google.com:19302\nstun:stun1.l.google.com:19302",
+  );
+  const [turnUrl, setTurnUrl] = useState(settings.turn_url ?? "");
+  const [turnUsername, setTurnUsername] = useState(settings.turn_username ?? "");
+  const [turnCredential, setTurnCredential] = useState(settings.turn_credential ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -46,6 +55,13 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           giphy_enabled: String(giphyEnabled),
           giphy_api_key: giphyApiKey.trim() || null,
           sidebar_compact_default: sidebarCompactDefault,
+          p2p_max_participants: p2pMaxParticipants || "5",
+          stun_servers: JSON.stringify(
+            stunServers.split("\n").map((u) => u.trim()).filter(Boolean).map((urls) => ({ urls })),
+          ),
+          turn_url: turnUrl.trim() || null,
+          turn_username: turnUsername.trim() || null,
+          turn_credential: turnCredential.trim() || null,
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -209,6 +225,48 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           <p className="mt-1 text-xs text-muted">
             When users collapse the sidebar, this controls what happens. Users can override this in their own settings.
           </p>
+        </Field>
+      </Section>
+
+      {/* P2P */}
+      <Section title="P2P channels">
+        <Field label="Default max participants">
+          <input
+            type="number"
+            min="2"
+            max="100"
+            value={p2pMaxParticipants}
+            onChange={(e) => setP2pMaxParticipants(e.target.value)}
+            className={inputCls}
+          />
+          <p className="mt-1 text-xs text-muted">
+            Max simultaneous peers in a P2P channel (2–100). Per-topic overrides take precedence.
+          </p>
+        </Field>
+        <Field label="STUN servers (one URL per line)">
+          <textarea
+            value={stunServers}
+            onChange={(e) => setStunServers(e.target.value)}
+            rows={3}
+            className={`${inputCls} font-mono resize-y`}
+            placeholder="stun:stun.l.google.com:19302"
+          />
+          <p className="mt-1 text-xs text-muted">Public STUN servers for WebRTC NAT traversal. Leave as default if unsure.</p>
+        </Field>
+        <Field label="TURN server URL">
+          <input
+            value={turnUrl}
+            onChange={(e) => setTurnUrl(e.target.value)}
+            placeholder="turn:turn.example.com:3478"
+            className={inputCls}
+          />
+          <p className="mt-1 text-xs text-muted">Optional. Needed for users behind strict NAT (~15%). Leave blank to skip.</p>
+        </Field>
+        <Field label="TURN username">
+          <input value={turnUsername} onChange={(e) => setTurnUsername(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="TURN credential">
+          <input type="password" value={turnCredential} onChange={(e) => setTurnCredential(e.target.value)} className={inputCls} />
         </Field>
       </Section>
 

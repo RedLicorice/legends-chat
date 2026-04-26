@@ -134,6 +134,13 @@
       "when": 1777900000000,
       "tag": "0018_wallet_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778000000000,
+      "tag": "0019_p2p_topics",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pin, Lock } from "lucide-react";
+import { Pin, Lock, Radio } from "lucide-react";
 import type { TopicListItem as Item } from "@/lib/topics";
 
 function timeAgo(date: Date): string {
@@ -50,6 +50,7 @@ export function TopicListItem({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             {topic.isSticky && <Pin className="h-3 w-3 text-accent" />}
+            {topic.isP2p && <Radio className="h-3 w-3 text-accent" />}
             {topic.isE2ee && <Lock className="h-3 w-3 text-accent2" />}
             <div className="truncate text-sm font-medium">{topic.title}</div>
             {topic.unreadCount > 0 && (
@@ -80,6 +81,7 @@ export function TopicListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           {topic.isSticky && <Pin className="h-3.5 w-3.5 text-accent" />}
+          {topic.isP2p && <Radio className="h-3.5 w-3.5 text-accent" />}
           {topic.isE2ee && <Lock className="h-3.5 w-3.5 text-accent2" />}
           <div className="truncate font-medium">{topic.title}</div>
           {topic.lastMessage && (

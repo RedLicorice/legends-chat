@@ -42,6 +42,11 @@ export async function PATCH(req: Request) {
     "giphy_enabled",
     "giphy_api_key",
     "sidebar_compact_default",
+    "p2p_max_participants",
+    "stun_servers",
+    "turn_url",
+    "turn_username",
+    "turn_credential",
   ] as const;
 
   for (const key of allowed) {

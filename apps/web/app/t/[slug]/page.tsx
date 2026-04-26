@@ -31,7 +31,7 @@ export default async function TopicPage({ params }: { params: Promise<{ slug: st
       user={{ id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, role: user.role, permissions: [...user.permissions], presenceOptOut: user.presenceOptOut }}
       topics={topicList}
       currentSlug={slug}
-      topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, isFeed: topic.isFeed, postRoles: (topic.postRoles as string[] | null) ?? [] }}
+      topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, isP2p: topic.isP2p, p2pFallbackE2ee: topic.p2pFallbackE2ee, isFeed: topic.isFeed, postRoles: (topic.postRoles as string[] | null) ?? [] }}
       mute={mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null}
       hasEmail={!!user.email}
       hasWallet={!!user.walletAddress}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopicListItem } from "@/components/TopicListItem";
 import { TopicView } from "@/components/TopicView";
+import { P2PView } from "@/components/P2PView";
 import { EmailLinkBanner } from "@/components/EmailLinkBanner";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
 import type { TopicListItem as TopicItem } from "@/lib/topics";
@@ -20,7 +21,7 @@ interface Props {
   };
   topics: TopicItem[];
   currentSlug: string;
-  topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   hasEmail: boolean;
   hasWallet?: boolean;
@@ -101,24 +102,34 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
       </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-hidden">
         {!hasEmail && !hasWallet && <EmailLinkBanner />}
-        <TopicView
-          topic={topic}
-          currentUser={{
-            id: user.id,
-            displayName: user.displayName,
-            avatarUrl: user.avatarUrl,
-            role: user.role,
-            presenceOptOut: user.presenceOptOut ?? false,
-            permissions: user.permissions,
-          }}
-          mute={mute}
-          giphyEnabled={giphyEnabled}
-          onMenuOpen={() => setSidebarOpen(true)}
-          onConnectionChange={setConnected}
-          showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
-          onExpandSidebar={expand}
-          onSidebarUpdate={handleSidebarUpdate}
-        />
+        {topic.isP2p ? (
+          <P2PView
+            topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, p2pFallbackE2ee: topic.p2pFallbackE2ee }}
+            currentUser={{ id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, role: user.role }}
+            onMenuOpen={() => setSidebarOpen(true)}
+            showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
+            onExpandSidebar={expand}
+          />
+        ) : (
+          <TopicView
+            topic={topic}
+            currentUser={{
+              id: user.id,
+              displayName: user.displayName,
+              avatarUrl: user.avatarUrl,
+              role: user.role,
+              presenceOptOut: user.presenceOptOut ?? false,
+              permissions: user.permissions,
+            }}
+            mute={mute}
+            giphyEnabled={giphyEnabled}
+            onMenuOpen={() => setSidebarOpen(true)}
+            onConnectionChange={setConnected}
+            showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
+            onExpandSidebar={expand}
+            onSidebarUpdate={handleSidebarUpdate}
+          />
+        )}
       </main>
     </div>
   );

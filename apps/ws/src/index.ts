@@ -61,6 +61,7 @@ import {
 } from "./messages";
 import { deliverCallbackQueryToWebhooks, deliverMessageToWebhooks, deliverNewMemberToWebhooks } from "./webhook";
 import { dispatchMessageNotifications } from "./notifications";
+import { registerP2PHandlers } from "./p2p-signaling";
 import { randomUUID } from "node:crypto";
 
 interface SocketData {
@@ -104,6 +105,7 @@ io.use(async (socket, next) => {
 io.on("connection", async (socket: AuthedSocket) => {
   const user = socket.data.user;
   socket.join(`user:${user.sub}`);
+  registerP2PHandlers(io, socket);
 
   // Track online presence (skip if user opted out)
   const optOut = await isPresenceOptOut(user.sub).catch(() => false);

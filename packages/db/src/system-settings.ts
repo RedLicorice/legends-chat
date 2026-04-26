@@ -16,7 +16,12 @@ export type SystemSettingKey =
   | "invite_code_prefix"
   | "default_theme"
   | "theme_accent_color"
-  | "sidebar_compact_default";
+  | "sidebar_compact_default"
+  | "p2p_max_participants"
+  | "stun_servers"
+  | "turn_url"
+  | "turn_username"
+  | "turn_credential";
 
 export async function getSetting(
   dbInstance: DB,

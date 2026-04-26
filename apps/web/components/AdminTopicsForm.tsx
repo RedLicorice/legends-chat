@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Radio } from "lucide-react";
 import { ImageUploadButton } from "@/components/ImageUploadButton";
 
 interface TopicRow {
@@ -16,6 +16,9 @@ interface TopicRow {
   isFeed: boolean;
   isHomeTopic: boolean;
   isE2ee: boolean;
+  isP2p: boolean;
+  p2pFallbackE2ee: boolean;
+  p2pMaxParticipants: number | null;
   postRoles: string[];
   readRoles: string[];
   autoDeleteMode: "none" | "age" | "count";
@@ -231,6 +234,9 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           isFeed: t.isFeed,
           isHomeTopic: t.isHomeTopic,
           isE2ee: t.isE2ee,
+          isP2p: t.isP2p ?? false,
+          p2pFallbackE2ee: t.p2pFallbackE2ee ?? false,
+          p2pMaxParticipants: t.p2pMaxParticipants ?? null,
           postRoles: (t.postRoles as string[] | null) ?? [],
           readRoles: (t.readRoles as string[] | null) ?? [],
           autoDeleteMode: t.autoDeleteMode,
@@ -346,6 +352,16 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                   />
                   E2EE
                 </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={t.isP2p}
+                    onChange={(e) => save(t.id, { isP2p: e.target.checked })}
+                    className="accent-accent"
+                    disabled={dis}
+                  />
+                  <Radio className="h-3.5 w-3.5" /> P2P
+                </label>
                 <button
                   onClick={() => deleteTopic(t.id, t.title)}
                   disabled={dis}
@@ -411,6 +427,44 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                 </p>
               </div>
             </div>
+
+            {/* P2P config */}
+            {t.isP2p && (
+              <div className="border-t border-border pt-3 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted">
+                  <Radio className="h-3.5 w-3.5" /> P2P settings
+                </div>
+                <label className="flex cursor-pointer items-center gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={t.p2pFallbackE2ee}
+                    onChange={(e) => save(t.id, { p2pFallbackE2ee: e.target.checked })}
+                    className="accent-accent"
+                    disabled={dis || !t.isE2ee}
+                  />
+                  <span>
+                    Fall back to server E2EE relay when over participant limit
+                    {!t.isE2ee && <span className="ml-1 text-muted">(requires E2EE to be enabled)</span>}
+                  </span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <label className="text-xs text-muted w-40">Max participants override</label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="100"
+                    value={t.p2pMaxParticipants ?? ""}
+                    placeholder="Use global default"
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                      save(t.id, { p2pMaxParticipants: v });
+                    }}
+                    disabled={dis}
+                    className="w-36 rounded-lg border border-border bg-panel2 px-3 py-1.5 text-sm outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Retention */}
             <div className="border-t border-border pt-3">

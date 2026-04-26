@@ -186,6 +186,9 @@ export const topics = pgTable(
     isHomeTopic: boolean("is_home_topic").notNull().default(false),
     postRoles: jsonb("post_roles").$type<string[]>().default([]),
     readRoles: jsonb("read_roles").$type<string[]>().default([]),
+    isP2p: boolean("is_p2p").notNull().default(false),
+    p2pFallbackE2ee: boolean("p2p_fallback_e2ee").notNull().default(false),
+    p2pMaxParticipants: integer("p2p_max_participants"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

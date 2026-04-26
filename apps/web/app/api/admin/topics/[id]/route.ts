@@ -19,6 +19,9 @@ export async function PATCH(
     isHomeTopic?: boolean;
     isE2ee?: boolean;
     wipeMessages?: boolean;
+    isP2p?: boolean;
+    p2pFallbackE2ee?: boolean;
+    p2pMaxParticipants?: number | null;
     postRoles?: string[];
     readRoles?: string[];
     title?: string;
@@ -46,6 +49,9 @@ export async function PATCH(
     }
     patch.isE2ee = body.isE2ee;
   }
+  if (typeof body.isP2p === "boolean") patch.isP2p = body.isP2p;
+  if (typeof body.p2pFallbackE2ee === "boolean") patch.p2pFallbackE2ee = body.p2pFallbackE2ee;
+  if ("p2pMaxParticipants" in body) patch.p2pMaxParticipants = typeof body.p2pMaxParticipants === "number" ? body.p2pMaxParticipants : null;
   if (Array.isArray(body.postRoles)) patch.postRoles = body.postRoles;
   if (Array.isArray(body.readRoles)) patch.readRoles = body.readRoles;
   if (typeof body.title === "string") patch.title = body.title;

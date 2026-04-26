@@ -28,6 +28,21 @@ export const WS_EVENTS = {
   POLL_CREATE: "poll:create",
   POLL_VOTE: "poll:vote",
   POLL_CLOSE: "poll:close",
+
+  // P2P signaling (bidirectional)
+  P2P_JOIN: "p2p:join",
+  P2P_JOINED: "p2p:joined",
+  P2P_PEER_JOINED: "p2p:peer-joined",
+  P2P_PEER_LEFT: "p2p:peer-left",
+  P2P_OFFER: "p2p:offer",
+  P2P_ANSWER: "p2p:answer",
+  P2P_ICE: "p2p:ice",
+  P2P_LEAVE: "p2p:leave",
+  P2P_HEARTBEAT: "p2p:heartbeat",
+  P2P_QUEUED: "p2p:queued",
+  P2P_ADMITTED: "p2p:admitted",
+  P2P_FALLBACK: "p2p:fallback",
+  P2P_RESUME: "p2p:resume",
 } as const;
 
 export type WsEvent = (typeof WS_EVENTS)[keyof typeof WS_EVENTS];

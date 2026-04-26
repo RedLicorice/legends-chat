@@ -22,6 +22,8 @@ export interface TopicListItem {
   iconUrl: string | null;
   isSticky: boolean;
   isE2ee: boolean;
+  isP2p: boolean;
+  p2pFallbackE2ee: boolean;
   isFeed: boolean;
   isHomeTopic: boolean;
   postRoles: string[];
@@ -114,6 +116,8 @@ export async function listTopicsForUser(userId: string, userRole: string, userPe
       iconUrl: t.iconUrl ?? null,
       isSticky: t.isSticky,
       isE2ee: t.isE2ee,
+      isP2p: t.isP2p,
+      p2pFallbackE2ee: t.p2pFallbackE2ee,
       isFeed: t.isFeed,
       isHomeTopic: t.isHomeTopic,
       postRoles: (t.postRoles as string[] | null) ?? [],
