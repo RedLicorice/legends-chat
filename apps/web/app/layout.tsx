@@ -35,6 +35,15 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        {/* Block pinch-to-zoom on iOS Safari (ignores viewport user-scalable=no since iOS 10) */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
+          document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
+          document.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
+          document.addEventListener('touchmove', function(e) { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+        `}} />
+      </head>
       <body className="min-h-screen bg-bg text-text">{children}</body>
     </html>
   );
