@@ -13,11 +13,14 @@ interface Props {
 export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [presenceOptOut, setPresenceOptOut] = useState(user.presenceOptOut ?? false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLInputElement>(null);
 
   // Email linking
   const [linkedEmail, setLinkedEmail] = useState<string | null>(null);
@@ -39,6 +42,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       fetch("/api/user/wallet").then((r) => r.ok ? r.json() : null).catch(() => null),
     ]).then(([profile, wallet]) => {
       if (profile?.email) setLinkedEmail(profile.email);
+      if (profile?.bannerUrl != null) setBannerUrl(profile.bannerUrl);
       setWalletAddress(wallet?.walletAddress ?? null);
     });
   }, []);
@@ -99,6 +103,29 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
     }
   }
 
+  async function uploadBanner(file: File) {
+    setUploadingBanner(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("bucket", "avatars");
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error ?? "upload failed");
+      setBannerUrl(data.url);
+      await fetch("/api/user/profile", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bannerUrl: data.url }),
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploadingBanner(false);
+    }
+  }
+
   async function uploadAvatar(file: File) {
     setUploading(true);
     setError(null);
@@ -124,7 +151,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       const res = await fetch("/api/user/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: displayName.trim(), avatarUrl, presenceOptOut }),
+        body: JSON.stringify({ displayName: displayName.trim(), avatarUrl, bannerUrl, presenceOptOut }),
       });
       if (!res.ok) throw new Error("save failed");
       onUpdate({ displayName: displayName.trim(), avatarUrl, presenceOptOut });
@@ -142,19 +169,40 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded-2xl border border-border bg-panel p-6 shadow-xl"
+        className="w-full max-w-sm rounded-2xl border border-border bg-panel shadow-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Profile</h2>
-          <button type="button" onClick={onClose} className="text-muted hover:text-text">
-            <X className="h-5 w-5" />
+        {/* Banner */}
+        <div className="relative h-28 bg-gradient-to-br from-accent/40 to-accent2/40">
+          {bannerUrl && <img src={bannerUrl} alt="" className="h-full w-full object-cover" />}
+          <button
+            type="button"
+            onClick={() => bannerRef.current?.click()}
+            disabled={uploadingBanner}
+            className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/40 transition group"
+            title="Change banner"
+          >
+            <Camera className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition" />
           </button>
+          <input
+            ref={bannerRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBanner(f); }}
+          />
+          <button type="button" onClick={onClose} className="absolute top-3 right-3 rounded-full bg-black/40 p-1 text-white hover:bg-black/60">
+            <X className="h-4 w-4" />
+          </button>
+          {uploadingBanner && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white">Uploading…</div>
+          )}
         </div>
 
-        <div className="mb-5 flex flex-col items-center gap-3">
-          <div className="relative">
-            <div className="h-20 w-20 overflow-hidden rounded-full bg-accent">
+        {/* Avatar overlapping banner */}
+        <div className="relative px-5 pb-0 -mt-10 mb-3 flex items-end gap-3">
+          <div className="relative shrink-0">
+            <div className="h-20 w-20 overflow-hidden rounded-full border-4 border-panel bg-accent">
               {avatarUrl ? (
                 <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
               ) : (
@@ -176,16 +224,17 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
               type="file"
               accept="image/jpeg,image/png,image/webp"
               className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadAvatar(f);
-              }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(f); }}
             />
           </div>
-          {uploading && <p className="text-xs text-muted">Uploading…</p>}
+          <div className="pb-1 min-w-0">
+            <p className="truncate font-semibold">{displayName}</p>
+            {uploading && <p className="text-xs text-muted">Uploading…</p>}
+          </div>
         </div>
 
-        <div className="mb-4 space-y-2">
+        <div className="px-5 pb-5 space-y-4">
+        <div className="space-y-2">
           <label className="block text-xs font-medium uppercase tracking-wide text-muted">Display name</label>
           <input
             value={displayName}
@@ -195,7 +244,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
           />
         </div>
 
-        <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-panel2">
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-panel2">
           <div className="flex-1">
             <div className="text-sm font-medium">Hide online status</div>
             <div className="text-xs text-muted">When on, you appear offline and cannot see others' status</div>
@@ -318,6 +367,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
             </button>
           </form>
         </div>
+        </div>{/* end px-5 pb-5 */}
       </div>
     </div>
 

@@ -141,6 +141,13 @@
       "when": 1778000000000,
       "tag": "0019_p2p_topics",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778100000000,
+      "tag": "0020_user_banner",
+      "breakpoints": true
     }
   ]
 }

@@ -52,6 +52,7 @@ export const users = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     presenceOptOut: boolean("presence_opt_out").notNull().default(false),
     walletAddress: text("wallet_address"),
+    bannerUrl: text("banner_url"),
   },
   (t) => ({
     telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId).where(sql`${t.telegramUserId} IS NOT NULL`),
