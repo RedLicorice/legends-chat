@@ -60,11 +60,15 @@ function buildThemeCss(
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const jar = await cookies();
   const userTheme = jar.get("lc_theme")?.value;
+  const userSidebarCompact = jar.get("lc_sidebar_compact")?.value;
 
-  const [allThemes, defaultTheme] = await Promise.all([
+  const [allThemes, defaultTheme, sidebarCompactDefault] = await Promise.all([
     db.select().from(themes).orderBy(asc(themes.createdAt)).catch(() => []),
     getSetting(db, "default_theme").catch(() => null),
+    getSetting(db, "sidebar_compact_default").catch(() => null),
   ]);
+
+  const resolvedSidebarCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
 
   const validIds = new Set(allThemes.map((t) => t.id));
   const resolved = validIds.has(userTheme ?? "") ? userTheme! : (validIds.has(defaultTheme ?? "") ? defaultTheme! : "dark");
@@ -81,7 +85,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   );
 
   return (
-    <html lang="en" data-theme={resolved} data-glass={isGlass ? "1" : "0"} suppressHydrationWarning>
+    <html lang="en" data-theme={resolved} data-glass={isGlass ? "1" : "0"} data-sidebar-compact={resolvedSidebarCompact} suppressHydrationWarning>
       <head>
         {themeCss && <style dangerouslySetInnerHTML={{ __html: themeCss }} />}
         {/* Block pinch-to-zoom on iOS Safari */}

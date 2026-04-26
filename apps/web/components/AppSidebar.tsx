@@ -26,29 +26,78 @@ interface Props {
   user: AppSidebarUser;
   children: React.ReactNode;
   variant?: "chat" | "admin";
-  // Controlled mode — used when hamburger lives outside the sidebar (e.g. TopicView)
+  // Mobile open/close (controlled mode for mobile overlay)
   isOpen?: boolean;
   onClose?: () => void;
+  // Desktop collapsed state — if provided, component is in controlled mode for desktop
+  desktopCollapsed?: boolean;
+  onToggleDesktop?: () => void;
+  // Callback when internal desktop collapse changes (uncontrolled mode)
+  onCollapseChange?: (c: boolean) => void;
+  // "minimal": collapsed sidebar takes no space; "strip": w-12 icon bar
+  compactMode?: "minimal" | "strip";
+  // Icon-only content for strip mode middle section
+  iconChildren?: React.ReactNode;
 }
 
 const STORAGE_KEY = "sidebar-collapsed";
 
-export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenProp, onClose: onCloseProp }: Props) {
+export function AppSidebar({
+  user,
+  children,
+  variant = "chat",
+  isOpen: isOpenProp,
+  onClose: onCloseProp,
+  desktopCollapsed: desktopCollapsedProp,
+  onToggleDesktop,
+  onCollapseChange,
+  compactMode: compactModeProp,
+  iconChildren,
+}: Props) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const controlled = isOpenProp !== undefined;
-  const isOpen = controlled ? isOpenProp : internalOpen;
-  const close = controlled ? (onCloseProp ?? (() => {})) : () => setInternalOpen(false);
+  const controlledMobile = isOpenProp !== undefined;
+  const isOpen = controlledMobile ? isOpenProp : internalOpen;
+  const close = controlledMobile ? (onCloseProp ?? (() => {})) : () => setInternalOpen(false);
 
-  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+  // Desktop collapsed: controlled mode if desktopCollapsedProp is provided
+  const controlledDesktop = desktopCollapsedProp !== undefined;
+  const [internalDesktopCollapsed, setInternalDesktopCollapsed] = useState(false);
   useEffect(() => {
-    setDesktopCollapsed(localStorage.getItem(STORAGE_KEY) === "true");
-  }, []);
+    if (!controlledDesktop) {
+      setInternalDesktopCollapsed(localStorage.getItem(STORAGE_KEY) === "true");
+    }
+  }, [controlledDesktop]);
+
+  const desktopCollapsed = controlledDesktop ? desktopCollapsedProp : internalDesktopCollapsed;
+
   function toggleDesktop() {
-    setDesktopCollapsed((v) => {
-      localStorage.setItem(STORAGE_KEY, String(!v));
-      return !v;
-    });
+    if (controlledDesktop) {
+      onToggleDesktop?.();
+    } else {
+      setInternalDesktopCollapsed((v) => {
+        const n = !v;
+        localStorage.setItem(STORAGE_KEY, String(n));
+        onCollapseChange?.(n);
+        return n;
+      });
+    }
   }
+
+  // Compact mode: prop or read from html data attribute
+  const [resolvedCompactMode, setResolvedCompactMode] = useState<"minimal" | "strip">(compactModeProp ?? "minimal");
+  useEffect(() => {
+    if (compactModeProp) {
+      setResolvedCompactMode(compactModeProp);
+    } else if (variant === "admin") {
+      setResolvedCompactMode("strip");
+    } else {
+      const attr = document.documentElement.dataset.sidebarCompact as "minimal" | "strip" | undefined;
+      setResolvedCompactMode(attr === "strip" ? "strip" : "minimal");
+    }
+  }, [compactModeProp, variant]);
+
+  // For admin variant, always use strip mode
+  const effectiveCompactMode = variant === "admin" ? "strip" : resolvedCompactMode;
 
   const [profile, setProfile] = useState({ displayName: user.displayName, avatarUrl: user.avatarUrl });
   const [showProfile, setShowProfile] = useState(false);
@@ -80,22 +129,15 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
 
   const initials = profile.displayName.slice(0, 1).toUpperCase();
 
+  // Strip mode: collapsed desktop shows icon strip
+  const showStrip = desktopCollapsed && effectiveCompactMode === "strip";
+  // Minimal mode: collapsed desktop hides sidebar entirely
+  const showMinimalHidden = desktopCollapsed && effectiveCompactMode === "minimal";
+
   return (
     <>
-      {/* Hamburger to re-open when desktop sidebar is collapsed */}
-      {desktopCollapsed && (
-        <button
-          type="button"
-          onClick={toggleDesktop}
-          className="fixed left-4 top-4 z-40 hidden rounded-md p-2 hover:bg-panel2 transition md:flex"
-          aria-label="Expand sidebar"
-        >
-          <PanelLeftOpen className="h-5 w-5" />
-        </button>
-      )}
-
       {/* Uncontrolled mobile hamburger */}
-      {!controlled && (
+      {!controlledMobile && (
         <button
           type="button"
           onClick={() => setInternalOpen(true)}
@@ -111,128 +153,174 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
       )}
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200 overflow-hidden",
+        "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200",
         "md:relative md:z-auto",
-        // Mobile: controlled by isOpen
+        // Mobile: controlled by isOpen (always full width)
         isOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full md:translate-x-0",
-        // Desktop: width-based collapse
-        desktopCollapsed ? "md:w-0 md:border-r-0" : "md:w-72",
+        // Desktop: width depends on collapse mode
+        showMinimalHidden ? "md:w-0 md:border-r-0" : showStrip ? "md:w-12" : "md:w-72",
       )}>
-        {/* Header */}
-        <div className="flex items-center gap-1 border-b border-border px-3 py-3">
-          <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-accent">
-            {profile.avatarUrl ? (
-              <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white">
-                {initials}
-              </div>
-            )}
+        {/* Strip mode: collapsed icon strip — desktop only */}
+        {showStrip && (
+          <div className="hidden md:flex flex-col items-center h-full">
+            {/* Expand button at top */}
+            <div className="shrink-0 py-2">
+              <button
+                type="button"
+                onClick={toggleDesktop}
+                title="Expand sidebar"
+                className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition"
+              >
+                <PanelLeftOpen className="h-5 w-5" />
+              </button>
+            </div>
+            {/* Icon children in middle (scrollable) */}
+            <div className="flex-1 overflow-y-auto w-full flex flex-col items-center">
+              {iconChildren}
+            </div>
+            {/* Footer icons at bottom */}
+            <div className="shrink-0 py-2 flex flex-col items-center gap-1">
+              {variant === "admin" ? (
+                <Link href="/" title="Back to chat" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
+                  <Home className="h-5 w-5" />
+                </Link>
+              ) : (
+                <>
+                  <Link href="/" title="Home" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
+                    <Home className="h-5 w-5" />
+                  </Link>
+                  <Link href="/settings" title="Settings" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
+                    <Settings className="h-5 w-5" />
+                  </Link>
+                  {isStaff && (
+                    <Link href="/admin" title="Admin" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
+                      <Shield className="h-5 w-5" />
+                    </Link>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-          <div className="min-w-0 flex-1 px-2">
-            <div className="truncate text-sm font-medium">{profile.displayName}</div>
-            <div className="text-xs uppercase tracking-wide text-muted">{user.role}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowProfile(true)}
-            title="Profile"
-            className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition"
-          >
-            <User className="h-4 w-4" />
-          </button>
-          <NotificationBell socket={null} align="left" />
-          {canModQueue && (
+        )}
+
+        {/* Full sidebar — always on mobile, hidden on desktop when collapsed */}
+        <div className={cn("flex h-full min-h-0 flex-col", (showStrip || showMinimalHidden) && "md:hidden")}>
+          {/* Header */}
+          <div className="flex items-center gap-1 border-b border-border px-3 py-3">
+            <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-accent">
+              {profile.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white">
+                  {initials}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1 px-2">
+              <div className="truncate text-sm font-medium">{profile.displayName}</div>
+              <div className="text-xs uppercase tracking-wide text-muted">{user.role}</div>
+            </div>
             <button
               type="button"
-              onClick={() => setShowModQueue(true)}
-              title="Mod Queue"
-              className="relative rounded-lg p-1.5 text-amber-400 hover:bg-panel2 transition"
+              onClick={() => setShowProfile(true)}
+              title="Profile"
+              className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition"
             >
-              <AlertTriangle className="h-4 w-4" />
-              {pendingFlags !== null && pendingFlags > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white leading-none">
-                  {pendingFlags}
-                </span>
-              )}
+              <User className="h-4 w-4" />
             </button>
-          )}
-          {/* Desktop collapse toggle */}
-          <button
-            type="button"
-            onClick={toggleDesktop}
-            title="Collapse sidebar"
-            className="hidden rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition md:flex"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
-          {/* Mobile close — in-row so it never overlaps other buttons */}
-          <button
-            type="button"
-            onClick={close}
-            className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
-            aria-label="Close menu"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Middle — scrollable content (topics list or admin nav) */}
-        <div className="flex-1 overflow-y-auto p-2">
-          {children}
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-border p-3 space-y-0.5">
-          {variant === "admin" ? (
-            <Link
-              href="/"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+            <NotificationBell socket={null} align="left" />
+            {canModQueue && (
+              <button
+                type="button"
+                onClick={() => setShowModQueue(true)}
+                title="Mod Queue"
+                className="relative rounded-lg p-1.5 text-amber-400 hover:bg-panel2 transition"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                {pendingFlags !== null && pendingFlags > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white leading-none">
+                    {pendingFlags}
+                  </span>
+                )}
+              </button>
+            )}
+            {/* Desktop collapse toggle */}
+            <button
+              type="button"
+              onClick={toggleDesktop}
+              title="Collapse sidebar"
+              className="hidden rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition md:flex"
             >
-              <Home className="h-4 w-4" /> Back to chat
-            </Link>
-          ) : (
-            <>
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+            {/* Mobile close */}
+            <button
+              type="button"
+              onClick={close}
+              className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
+              aria-label="Close menu"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Middle — scrollable content (topics list or admin nav) */}
+          <div className="flex-1 overflow-y-auto p-2">
+            {children}
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-border p-3 space-y-0.5">
+            {variant === "admin" ? (
               <Link
                 href="/"
                 className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
               >
-                <Home className="h-4 w-4" /> Home
+                <Home className="h-4 w-4" /> Back to chat
               </Link>
-              <Link
-                href="/settings"
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-              >
-                <Settings className="h-4 w-4" /> Settings
-              </Link>
-              {isStaff && (
+            ) : (
+              <>
                 <Link
-                  href="/admin"
+                  href="/"
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
                 >
-                  <Shield className="h-4 w-4" /> Admin
+                  <Home className="h-4 w-4" /> Home
                 </Link>
-              )}
-            </>
-          )}
-          {installState.type === "native" && (
-            <button
-              type="button"
-              onClick={installState.install}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-            >
-              <Download className="h-4 w-4" /> Install app
-            </button>
-          )}
-          {installState.type === "ios" && (
-            <button
-              type="button"
-              onClick={() => setShowIosInstall(true)}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-            >
-              <Download className="h-4 w-4" /> Install app
-            </button>
-          )}
+                <Link
+                  href="/settings"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+                >
+                  <Settings className="h-4 w-4" /> Settings
+                </Link>
+                {isStaff && (
+                  <Link
+                    href="/admin"
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+                  >
+                    <Shield className="h-4 w-4" /> Admin
+                  </Link>
+                )}
+              </>
+            )}
+            {installState.type === "native" && (
+              <button
+                type="button"
+                onClick={installState.install}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+              >
+                <Download className="h-4 w-4" /> Install app
+              </button>
+            )}
+            {installState.type === "ios" && (
+              <button
+                type="button"
+                onClick={() => setShowIosInstall(true)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+              >
+                <Download className="h-4 w-4" /> Install app
+              </button>
+            )}
+          </div>
         </div>
       </aside>
 

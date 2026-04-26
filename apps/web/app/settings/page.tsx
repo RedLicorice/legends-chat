@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { TotpPanel } from "@/components/TotpPanel";
 import { ThemeSelector } from "@/components/ThemeSelector";
+import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 
@@ -16,8 +17,15 @@ export default async function SettingsPage() {
 
   const jar = await cookies();
   const userTheme = jar.get("lc_theme")?.value;
-  const defaultTheme = await getSetting(db, "default_theme").catch(() => null);
+  const userSidebarCompact = jar.get("lc_sidebar_compact")?.value;
+
+  const [defaultTheme, sidebarCompactDefault] = await Promise.all([
+    getSetting(db, "default_theme").catch(() => null),
+    getSetting(db, "sidebar_compact_default").catch(() => null),
+  ]);
+
   const currentTheme = userTheme ?? defaultTheme ?? "dark";
+  const currentCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
 
   return (
     <main className="flex min-h-screen items-start justify-center p-8">
@@ -36,6 +44,7 @@ export default async function SettingsPage() {
         <div className="rounded-xl border border-border bg-panel p-5 space-y-4">
           <h2 className="font-semibold">Appearance</h2>
           <ThemeSelector defaultTheme={currentTheme} />
+          <SidebarCompactSelector defaultValue={currentCompact} />
         </div>
 
         <div className="rounded-xl border border-border bg-panel p-5">

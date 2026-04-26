@@ -13,7 +13,7 @@ interface E2EESetupProps {
   userId: string;
   hasPermanentAccount: boolean;
   existingBackup?: string | null;
-  onReady: () => void;
+  onReady: (kp: CryptoKeyPair) => void;
   onSkip?: () => void;
 }
 
@@ -40,7 +40,7 @@ export function E2EESetup({ userId, hasPermanentAccount, existingBackup, onReady
         body: JSON.stringify({ identityPublicKey: pubB64, backup }),
       });
       if (!res.ok) throw new Error("Failed to register key");
-      onReady();
+      onReady(kp);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -61,7 +61,7 @@ export function E2EESetup({ userId, hasPermanentAccount, existingBackup, onReady
         body: JSON.stringify({ identityPublicKey: pubB64 }),
       });
       if (!res.ok) throw new Error("Failed to register key");
-      onReady();
+      onReady(kp);
     } catch {
       setError("Wrong passphrase or invalid backup");
     } finally {

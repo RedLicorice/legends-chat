@@ -15,7 +15,8 @@ export type SystemSettingKey =
   | "giphy_api_key"
   | "invite_code_prefix"
   | "default_theme"
-  | "theme_accent_color";
+  | "theme_accent_color"
+  | "sidebar_compact_default";
 
 export async function getSetting(
   dbInstance: DB,

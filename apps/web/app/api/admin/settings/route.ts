@@ -41,6 +41,7 @@ export async function PATCH(req: Request) {
     "registration_mode",
     "giphy_enabled",
     "giphy_api_key",
+    "sidebar_compact_default",
   ] as const;
 
   for (const key of allowed) {

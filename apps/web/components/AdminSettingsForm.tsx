@@ -21,6 +21,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
   const [giphyEnabled, setGiphyEnabled] = useState(settings.giphy_enabled === "true");
   const [giphyApiKey, setGiphyApiKey] = useState(settings.giphy_api_key ?? "");
+  const [sidebarCompactDefault, setSidebarCompactDefault] = useState<string>(settings.sidebar_compact_default ?? "minimal");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -44,6 +45,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           farewell_message: farewellMessage.trim() || null,
           giphy_enabled: String(giphyEnabled),
           giphy_api_key: giphyApiKey.trim() || null,
+          sidebar_compact_default: sidebarCompactDefault,
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -190,6 +192,23 @@ export function AdminSettingsForm({ settings, topics }: Props) {
             className={inputCls}
           />
           <p className="mt-1 text-xs text-muted">Required when Giphy is enabled. Get one at developers.giphy.com.</p>
+        </Field>
+      </Section>
+
+      {/* Sidebar */}
+      <Section title="Sidebar">
+        <Field label="Default collapsed sidebar style">
+          <select
+            value={sidebarCompactDefault}
+            onChange={(e) => setSidebarCompactDefault(e.target.value)}
+            className={inputCls}
+          >
+            <option value="minimal">Minimal — button in header (no space used)</option>
+            <option value="strip">Strip — icon bar at the side</option>
+          </select>
+          <p className="mt-1 text-xs text-muted">
+            When users collapse the sidebar, this controls what happens. Users can override this in their own settings.
+          </p>
         </Field>
       </Section>
 

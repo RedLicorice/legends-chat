@@ -13,6 +13,7 @@ export const WS_EVENTS = {
   USER_MUTED: "user:muted",
   POLL_UPDATED: "poll:updated",
   NOTIFICATION_NEW: "notification:new",
+  SIDEBAR_UPDATE: "sidebar:update",
 
   // client -> server
   MESSAGE_SEND: "message:send",

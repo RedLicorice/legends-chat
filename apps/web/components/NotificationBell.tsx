@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Bell } from "lucide-react";
 import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
@@ -34,7 +35,12 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
-  const ref = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/user/notifications");
@@ -56,19 +62,34 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
     return () => { socket.off(WS_EVENTS.NOTIFICATION_NEW, handler); };
   }, [socket]);
 
-  // Click outside to close
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        btnRef.current && !btnRef.current.contains(target) &&
+        panelRef.current && !panelRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  function computeStyle(): React.CSSProperties {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return {};
+    const top = rect.bottom + 8;
+    if (align === "left") return { position: "fixed", top, left: rect.left, zIndex: 9999 };
+    return { position: "fixed", top, right: window.innerWidth - rect.right, zIndex: 9999 };
+  }
+
   async function openPanel() {
-    setOpen((v) => !v);
-    if (!open && unread > 0) {
+    const nextOpen = !open;
+    setPanelStyle(computeStyle());
+    setOpen(nextOpen);
+    if (nextOpen && unread > 0) {
       setUnread(0);
       setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
       await fetch("/api/user/notifications", { method: "PATCH" });
@@ -76,8 +97,9 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={openPanel}
         className={cn("relative rounded-lg p-2 transition hover:bg-panel2 text-muted hover:text-text", open && "bg-panel2 text-accent")}
@@ -91,8 +113,12 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
         )}
       </button>
 
-      {open && (
-        <div className={cn("absolute top-full z-50 mt-2 w-80 rounded-xl border border-border bg-panel shadow-lg", align === "left" ? "left-0" : "right-0")}>
+      {open && mounted && createPortal(
+        <div
+          ref={panelRef}
+          style={panelStyle}
+          className="w-80 rounded-xl border border-border bg-panel shadow-lg"
+        >
           <div className="border-b border-border px-4 py-2.5 text-sm font-semibold">Notifications</div>
           {items.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-muted">No notifications yet.</div>
@@ -120,7 +146,8 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
               ))}
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

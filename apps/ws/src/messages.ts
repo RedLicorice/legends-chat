@@ -449,6 +449,11 @@ export async function getTopicById(topicId: string) {
   return row ?? null;
 }
 
+export async function getTopicMemberUserIds(topicId: string): Promise<string[]> {
+  const rows = await db.select({ userId: topicMembers.userId }).from(topicMembers).where(eq(topicMembers.topicId, topicId));
+  return rows.map((r) => r.userId);
+}
+
 export async function getTopicAutoDelete(
   topicId: string,
 ): Promise<{ mode: "none" | "age" | "count"; max: number | null } | null> {

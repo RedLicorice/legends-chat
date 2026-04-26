@@ -57,6 +57,7 @@ import {
   setLastReadMessage,
   toggleReaction,
   getTopicById,
+  getTopicMemberUserIds,
 } from "./messages";
 import { deliverCallbackQueryToWebhooks, deliverMessageToWebhooks, deliverNewMemberToWebhooks } from "./webhook";
 import { dispatchMessageNotifications } from "./notifications";
@@ -161,6 +162,18 @@ io.on("connection", async (socket: AuthedSocket) => {
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
       const plainPreview = isE2ee ? "(encrypted message)" : parsed.content.text;
+      // Broadcast sidebar update to all topic members so their sidebar refreshes in real time
+      getTopicMemberUserIds(parsed.topicId).then((memberIds) => {
+        const sidebarPayload = {
+          topicId: parsed.topicId,
+          preview: plainPreview.slice(0, 120),
+          senderName: msg.senderDisplayName ?? null,
+          at: typeof msg.createdAt === "string" ? msg.createdAt : (msg.createdAt as Date).toISOString(),
+        };
+        for (const memberId of memberIds) {
+          io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
+        }
+      }).catch((e) => console.error("[sidebar] broadcast failed", e));
       dispatchMessageNotifications(io, {
         messageId: msg.id,
         topicId: parsed.topicId,
@@ -329,8 +342,19 @@ subClient.on("message", (channel, message) => {
       const { userId } = JSON.parse(message) as { userId: string };
       io.to(`user:${userId}`).emit(WS_EVENTS.USER_MUTED, { userId });
     } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_NEW) {
-      const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: unknown };
+      const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: { text?: string; senderDisplayName?: string | null; createdAt?: string } };
       io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
+      getTopicMemberUserIds(topicId).then((memberIds) => {
+        const sidebarPayload = {
+          topicId,
+          preview: (msg.text ?? "").slice(0, 120),
+          senderName: msg.senderDisplayName ?? null,
+          at: msg.createdAt ?? new Date().toISOString(),
+        };
+        for (const memberId of memberIds) {
+          io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
+        }
+      }).catch((e) => console.error("[sidebar] bot broadcast failed", e));
     } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_EDIT) {
       const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: unknown };
       io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_EDIT, msg);

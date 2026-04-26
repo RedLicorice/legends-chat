@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart2, CornerDownLeft, FileText, Flag, ImagePlus, Lock, Menu, MessageSquareText, Paperclip, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
+import { BarChart2, CornerDownLeft, FileText, Flag, ImagePlus, Lock, Menu, MessageSquareText, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { io, type Socket } from "socket.io-client";
@@ -90,6 +90,13 @@ interface Member {
   joinedAt: string;
 }
 
+interface SidebarTopicUpdate {
+  topicId: string;
+  preview: string;
+  senderName: string | null;
+  at: string;
+}
+
 interface TopicViewProps {
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
   currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
@@ -97,6 +104,9 @@ interface TopicViewProps {
   giphyEnabled?: boolean;
   onMenuOpen?: () => void;
   onConnectionChange?: (connected: boolean) => void;
+  showExpandSidebar?: boolean;
+  onExpandSidebar?: () => void;
+  onSidebarUpdate?: (update: SidebarTopicUpdate) => void;
 }
 
 function friendlyTime(date: Date | string): string {
@@ -138,7 +148,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, onConnectionChange }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -286,6 +296,10 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
         if (d.online) next.add(d.userId); else next.delete(d.userId);
         return next;
       });
+    });
+    socket.on(WS_EVENTS.SIDEBAR_UPDATE, (update: SidebarTopicUpdate) => {
+      if (!active) return;
+      onSidebarUpdate?.(update);
     });
 
     return () => {
@@ -588,10 +602,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
           userId={currentUser.id}
           hasPermanentAccount={!currentUser.role.includes("anon")}
           existingBackup={e2eeBackup}
-          onReady={async () => {
+          onReady={(kp) => {
+            e2eeKeyPairRef.current = kp;
             setE2eeSetupNeeded(false);
-            const { getOrCreateIdentityKeyPair } = await import("@/lib/e2ee");
-            e2eeKeyPairRef.current = await getOrCreateIdentityKeyPair();
             setE2eeReady(true);
           }}
           onSkip={() => { setE2eeSetupNeeded(false); }}
@@ -608,6 +621,16 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
         >
           <Menu className="h-5 w-5" />
         </button>
+        {showExpandSidebar && (
+          <button
+            type="button"
+            onClick={onExpandSidebar}
+            className="hidden md:flex shrink-0 rounded-md p-1.5 hover:bg-panel2 transition mr-1"
+            title="Expand sidebar"
+          >
+            <PanelLeftOpen className="h-5 w-5" />
+          </button>
+        )}
         <div className="flex-1">
           <h1 className="text-lg font-semibold">{topic.title}</h1>
           <p className="flex items-center gap-1.5 text-xs text-muted">
