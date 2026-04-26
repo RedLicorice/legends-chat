@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ImageUploadButton } from "@/components/ImageUploadButton";
 
 interface Topic { id: string; title: string; slug: string }
 
@@ -68,30 +69,39 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           />
         </Field>
         <Field label="Logo URL">
-          <input
-            value={communityLogo}
-            onChange={(e) => setCommunityLogo(e.target.value)}
-            placeholder="https://example.com/logo.png"
-            className={inputCls}
-          />
+          <div className="flex gap-2">
+            <input
+              value={communityLogo}
+              onChange={(e) => setCommunityLogo(e.target.value)}
+              placeholder="https://example.com/logo.png"
+              className={inputCls}
+            />
+            <ImageUploadButton bucket="avatars" onUploaded={setCommunityLogo} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
+          </div>
           <p className="mt-1 text-xs text-muted">Shown in the header and browser tab.</p>
         </Field>
         <Field label="Banner URL">
-          <input
-            value={communityBanner}
-            onChange={(e) => setCommunityBanner(e.target.value)}
-            placeholder="https://example.com/banner.png"
-            className={inputCls}
-          />
+          <div className="flex gap-2">
+            <input
+              value={communityBanner}
+              onChange={(e) => setCommunityBanner(e.target.value)}
+              placeholder="https://example.com/banner.png"
+              className={inputCls}
+            />
+            <ImageUploadButton bucket="avatars" onUploaded={setCommunityBanner} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
+          </div>
           <p className="mt-1 text-xs text-muted">Decorative banner shown on the login/register pages.</p>
         </Field>
         <Field label="PWA icon URL">
-          <input
-            value={pwaIcon}
-            onChange={(e) => setPwaIcon(e.target.value)}
-            placeholder="https://example.com/icon.png"
-            className={inputCls}
-          />
+          <div className="flex gap-2">
+            <input
+              value={pwaIcon}
+              onChange={(e) => setPwaIcon(e.target.value)}
+              placeholder="https://example.com/icon.png"
+              className={inputCls}
+            />
+            <ImageUploadButton bucket="avatars" onUploaded={setPwaIcon} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
+          </div>
           <p className="mt-1 text-xs text-muted">
             Square PNG, at least 512×512. Used as the home screen icon when users install the app.
             Leave blank to use the default purple icon.
@@ -208,6 +218,7 @@ const ROLES = ["user", "moderator", "admin"] as const;
 function InviteConfigSection() {
   const [invitesEnabled, setInvitesEnabled] = useState(true);
   const [quotas, setQuotas] = useState<Record<string, number>>({ user: 1, moderator: 10, admin: 100 });
+  const [codePrefix, setCodePrefix] = useState("LGND");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -215,9 +226,10 @@ function InviteConfigSection() {
   useEffect(() => {
     fetch("/api/admin/invite-config")
       .then((r) => r.json())
-      .then((d: { invitesEnabled: boolean; quotas: Record<string, number> }) => {
+      .then((d: { invitesEnabled: boolean; quotas: Record<string, number>; codePrefix?: string }) => {
         setInvitesEnabled(d.invitesEnabled);
         setQuotas((prev) => ({ ...prev, ...d.quotas }));
+        if (d.codePrefix) setCodePrefix(d.codePrefix);
       })
       .catch(() => {});
   }, []);
@@ -230,7 +242,7 @@ function InviteConfigSection() {
       const res = await fetch("/api/admin/invite-config", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ invitesEnabled, quotas }),
+        body: JSON.stringify({ invitesEnabled, quotas, codePrefix: codePrefix.trim() || "LGND" }),
       });
       if (!res.ok) throw new Error("save failed");
       setSaved(true);
@@ -258,6 +270,20 @@ function InviteConfigSection() {
           <span className="text-sm">{invitesEnabled ? "Invite code required" : "Anyone can register without invite"}</span>
         </label>
         <p className="mt-1 text-xs text-muted">When enabled, new users must present a valid invite code during registration.</p>
+      </Field>
+
+      <Field label="Invite code prefix">
+        <div className="flex items-center gap-2">
+          <input
+            value={codePrefix}
+            onChange={(e) => setCodePrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))}
+            maxLength={8}
+            placeholder="LGND"
+            className="w-32 rounded-lg border border-border bg-panel2 px-3 py-2 text-sm font-mono outline-none focus:border-accent"
+          />
+          <span className="text-sm text-muted">#XXXXXX</span>
+        </div>
+        <p className="mt-1 text-xs text-muted">Prefix for generated invite codes (letters and numbers only, max 8 chars). Existing codes keep their original prefix.</p>
       </Field>
 
       <Field label="Daily invite quota per role">

@@ -18,6 +18,7 @@ export async function GET() {
       ownerUserId: bots.ownerUserId,
       ownerName: users.displayName,
       avatarUrl: bots.avatarUrl,
+      description: bots.description,
       webhookUrl: bots.webhookUrl,
       isActive: bots.isActive,
       createdAt: bots.createdAt,

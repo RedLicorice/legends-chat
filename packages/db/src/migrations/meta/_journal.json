@@ -94,6 +94,12 @@
       "when": 1777500000000,
       "tag": "0014_custom_gifs",
       "breakpoints": true
+    }, {
+      "idx": 15,
+      "version": "7",
+      "when": 1777600000000,
+      "tag": "0015_bot_description",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   formatInviteCodeFromBytes,
   type Role,
 } from "@legends/shared";
+import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -19,9 +20,10 @@ const bodySchema = z.object({
 });
 
 async function uniqueCode(): Promise<string> {
-  // Retry on the astronomically unlikely collision.
+  const prefixSetting = await getSetting(db, "invite_code_prefix");
+  const prefix = prefixSetting ? prefixSetting.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) + "#" : undefined;
   for (let i = 0; i < 5; i += 1) {
-    const candidate = formatInviteCodeFromBytes(randomBytes(12));
+    const candidate = formatInviteCodeFromBytes(randomBytes(12), prefix);
     const existing = await db
       .select({ id: inviteCodes.id })
       .from(inviteCodes)

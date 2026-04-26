@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { Bot, ChevronDown, ChevronUp, Copy, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { ImageUploadButton } from "@/components/ImageUploadButton";
 
 interface BotRow {
   id: string;
   name: string;
   avatarUrl: string | null;
+  description: string | null;
   webhookUrl: string | null;
   isActive: boolean;
   createdAt: Date | string;
@@ -39,6 +41,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
   const [revealedToken, setRevealedToken] = useState<{ botId: string; token: string } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [editNames, setEditNames] = useState<Record<string, string>>({});
+  const [editDescriptions, setEditDescriptions] = useState<Record<string, string>>({});
   const [editWebhooks, setEditWebhooks] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -77,6 +80,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
     try {
       const patch: Record<string, unknown> = {};
       if (editNames[botId] !== undefined) patch.name = editNames[botId];
+      if (editDescriptions[botId] !== undefined) patch.description = editDescriptions[botId] || null;
       if (editWebhooks[botId] !== undefined) patch.webhookUrl = editWebhooks[botId] || null;
       if (Object.keys(patch).length === 0) return;
       const res = await fetch(`/api/admin/bots/${botId}`, {
@@ -88,6 +92,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
       if (!res.ok) { setError(data.error ?? "Failed to save"); return; }
       setBots((prev) => prev.map((b) => b.id === botId ? data.bot : b));
       setEditNames((prev) => { const n = { ...prev }; delete n[botId]; return n; });
+      setEditDescriptions((prev) => { const n = { ...prev }; delete n[botId]; return n; });
       setEditWebhooks((prev) => { const n = { ...prev }; delete n[botId]; return n; });
     } finally {
       setSaving(null);
@@ -169,8 +174,11 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
         return (
           <div key={bot.id} className="rounded-xl border border-border bg-panel overflow-hidden">
             <div className="flex items-center gap-3 px-5 py-4">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent2/20">
-                <Bot className="h-5 w-5 text-accent2" />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent2/20">
+                {bot.avatarUrl
+                  ? <img src={bot.avatarUrl} alt="" className="h-full w-full object-cover" />
+                  : <Bot className="h-5 w-5 text-accent2" />
+                }
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm">{bot.name}</div>
@@ -197,6 +205,50 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                   </div>
                 )}
 
+                {/* Avatar */}
+                <div>
+                  <label className="text-xs text-muted mb-1 block">Avatar</label>
+                  <div className="flex items-center gap-3">
+                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-accent2/20 flex items-center justify-center">
+                      {bot.avatarUrl
+                        ? <img src={bot.avatarUrl} alt="" className="h-full w-full object-cover" />
+                        : <Bot className="h-6 w-6 text-accent2" />
+                      }
+                    </div>
+                    <ImageUploadButton
+                      bucket="avatars"
+                      onUploaded={(url) => {
+                        fetch(`/api/admin/bots/${bot.id}`, {
+                          method: "PATCH",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ avatarUrl: url }),
+                        })
+                          .then((r) => r.json())
+                          .then((d: { bot: BotRow }) => setBots((prev) => prev.map((b) => b.id === bot.id ? d.bot : b)))
+                          .catch(() => {});
+                      }}
+                    />
+                    {bot.avatarUrl && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted hover:text-danger"
+                        onClick={() => {
+                          fetch(`/api/admin/bots/${bot.id}`, {
+                            method: "PATCH",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ avatarUrl: null }),
+                          })
+                            .then((r) => r.json())
+                            .then((d: { bot: BotRow }) => setBots((prev) => prev.map((b) => b.id === bot.id ? d.bot : b)))
+                            .catch(() => {});
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 {/* Edit name */}
                 <div>
                   <label className="text-xs text-muted mb-1 block">Name</label>
@@ -204,6 +256,18 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                     value={editNames[bot.id] ?? bot.name}
                     onChange={(e) => setEditNames((p) => ({ ...p, [bot.id]: e.target.value }))}
                     className="w-full rounded-lg bg-panel2 px-3 py-1.5 text-sm outline-none"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="text-xs text-muted mb-1 block">Description</label>
+                  <textarea
+                    value={editDescriptions[bot.id] ?? (bot.description ?? "")}
+                    onChange={(e) => setEditDescriptions((p) => ({ ...p, [bot.id]: e.target.value }))}
+                    rows={2}
+                    placeholder="Short description shown to users"
+                    className="w-full rounded-lg bg-panel2 px-3 py-1.5 text-sm outline-none resize-none placeholder:text-muted"
                   />
                 </div>
 

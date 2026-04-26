@@ -14,7 +14,7 @@ export default async function AdminBotsPage() {
   if (!user.permissions.has(PERMISSIONS.BOTS_MANAGE)) redirect("/");
 
   const [botList, topicList] = await Promise.all([
-    db.select({ id: bots.id, name: bots.name, avatarUrl: bots.avatarUrl, webhookUrl: bots.webhookUrl, isActive: bots.isActive, createdAt: bots.createdAt }).from(bots).orderBy(bots.createdAt),
+    db.select({ id: bots.id, name: bots.name, avatarUrl: bots.avatarUrl, description: bots.description, webhookUrl: bots.webhookUrl, isActive: bots.isActive, createdAt: bots.createdAt }).from(bots).orderBy(bots.createdAt),
     db.select({ id: topics.id, title: topics.title, isE2ee: topics.isE2ee }).from(topics).orderBy(asc(topics.sortOrder), asc(topics.title)),
   ]);
 

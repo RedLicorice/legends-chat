@@ -14,10 +14,11 @@ export async function PATCH(
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const { id } = await params;
-  const body = await req.json() as { name?: string; avatarUrl?: string | null; webhookUrl?: string | null; isActive?: boolean };
+  const body = await req.json() as { name?: string; avatarUrl?: string | null; description?: string | null; webhookUrl?: string | null; isActive?: boolean };
   const patch: Record<string, unknown> = {};
   if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim();
   if ("avatarUrl" in body) patch.avatarUrl = body.avatarUrl ?? null;
+  if ("description" in body) patch.description = body.description ?? null;
   if ("webhookUrl" in body) patch.webhookUrl = body.webhookUrl ?? null;
   if (typeof body.isActive === "boolean") patch.isActive = body.isActive;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "nothing to update" }, { status: 400 });

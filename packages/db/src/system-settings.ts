@@ -12,7 +12,8 @@ export type SystemSettingKey =
   | "pwa_icon_url"
   | "registration_mode" // "telegram_only" | "open" | "closed"
   | "giphy_enabled"
-  | "giphy_api_key";
+  | "giphy_api_key"
+  | "invite_code_prefix";
 
 export async function getSetting(
   dbInstance: DB,

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
+import { ImageUploadButton } from "@/components/ImageUploadButton";
 
 interface TopicRow {
   id: string;
@@ -342,13 +343,20 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
 
             {/* Icon URL */}
             <div className="border-t border-border pt-3">
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Icon URL</label>
-              <InlineTextInput
-                value={t.iconUrl ?? ""}
-                placeholder="https://example.com/icon.png"
-                onSave={(v) => save(t.id, { iconUrl: v.trim() || null })}
-                disabled={dis}
-              />
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Icon</label>
+              <div className="flex gap-2 items-start">
+                <InlineTextInput
+                  value={t.iconUrl ?? ""}
+                  placeholder="https://example.com/icon.png"
+                  onSave={(v) => save(t.id, { iconUrl: v.trim() || null })}
+                  disabled={dis}
+                />
+                <ImageUploadButton
+                  bucket="avatars"
+                  onUploaded={(url) => save(t.id, { iconUrl: url })}
+                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2"
+                />
+              </div>
               <p className="mt-1 text-xs text-muted">Square image shown as topic icon in the sidebar. Leave blank to use initials.</p>
             </div>
 

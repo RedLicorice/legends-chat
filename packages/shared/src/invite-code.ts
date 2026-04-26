@@ -11,13 +11,14 @@ export const INVITE_CODE_REGEX = new RegExp(
   `^${INVITE_CODE_PREFIX}[${INVITE_CODE_ALPHABET}]{${INVITE_CODE_BODY_LENGTH}}$`,
 );
 
-export function formatInviteCodeFromBytes(bytes: Uint8Array): string {
+export function formatInviteCodeFromBytes(bytes: Uint8Array, prefix?: string): string {
   if (bytes.length < INVITE_CODE_BODY_LENGTH) {
     throw new Error(`need at least ${INVITE_CODE_BODY_LENGTH} random bytes`);
   }
+  const p = prefix ?? INVITE_CODE_PREFIX;
   let body = "";
   for (let i = 0; i < INVITE_CODE_BODY_LENGTH; i += 1) {
     body += INVITE_CODE_ALPHABET[bytes[i]! % INVITE_CODE_ALPHABET.length];
   }
-  return INVITE_CODE_PREFIX + body;
+  return p + body;
 }
