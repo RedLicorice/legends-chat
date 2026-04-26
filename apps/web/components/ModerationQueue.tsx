@@ -4,6 +4,11 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Ban, Check, Trash2, VolumeX } from "lucide-react";
 
+function isE2EEPayload(text: string): boolean {
+  if (!text.startsWith("{")) return false;
+  try { return (JSON.parse(text) as { e?: number }).e === 1; } catch { return false; }
+}
+
 interface FlagView {
   id: string;
   createdAt: string;
@@ -92,7 +97,9 @@ export function ModerationQueue({
             <div className="mb-1 text-xs text-muted">
               {f.message.senderDisplayName ?? "Unknown sender"} — <span className="text-muted/70">#{f.message.id}</span>
             </div>
-            <div className="whitespace-pre-wrap break-words text-sm">{f.message.text}</div>
+            <div className="whitespace-pre-wrap break-words text-sm">
+              {isE2EEPayload(f.message.text) ? <span className="text-muted italic">(encrypted message)</span> : f.message.text}
+            </div>
             {f.message.deletedAt && <div className="mt-2 text-xs text-muted">(already deleted)</div>}
           </div>
           <div className="flex flex-wrap gap-2">

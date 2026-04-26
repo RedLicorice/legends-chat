@@ -4,7 +4,6 @@ import { AlertTriangle, Users, Wifi, MessageSquare } from "lucide-react";
 import { count, and, eq, gt, isNull, desc } from "drizzle-orm";
 import { PERMISSIONS } from "@legends/shared";
 import { getCurrentUser } from "@/lib/auth";
-import { SideMenu } from "@/components/SideMenu";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { messageFlags, messages, topics, users } from "@legends/db/schema";
@@ -61,9 +60,7 @@ export default async function AdminDashboardPage() {
   const pendingFlags = Number(pendingRow?.n ?? 0);
 
   return (
-    <div className="flex min-h-screen">
-      <SideMenu user={user} />
-      <main className="flex-1 p-8 max-w-4xl">
+    <main className="flex-1 p-8 max-w-4xl">
         <h1 className="mb-6 text-2xl font-semibold">Dashboard</h1>
 
         <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -120,8 +117,7 @@ export default async function AdminDashboardPage() {
             </tbody>
           </table>
         </div>
-      </main>
-    </div>
+    </main>
   );
 }
 

@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { PERMISSIONS } from "@legends/shared";
 import { getCurrentUser } from "@/lib/auth";
-import { SideMenu } from "@/components/SideMenu";
 import { AdminBotsForm } from "@/components/AdminBotsForm";
 import { db } from "@/lib/db";
 import { bots, topics, topicBots } from "@legends/db/schema";
@@ -22,9 +21,7 @@ export default async function AdminBotsPage() {
   const assignments = await db.select({ botId: topicBots.botId, topicId: topicBots.topicId }).from(topicBots);
 
   return (
-    <div className="flex">
-      <SideMenu user={user} />
-      <main className="flex-1 p-8">
+    <main className="flex-1 p-8">
         <h1 className="mb-2 text-2xl font-semibold">Bots</h1>
         <p className="mb-6 text-sm text-muted">Create and manage bots. Assign them to topics to receive message webhooks.</p>
         <AdminBotsForm
@@ -32,7 +29,6 @@ export default async function AdminBotsPage() {
           topics={topicList}
           assignments={assignments}
         />
-      </main>
-    </div>
+    </main>
   );
 }

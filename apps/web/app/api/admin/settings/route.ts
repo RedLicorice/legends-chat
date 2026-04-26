@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { PERMISSIONS } from "@legends/shared";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -36,6 +37,7 @@ export async function PATCH(req: Request) {
     "community_name",
     "community_logo_url",
     "community_banner_url",
+    "pwa_icon_url",
     "registration_mode",
   ] as const;
 
@@ -45,6 +47,8 @@ export async function PATCH(req: Request) {
       await setSetting(db, key, val ?? null);
     }
   }
+
+  revalidatePath("/", "layout");
 
   return NextResponse.json({ ok: true });
 }

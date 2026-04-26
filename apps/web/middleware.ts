@@ -4,6 +4,7 @@ import { publicOrigin } from "@/lib/public-origin";
 
 const PUBLIC_PATHS = [
   "/login",
+  "/register",
   "/auth/callback",
   "/auth/refresh",
   "/api/health",

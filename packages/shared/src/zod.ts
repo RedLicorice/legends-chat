@@ -80,6 +80,7 @@ export const createTopicSchema = z.object({
     .regex(/^[a-z0-9-]+$/),
   title: z.string().min(1).max(120),
   description: z.string().max(500).optional(),
+  iconUrl: z.string().url().nullable().optional(),
   isSticky: z.boolean().default(false),
   sortOrder: z.number().int().default(0),
   isE2ee: z.boolean().default(false),

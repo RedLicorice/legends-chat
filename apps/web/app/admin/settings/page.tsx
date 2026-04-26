@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { PERMISSIONS } from "@legends/shared";
 import { getCurrentUser } from "@/lib/auth";
-import { SideMenu } from "@/components/SideMenu";
 import { AdminSettingsForm } from "@/components/AdminSettingsForm";
 import { db } from "@/lib/db";
 import { getAllSettings } from "@legends/db/system-settings";
@@ -21,13 +20,10 @@ export default async function AdminSettingsPage() {
   ]);
 
   return (
-    <div className="flex">
-      <SideMenu user={user} />
-      <main className="flex-1 p-8 max-w-xl">
-        <h1 className="mb-2 text-2xl font-semibold">Community Settings</h1>
-        <p className="mb-6 text-sm text-muted">Configure the default channel and automated system messages.</p>
-        <AdminSettingsForm settings={settings} topics={topicList} />
-      </main>
-    </div>
+    <main className="flex-1 p-8 max-w-xl">
+      <h1 className="mb-2 text-2xl font-semibold">Community Settings</h1>
+      <p className="mb-6 text-sm text-muted">Configure the default channel and automated system messages.</p>
+      <AdminSettingsForm settings={settings} topics={topicList} />
+    </main>
   );
 }

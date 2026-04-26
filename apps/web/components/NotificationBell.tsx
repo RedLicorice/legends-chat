@@ -30,7 +30,7 @@ function timeAgo(date: string): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-export function NotificationBell({ socket }: { socket: Socket | null }) {
+export function NotificationBell({ socket, align = "right" }: { socket: Socket | null; align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -92,7 +92,7 @@ export function NotificationBell({ socket }: { socket: Socket | null }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-panel shadow-lg">
+        <div className={cn("absolute top-full z-50 mt-2 w-80 rounded-xl border border-border bg-panel shadow-lg", align === "left" ? "left-0" : "right-0")}>
           <div className="border-b border-border px-4 py-2.5 text-sm font-semibold">Notifications</div>
           {items.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-muted">No notifications yet.</div>

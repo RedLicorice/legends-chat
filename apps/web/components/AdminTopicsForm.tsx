@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -9,6 +9,7 @@ interface TopicRow {
   slug: string;
   title: string;
   description: string | null;
+  iconUrl: string | null;
   isSticky: boolean;
   sortOrder: number;
   isFeed: boolean;
@@ -207,6 +208,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           slug: t.slug,
           title: t.title,
           description: t.description,
+          iconUrl: t.iconUrl ?? null,
           isSticky: t.isSticky,
           sortOrder: t.sortOrder,
           isFeed: t.isFeed,
@@ -298,12 +300,12 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
         return (
           <div key={t.id} className="rounded-xl border border-border bg-panel p-5 space-y-4">
             {/* Header + toggles */}
-            <div className="flex items-start justify-between gap-3">
-              <div>
+            <div>
+              <div className="mb-2">
                 <div className="font-medium">{t.title}</div>
                 <div className="text-xs text-muted">#{t.slug}</div>
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                 {(["isFeed", "isHomeTopic", "isSticky"] as const).map((key) => (
                   <label key={key} className="flex cursor-pointer items-center gap-2">
                     <input
@@ -329,13 +331,25 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                 <button
                   onClick={() => deleteTopic(t.id, t.title)}
                   disabled={dis}
-                  className="flex items-center gap-1 rounded-lg border border-danger px-2 py-1 text-xs text-danger hover:bg-danger hover:text-white disabled:opacity-50"
+                  className="ml-auto flex items-center gap-1 rounded-lg border border-danger px-2 py-1 text-xs text-danger hover:bg-danger hover:text-white disabled:opacity-50"
                   title="Delete topic"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {deleting === t.id ? "Deleting…" : "Delete"}
                 </button>
               </div>
+            </div>
+
+            {/* Icon URL */}
+            <div className="border-t border-border pt-3">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Icon URL</label>
+              <InlineTextInput
+                value={t.iconUrl ?? ""}
+                placeholder="https://example.com/icon.png"
+                onSave={(v) => save(t.id, { iconUrl: v.trim() || null })}
+                disabled={dis}
+              />
+              <p className="mt-1 text-xs text-muted">Square image shown as topic icon in the sidebar. Leave blank to use initials.</p>
             </div>
 
             {/* Permissions */}
@@ -445,5 +459,21 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
         );
       })}
     </div>
+  );
+}
+
+function InlineTextInput({ value, placeholder, onSave, disabled }: { value: string; placeholder?: string; onSave: (v: string) => void; disabled?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <input
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== value) onSave(draft); }}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
+      disabled={disabled}
+      className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
+    />
   );
 }

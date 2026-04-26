@@ -9,6 +9,7 @@ export type SystemSettingKey =
   | "community_name"
   | "community_logo_url"
   | "community_banner_url"
+  | "pwa_icon_url"
   | "registration_mode"; // "telegram_only" | "open" | "closed"
 
 export async function getSetting(

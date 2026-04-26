@@ -19,6 +19,7 @@ export interface TopicListItem {
   slug: string;
   title: string;
   description: string | null;
+  iconUrl: string | null;
   isSticky: boolean;
   isE2ee: boolean;
   isFeed: boolean;
@@ -74,7 +75,22 @@ export async function listTopicsForUser(userId: string, userRole: string): Promi
         try {
           const key = await getKeyData(latest.keyId);
           const aad = new TextEncoder().encode(t.id);
-          preview = decryptMessage(key, latest.contentCiphertext, latest.contentNonce, aad).slice(0, 120);
+          const raw = decryptMessage(key, latest.contentCiphertext, latest.contentNonce, aad);
+          try {
+            const parsed = JSON.parse(raw) as { v?: number; t?: string; a?: { type: string }[] };
+            if (parsed.v === 1) {
+              if (parsed.t?.trim()) {
+                preview = parsed.t.slice(0, 120);
+              } else if (parsed.a?.length) {
+                const type = parsed.a[0]?.type ?? "attachment";
+                preview = type === "image" ? "📷 Image" : "📎 Attachment";
+              }
+            } else {
+              preview = raw.slice(0, 120);
+            }
+          } catch {
+            preview = raw.slice(0, 120);
+          }
         } catch {
           preview = "(unavailable)";
         }
@@ -94,6 +110,7 @@ export async function listTopicsForUser(userId: string, userRole: string): Promi
       slug: t.slug,
       title: t.title,
       description: t.description,
+      iconUrl: t.iconUrl ?? null,
       isSticky: t.isSticky,
       isE2ee: t.isE2ee,
       isFeed: t.isFeed,

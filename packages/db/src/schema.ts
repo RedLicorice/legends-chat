@@ -161,6 +161,7 @@ export const topics = pgTable(
     autoDeleteMode: autoDeleteMode("auto_delete_mode").notNull().default("none"),
     autoDeleteAgeSeconds: integer("auto_delete_age_seconds"),
     autoDeleteMaxMessages: integer("auto_delete_max_messages"),
+    iconUrl: text("icon_url"),
     isFeed: boolean("is_feed").notNull().default(false),
     isHomeTopic: boolean("is_home_topic").notNull().default(false),
     postRoles: jsonb("post_roles").$type<string[]>().default([]),

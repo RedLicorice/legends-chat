@@ -23,6 +23,7 @@ export async function PATCH(
     readRoles?: string[];
     title?: string;
     description?: string | null;
+    iconUrl?: string | null;
     isSticky?: boolean;
     sortOrder?: number;
     autoDeleteMode?: "none" | "age" | "count";
@@ -48,6 +49,7 @@ export async function PATCH(
   if (Array.isArray(body.readRoles)) patch.readRoles = body.readRoles;
   if (typeof body.title === "string") patch.title = body.title;
   if ("description" in body) patch.description = body.description ?? null;
+  if ("iconUrl" in body) patch.iconUrl = body.iconUrl ?? null;
   if (typeof body.isSticky === "boolean") patch.isSticky = body.isSticky;
   if (typeof body.sortOrder === "number") patch.sortOrder = body.sortOrder;
   if (body.autoDeleteMode === "none" || body.autoDeleteMode === "age" || body.autoDeleteMode === "count") {

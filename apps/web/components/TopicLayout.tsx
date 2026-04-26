@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { TopicsSidebar } from "@/components/TopicsSidebar";
+import { AppSidebar } from "@/components/AppSidebar";
+import { TopicListItem } from "@/components/TopicListItem";
 import { TopicView } from "@/components/TopicView";
 import { EmailLinkBanner } from "@/components/EmailLinkBanner";
 import type { TopicListItem as TopicItem } from "@/lib/topics";
@@ -24,16 +25,28 @@ interface Props {
 
 export function TopicLayout({ user, topics, currentSlug, topic, mute, hasEmail }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <TopicsSidebar
+      <AppSidebar
         user={user}
-        topics={topics}
-        currentSlug={currentSlug}
+        variant="chat"
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-      />
+      >
+        <div className="space-y-0.5">
+          {topics.map((t) => (
+            <div key={t.id} className={currentSlug === t.slug ? "opacity-100" : "opacity-90"}>
+              <TopicListItem
+                topic={t}
+                compact
+                connectionStatus={currentSlug === t.slug ? (connected ? "connected" : "connecting") : undefined}
+              />
+            </div>
+          ))}
+        </div>
+      </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-hidden">
         {!hasEmail && <EmailLinkBanner />}
         <TopicView
@@ -48,6 +61,7 @@ export function TopicLayout({ user, topics, currentSlug, topic, mute, hasEmail }
           }}
           mute={mute}
           onMenuOpen={() => setSidebarOpen(true)}
+          onConnectionChange={setConnected}
         />
       </main>
     </div>

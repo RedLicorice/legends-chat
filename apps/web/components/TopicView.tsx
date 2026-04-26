@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { BarChart2, CornerDownLeft, Flag, ImagePlus, Lock, Menu, MessageSquareText, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
-import { NotificationBell } from "@/components/NotificationBell";
 import { io, type Socket } from "socket.io-client";
 import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
@@ -17,6 +16,7 @@ import { UserViewModal } from "@/components/UserViewModal";
 import { SearchModal } from "@/components/SearchModal";
 import { ThreadPanel } from "@/components/ThreadPanel";
 import { E2EESetup } from "@/components/E2EESetup";
+import { ImageLightbox } from "@/components/ImageLightbox";
 import type {
   E2EEPayload,
 } from "@/lib/e2ee";
@@ -92,6 +92,7 @@ interface TopicViewProps {
   currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   onMenuOpen?: () => void;
+  onConnectionChange?: (connected: boolean) => void;
 }
 
 function friendlyTime(date: Date | string): string {
@@ -133,7 +134,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionChange }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -157,6 +158,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
   const [threadFor, setThreadFor] = useState<Message | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
   const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -224,6 +226,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
     socket.on("connect", () => {
       if (!active) return;
       setConnected(true);
+      onConnectionChange?.(true);
       socket.emit(
         WS_EVENTS.TOPIC_JOIN,
         topic.id,
@@ -238,7 +241,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
         },
       );
     });
-    socket.on("disconnect", () => { if (active) setConnected(false); });
+    socket.on("disconnect", () => { if (active) { setConnected(false); onConnectionChange?.(false); } });
     socket.on(WS_EVENTS.MESSAGE_NEW, (msg: Message) => {
       if (!active || msg.topicId !== topic.id) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -585,6 +588,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
         />
       )}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
+      {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
 
       <header className="flex items-center gap-3 border-b border-border px-4 py-4 md:px-6">
         <button
@@ -597,7 +601,10 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
         {topic.isE2ee && <Lock className="h-4 w-4 text-accent2" />}
         <div className="flex-1">
           <h1 className="text-lg font-semibold">{topic.title}</h1>
-          <p className="text-xs text-muted">{connected ? "connected" : "connecting…"}</p>
+          <p className="flex items-center gap-1 text-xs text-muted">
+            {topic.isE2ee && <Lock className="h-3 w-3 text-accent2" />}
+            {connected ? "connected" : "connecting…"}
+          </p>
         </div>
         <button
           type="button"
@@ -607,7 +614,6 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
         >
           <Search className="h-5 w-5" />
         </button>
-        <NotificationBell socket={socket} />
         <button
           type="button"
           onClick={() => setShowUsers((v) => !v)}
@@ -713,7 +719,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
                   {m.attachments.length > 0 && (
                     <div className="mb-3 flex flex-col gap-2">
                       {m.attachments.map((att, ai) => (
-                        <img key={ai} src={att.thumbnailUrl ?? att.url} alt="" className="max-h-96 w-full rounded-xl object-contain" loading="lazy" />
+                        <img key={ai} src={att.url} alt="" className="max-h-96 w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
                       ))}
                     </div>
                   )}
@@ -835,7 +841,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen }: TopicViewPro
                     {m.attachments.length > 0 && (
                       <div className={cn("flex flex-col gap-1", m.text.trim() && "mb-2")}>
                         {m.attachments.map((att, ai) => (
-                          <img key={ai} src={att.thumbnailUrl ?? att.url} alt="" className="max-h-64 max-w-full rounded-xl object-contain" loading="lazy" />
+                          <img key={ai} src={att.url} alt="" className="max-h-64 max-w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
                         ))}
                       </div>
                     )}

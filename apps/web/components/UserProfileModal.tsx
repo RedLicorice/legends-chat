@@ -1,9 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { X, Camera, LogOut, ShieldCheck } from "lucide-react";
-import { PERMISSIONS } from "@legends/shared";
-import { AdminConsoleModal } from "@/components/AdminConsoleModal";
+import { X, Camera, LogOut } from "lucide-react";
 
 interface Props {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut?: boolean; permissions?: string[] };
@@ -18,10 +16,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAdmin, setShowAdmin] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const isAdmin = user.permissions?.includes(PERMISSIONS.ADMIN_CONFIG) ?? false;
 
   async function uploadAvatar(file: File) {
     setUploading(true);
@@ -137,17 +132,6 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
           </div>
         </label>
 
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setShowAdmin(true)}
-            className="mb-4 flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-panel2"
-          >
-            <ShieldCheck className="h-4 w-4 text-accent" />
-            Admin Console
-          </button>
-        )}
-
         {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 
         <div className="flex gap-2">
@@ -172,7 +156,6 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       </div>
     </div>
 
-    {showAdmin && <AdminConsoleModal onClose={() => setShowAdmin(false)} />}
     </>
   );
 }

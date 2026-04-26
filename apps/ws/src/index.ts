@@ -160,13 +160,14 @@ io.on("connection", async (socket: AuthedSocket) => {
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
+      const plainPreview = isE2ee ? "(encrypted message)" : parsed.content.text;
       dispatchMessageNotifications(io, {
         messageId: msg.id,
         topicId: parsed.topicId,
         topicTitle: topic?.title ?? "",
         senderUserId: user.sub,
         senderName: msg.senderDisplayName ?? "Unknown",
-        text: parsed.content.text,
+        text: plainPreview,
         replyToMessageId: parsed.content.replyToMessageId ?? null,
       }).catch((e) => console.error("[notifications] dispatch failed", e));
       if (!isE2ee) {
@@ -177,7 +178,7 @@ io.on("connection", async (socket: AuthedSocket) => {
       notifyTopicMembers({
         topicId: parsed.topicId,
         senderUserId: user.sub,
-        preview: parsed.content.text,
+        preview: plainPreview,
         messageId: msg.id,
       }).catch((e) => console.error("[push] notify failed", e));
       const cfg = await getTopicAutoDelete(parsed.topicId);

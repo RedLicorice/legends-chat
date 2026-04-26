@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { messages, topics, users } from "@legends/db/schema";
 import { db } from "@/lib/db";
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
     .where(
       and(
         isNull(messages.deletedAt),
-        sql`${messages.topicId} = ANY(${allowedTopicIds}::uuid[])`,
+        inArray(messages.topicId, allowedTopicIds),
         sql`${messages.searchVector} @@ to_tsquery('english', ${tsQuery})`,
       ),
     )

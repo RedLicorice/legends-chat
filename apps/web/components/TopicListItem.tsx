@@ -13,15 +13,40 @@ function timeAgo(date: Date): string {
   return `${d}d`;
 }
 
-export function TopicListItem({ topic, compact }: { topic: Item; compact?: boolean }) {
+function StatusBadge({ isE2ee, status }: { isE2ee: boolean; status: "connecting" | "connected" }) {
+  if (isE2ee) {
+    return (
+      <span className={`absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-panel ring-1 ring-border ${status === "connecting" ? "animate-pulse" : ""}`}>
+        <Lock className="h-2.5 w-2.5 text-accent2" />
+      </span>
+    );
+  }
+  return (
+    <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-panel ${status === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
+  );
+}
+
+export function TopicListItem({
+  topic,
+  compact,
+  connectionStatus,
+}: {
+  topic: Item;
+  compact?: boolean;
+  connectionStatus?: "connecting" | "connected";
+}) {
   if (compact) {
     return (
       <Link
         href={`/t/${topic.slug}`}
         className="flex items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-panel2"
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-panel2 text-sm font-semibold">
-          {topic.title.slice(0, 1).toUpperCase()}
+        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-panel2 text-sm font-semibold">
+          {topic.iconUrl
+            ? <img src={topic.iconUrl} alt="" className="h-full w-full object-cover" />
+            : topic.title.slice(0, 1).toUpperCase()
+          }
+          {connectionStatus && <StatusBadge isE2ee={topic.isE2ee} status={connectionStatus} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
@@ -47,8 +72,12 @@ export function TopicListItem({ topic, compact }: { topic: Item; compact?: boole
       href={`/t/${topic.slug}`}
       className="flex items-start gap-3 rounded-xl border border-transparent px-4 py-3 transition hover:border-border hover:bg-panel2"
     >
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-panel2 text-base font-semibold">
-        {topic.title.slice(0, 1).toUpperCase()}
+      <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-panel2 text-base font-semibold">
+        {topic.iconUrl
+          ? <img src={topic.iconUrl} alt="" className="h-full w-full object-cover" />
+          : topic.title.slice(0, 1).toUpperCase()
+        }
+        {connectionStatus && <StatusBadge isE2ee={topic.isE2ee} status={connectionStatus} />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

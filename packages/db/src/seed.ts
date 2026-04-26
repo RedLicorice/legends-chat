@@ -9,6 +9,7 @@ import {
   inviteQuotaConfig,
   registrationConfig,
   rolesPermissions,
+  systemSettings,
   topics,
   users,
 } from "./schema";
@@ -25,6 +26,12 @@ async function main() {
     .insert(registrationConfig)
     .values({ id: 1, invitesEnabled: true, publicRegistrationEnabled: false })
     .onConflictDoNothing();
+
+  // 1b. system settings — set registration_mode to "open" so email registration works
+  await db
+    .insert(systemSettings)
+    .values({ key: "registration_mode", value: "open", updatedAt: new Date() })
+    .onConflictDoUpdate({ target: systemSettings.key, set: { value: "open", updatedAt: new Date() } });
 
   // 2. role permissions (truncate-and-reinsert so changes propagate)
   await db.delete(rolesPermissions);
