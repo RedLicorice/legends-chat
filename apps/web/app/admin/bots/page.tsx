@@ -21,7 +21,7 @@ export default async function AdminBotsPage() {
   const assignments = await db.select({ botId: topicBots.botId, topicId: topicBots.topicId }).from(topicBots);
 
   return (
-    <main className="flex-1 p-8">
+    <main className="flex-1 p-4 sm:p-8">
         <h1 className="mb-2 text-2xl font-semibold">Bots</h1>
         <p className="mb-6 text-sm text-muted">Create and manage bots. Assign them to topics to receive message webhooks.</p>
         <AdminBotsForm

@@ -16,7 +16,7 @@ export default async function ModerationPage() {
   const canMute = user.permissions.has(PERMISSIONS.USERS_MUTE_DIRECT);
 
   return (
-    <main className="flex-1 p-8">
+    <main className="flex-1 p-4 sm:p-8">
       <h1 className="mb-2 text-2xl font-semibold">Moderation queue</h1>
       <p className="mb-6 text-sm text-muted">
         {flags.length} pending flag{flags.length === 1 ? "" : "s"}

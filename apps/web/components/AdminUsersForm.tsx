@@ -150,7 +150,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
             {banTarget.type === "mute" ? "Mute" : "Ban"}{" "}
             {users.find((u) => u.id === banTarget.id)?.displayName}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs text-muted">Reason (optional)</label>
               <input
@@ -197,7 +197,8 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
           const isEditingThis = editingName?.id === u.id;
           return (
             <div key={u.id} className="rounded-xl border border-border bg-panel px-4 py-3 space-y-2">
-              <div className="flex items-center gap-3">
+              {/* Row 1: avatar + name/email */}
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent2 text-sm font-semibold text-white">
                   {u.avatarUrl ? (
                     <img src={u.avatarUrl} alt="" className="h-full w-full object-cover" />
@@ -205,7 +206,6 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
                     u.displayName.slice(0, 1).toUpperCase()
                   )}
                 </div>
-
                 <div className="min-w-0 flex-1">
                   {isEditingThis ? (
                     <div className="flex items-center gap-2">
@@ -233,63 +233,64 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
                       {!isSelf && (
                         <button
                           onClick={() => setEditingName({ id: u.id, value: u.displayName })}
-                          className="text-muted hover:text-foreground"
+                          className="shrink-0 text-muted hover:text-text"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </div>
                   )}
-                  <div className="flex gap-3 text-xs text-muted">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
                     {u.telegramUsername && <span>@{u.telegramUsername}</span>}
-                    {u.email && <span>{u.email}</span>}
+                    {u.email && <span className="truncate max-w-[180px]">{u.email}</span>}
+                    <span>{new Date(u.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
+              </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {errors[u.id] && <span className="text-xs text-danger">{errors[u.id]}</span>}
-                  <select
-                    value={u.role}
-                    disabled={dis || isSelf}
-                    onChange={(e) => setRole(u.id, e.target.value)}
-                    className={cn(
-                      "rounded-lg border border-border bg-panel2 px-2 py-1 text-sm outline-none focus:border-accent disabled:opacity-50",
-                      u.role === "admin" && "text-accent",
-                      u.role === "moderator" && "text-accent2",
-                    )}
-                  >
-                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-
-                  {!isSelf && (
-                    <>
-                      <button
-                        onClick={() => { setBanTarget({ id: u.id, type: "mute" }); setBanReason(""); setBanDuration(""); }}
-                        disabled={dis}
-                        title="Mute"
-                        className="rounded-lg border border-border p-1.5 text-muted hover:border-accent hover:text-accent disabled:opacity-50"
-                      >
-                        <VolumeX className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => { setBanTarget({ id: u.id, type: "ban" }); setBanReason(""); setBanDuration(""); }}
-                        disabled={dis}
-                        title="Ban"
-                        className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
-                      >
-                        <Ban className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => deleteUser(u.id, u.displayName)}
-                        disabled={dis}
-                        title="Delete user"
-                        className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </>
+              {/* Row 2: role select + action buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                {errors[u.id] && <span className="w-full text-xs text-danger">{errors[u.id]}</span>}
+                <select
+                  value={u.role}
+                  disabled={dis || isSelf}
+                  onChange={(e) => setRole(u.id, e.target.value)}
+                  className={cn(
+                    "rounded-lg border border-border bg-panel2 px-2 py-1 text-sm outline-none focus:border-accent disabled:opacity-50",
+                    u.role === "admin" && "text-accent",
+                    u.role === "moderator" && "text-accent2",
                   )}
-                </div>
+                >
+                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                {!isSelf && (
+                  <div className="ml-auto flex gap-1.5">
+                    <button
+                      onClick={() => { setBanTarget({ id: u.id, type: "mute" }); setBanReason(""); setBanDuration(""); }}
+                      disabled={dis}
+                      title="Mute"
+                      className="rounded-lg border border-border p-1.5 text-muted hover:border-accent hover:text-accent disabled:opacity-50"
+                    >
+                      <VolumeX className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => { setBanTarget({ id: u.id, type: "ban" }); setBanReason(""); setBanDuration(""); }}
+                      disabled={dis}
+                      title="Ban"
+                      className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => deleteUser(u.id, u.displayName)}
+                      disabled={dis}
+                      title="Delete user"
+                      className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );
