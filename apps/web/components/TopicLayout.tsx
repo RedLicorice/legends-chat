@@ -23,10 +23,11 @@ interface Props {
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   hasEmail: boolean;
+  hasWallet?: boolean;
   giphyEnabled?: boolean;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, giphyEnabled }: Props) {
+export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, hasWallet, giphyEnabled }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
@@ -99,7 +100,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
         </div>
       </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-hidden">
-        {!hasEmail && <EmailLinkBanner />}
+        {!hasEmail && !hasWallet && <EmailLinkBanner />}
         <TopicView
           topic={topic}
           currentUser={{

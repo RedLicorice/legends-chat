@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Camera, LogOut, Mail, CheckCircle } from "lucide-react";
+import { X, Camera, LogOut, Mail, CheckCircle, Wallet } from "lucide-react";
+import { WalletAuthButton } from "@/components/WalletAuthButton";
 
 interface Props {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut?: boolean; permissions?: string[] };
@@ -27,12 +28,34 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSuccess, setEmailSuccess] = useState(false);
 
+  // Wallet linking
+  const [walletAddress, setWalletAddress] = useState<string | null | undefined>(undefined);
+  const [unlinkingWallet, setUnlinkingWallet] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
+
   useEffect(() => {
-    fetch("/api/user/profile")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.email) setLinkedEmail(d.email); })
-      .catch(() => {});
+    Promise.all([
+      fetch("/api/user/profile").then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch("/api/user/wallet").then((r) => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([profile, wallet]) => {
+      if (profile?.email) setLinkedEmail(profile.email);
+      setWalletAddress(wallet?.walletAddress ?? null);
+    });
   }, []);
+
+  async function unlinkWallet() {
+    setUnlinkingWallet(true);
+    setWalletError(null);
+    try {
+      const r = await fetch("/api/user/wallet", { method: "DELETE" });
+      if (!r.ok) { const d = await r.json() as { error?: string }; throw new Error(d.error ?? "Failed to unlink."); }
+      setWalletAddress(null);
+    } catch (e) {
+      setWalletError((e as Error).message);
+    } finally {
+      setUnlinkingWallet(false);
+    }
+  }
 
   async function sendOtp() {
     setEmailLoading(true);
@@ -245,6 +268,34 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
           )}
           {emailError && <p className="text-xs text-danger">{emailError}</p>}
         </div>
+
+        {/* Wallet linking */}
+        {walletAddress !== undefined && (
+          <div className="mb-4 rounded-lg border border-border p-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Wallet className="h-4 w-4 text-muted" />
+              <span>Web3 Wallet</span>
+            </div>
+            {walletAddress ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono text-xs text-muted">{walletAddress}</span>
+                <button
+                  type="button"
+                  onClick={unlinkWallet}
+                  disabled={unlinkingWallet}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs text-danger hover:bg-panel2 disabled:opacity-50"
+                >
+                  {unlinkingWallet ? "…" : "Unlink"}
+                </button>
+              </div>
+            ) : (
+              <WalletAuthButton mode="link" onSuccess={() => {
+                fetch("/api/user/wallet").then((r) => r.ok ? r.json() : null).then((d) => setWalletAddress(d?.walletAddress ?? null)).catch(() => {});
+              }} />
+            )}
+            {walletError && <p className="text-xs text-danger">{walletError}</p>}
+          </div>
+        )}
 
         {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 
