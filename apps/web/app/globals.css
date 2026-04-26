@@ -25,19 +25,19 @@
    Sets backdrop-filter and transparent panel/border colours.
 ────────────────────────────────────────────────────── */
 [data-glass="1"] .bg-panel {
-  background-color: rgba(var(--ch-panel), 0.60);
+  background-color: rgb(var(--ch-panel) / 0.60);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }
 
 [data-glass="1"] .bg-panel2 {
-  background-color: rgba(var(--ch-panel2), 0.65);
+  background-color: rgb(var(--ch-panel2) / 0.65);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
 [data-glass="1"] .border-border {
-  border-color: rgba(var(--ch-border), 0.70);
+  border-color: rgb(var(--ch-border) / 0.70);
 }
 
 /* ──────────────────────────────────────────────────────

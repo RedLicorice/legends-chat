@@ -20,7 +20,7 @@ INSERT INTO "themes" ("id", "name", "is_builtin", "colors", "is_glass") VALUES
   'matte-glass',
   'Matte Glass',
   true,
-  '{"bg":"15 12 35","panel":"27 22 54","panel2":"35 30 68","border":"61 53 101","text":"238 239 252","muted":"154 156 192","accent":"139 112 255","accent2":"92 212 255","danger":"255 98 132"}',
+  '{"bg":"15 12 35","panel":"27 22 54","panel2":"35 30 68","border":"38 45 59","text":"238 239 252","muted":"154 156 192","accent":"139 112 255","accent2":"92 212 255","danger":"255 98 132"}',
   true
 )
 ON CONFLICT ("id") DO NOTHING;
