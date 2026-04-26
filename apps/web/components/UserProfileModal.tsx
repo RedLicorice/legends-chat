@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { X, Camera, LogOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Camera, LogOut, Mail, CheckCircle } from "lucide-react";
 
 interface Props {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut?: boolean; permissions?: string[] };
@@ -17,6 +17,64 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Email linking
+  const [linkedEmail, setLinkedEmail] = useState<string | null>(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [otpInput, setOtpInput] = useState("");
+  const [emailStep, setEmailStep] = useState<"idle" | "otp">("idle");
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailSuccess, setEmailSuccess] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/user/profile")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.email) setLinkedEmail(d.email); })
+      .catch(() => {});
+  }, []);
+
+  async function sendOtp() {
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      const res = await fetch("/api/user/email-link", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: emailInput.trim().toLowerCase() }),
+      });
+      const d = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(d.error ?? "Failed to send code.");
+      setEmailStep("otp");
+    } catch (e) {
+      setEmailError((e as Error).message);
+    } finally {
+      setEmailLoading(false);
+    }
+  }
+
+  async function verifyOtp() {
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      const res = await fetch("/api/user/email-link/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ otp: otpInput.trim() }),
+      });
+      const d = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(d.error ?? "Invalid code.");
+      setLinkedEmail(emailInput.trim().toLowerCase());
+      setEmailSuccess(true);
+      setEmailStep("idle");
+      setEmailInput("");
+      setOtpInput("");
+    } catch (e) {
+      setEmailError((e as Error).message);
+    } finally {
+      setEmailLoading(false);
+    }
+  }
 
   async function uploadAvatar(file: File) {
     setUploading(true);
@@ -131,6 +189,62 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
             </div>
           </div>
         </label>
+
+        {/* Email linking */}
+        <div className="mb-4 rounded-lg border border-border p-3 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Mail className="h-4 w-4 text-muted" />
+            <span>Email</span>
+            {emailSuccess && <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />}
+          </div>
+          {linkedEmail ? (
+            <p className="text-xs text-muted">{linkedEmail}</p>
+          ) : emailStep === "idle" ? (
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="you@example.com"
+                className="min-w-0 flex-1 rounded-md border border-border bg-panel2 px-2 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              <button
+                type="button"
+                onClick={sendOtp}
+                disabled={emailLoading || !emailInput.trim()}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {emailLoading ? "…" : "Link"}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-muted">Code sent to {emailInput}.</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={otpInput}
+                  onChange={(e) => setOtpInput(e.target.value)}
+                  placeholder="6-digit code"
+                  maxLength={6}
+                  className="min-w-0 flex-1 rounded-md border border-border bg-panel2 px-2 py-1.5 text-xs outline-none focus:border-accent font-mono tracking-widest"
+                />
+                <button
+                  type="button"
+                  onClick={verifyOtp}
+                  disabled={emailLoading || otpInput.length < 6}
+                  className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                >
+                  {emailLoading ? "…" : "Verify"}
+                </button>
+              </div>
+              <button type="button" onClick={() => { setEmailStep("idle"); setEmailError(null); }} className="text-xs text-muted hover:text-text">
+                ← Back
+              </button>
+            </div>
+          )}
+          {emailError && <p className="text-xs text-danger">{emailError}</p>}
+        </div>
 
         {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 

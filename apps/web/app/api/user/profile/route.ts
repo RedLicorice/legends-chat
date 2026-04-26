@@ -20,6 +20,7 @@ export async function GET() {
     avatarUrl: user.avatarUrl,
     role: user.role,
     presenceOptOut: user.presenceOptOut,
+    email: user.email ?? null,
   });
 }
 
