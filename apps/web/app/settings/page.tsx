@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { TotpPanel } from "@/components/TotpPanel";
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
+import { WalletPanel } from "@/components/WalletPanel";
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 
@@ -49,6 +50,10 @@ export default async function SettingsPage() {
 
         <div className="rounded-xl border border-border bg-panel p-5">
           <TotpPanel />
+        </div>
+
+        <div className="rounded-xl border border-border bg-panel p-5">
+          <WalletPanel />
         </div>
       </div>
     </main>

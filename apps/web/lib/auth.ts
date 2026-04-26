@@ -151,6 +151,7 @@ export interface CurrentUser {
   displayName: string;
   avatarUrl: string | null;
   email: string | null;
+  walletAddress: string | null;
   isAnon: boolean;
   presenceOptOut: boolean;
 }
@@ -185,6 +186,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
     email: u.email ?? null,
+    walletAddress: u.walletAddress ?? null,
     isAnon: u.isAnon,
     presenceOptOut: u.presenceOptOut,
   };

@@ -10,6 +10,8 @@ const PUBLIC_PATHS = [
   "/api/health",
   "/api/auth/login",
   "/api/auth/register",
+  "/api/auth/wallet/challenge",
+  "/api/auth/wallet/verify",
   "/api/register-config",
   "/api/invite-check",
   "/api/user/email-link/verify",

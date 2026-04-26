@@ -51,11 +51,13 @@ export const users = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     presenceOptOut: boolean("presence_opt_out").notNull().default(false),
+    walletAddress: text("wallet_address"),
   },
   (t) => ({
     telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId).where(sql`${t.telegramUserId} IS NOT NULL`),
     invitedByIdx: index("users_invited_by_idx").on(t.invitedByUserId),
     anonExpiryIdx: index("users_anon_expiry_idx").on(t.anonExpiresAt).where(sql`${t.isAnon} = true`),
+    walletAddressIdx: uniqueIndex("users_wallet_address_idx").on(t.walletAddress).where(sql`${t.walletAddress} IS NOT NULL`),
   }),
 );
 
