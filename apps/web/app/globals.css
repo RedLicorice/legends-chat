@@ -3,11 +3,11 @@
 @tailwind utilities;
 
 /* ──────────────────────────────────────────────────────
-   Theme tokens (channel format: R G B, no commas)
-   Used by Tailwind via rgb(var(--ch-X) / <alpha>)
+   Default (dark) theme token fallbacks — channel format: R G B
+   These are overridden per-theme by the inline <style> injected in layout.
+   Tailwind reads these via rgb(var(--ch-X) / <alpha>).
 ────────────────────────────────────────────────────── */
-:root,
-[data-theme="dark"] {
+:root {
   --ch-bg:      11  13  18;
   --ch-panel:   20  24  33;
   --ch-panel2:  26  31  43;
@@ -19,39 +19,25 @@
   --ch-danger: 255  92 124;
 }
 
-[data-theme="matte-glass"] {
-  --ch-bg:      15  12  35;
-  --ch-panel:   27  22  54;
-  --ch-panel2:  35  30  68;
-  --ch-border:  61  53 101;
-  --ch-text:   238 239 252;
-  --ch-muted:  154 156 192;
-  --ch-accent: 139 112 255;
-  --ch-accent2: 92 212 255;
-  --ch-danger: 255  98 132;
-}
-
 /* ──────────────────────────────────────────────────────
-   Matte-glass: gradient background + frosted panels
+   Glass-mode overrides — applied when a theme has isGlass=true.
+   The layout injects  data-glass="1"  on <html> for those themes.
+   Sets backdrop-filter and transparent panel/border colours.
 ────────────────────────────────────────────────────── */
-[data-theme="matte-glass"] body {
-  background: radial-gradient(ellipse 90% 90% at 15% 10%, #1c1448 0%, #0b0e22 55%, #070c14 100%) fixed;
-}
-
-[data-theme="matte-glass"] .bg-panel {
-  background-color: rgba(27, 22, 54, 0.60);
+[data-glass="1"] .bg-panel {
+  background-color: rgba(var(--ch-panel), 0.60);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }
 
-[data-theme="matte-glass"] .bg-panel2 {
-  background-color: rgba(35, 30, 68, 0.65);
+[data-glass="1"] .bg-panel2 {
+  background-color: rgba(var(--ch-panel2), 0.65);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-[data-theme="matte-glass"] .border-border {
-  border-color: rgba(61, 53, 101, 0.70);
+[data-glass="1"] .border-border {
+  border-color: rgba(var(--ch-border), 0.70);
 }
 
 /* ──────────────────────────────────────────────────────

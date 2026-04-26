@@ -21,8 +21,6 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
   const [giphyEnabled, setGiphyEnabled] = useState(settings.giphy_enabled === "true");
   const [giphyApiKey, setGiphyApiKey] = useState(settings.giphy_api_key ?? "");
-  const [defaultTheme, setDefaultTheme] = useState(settings.default_theme ?? "dark");
-  const [accentColor, setAccentColor] = useState(settings.theme_accent_color ?? "#7c5cff");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -46,8 +44,6 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           farewell_message: farewellMessage.trim() || null,
           giphy_enabled: String(giphyEnabled),
           giphy_api_key: giphyApiKey.trim() || null,
-          default_theme: defaultTheme,
-          theme_accent_color: /^#[0-9a-f]{6}$/i.test(accentColor.trim()) ? accentColor.trim() : null,
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -194,49 +190,6 @@ export function AdminSettingsForm({ settings, topics }: Props) {
             className={inputCls}
           />
           <p className="mt-1 text-xs text-muted">Required when Giphy is enabled. Get one at developers.giphy.com.</p>
-        </Field>
-      </Section>
-
-      {/* Theme */}
-      <Section title="Theme">
-        <Field label="Default theme">
-          <select
-            value={defaultTheme}
-            onChange={(e) => setDefaultTheme(e.target.value)}
-            className={inputCls}
-          >
-            <option value="dark">Dark</option>
-            <option value="matte-glass">Matte Glass</option>
-          </select>
-          <p className="mt-1 text-xs text-muted">Applied to new users and anyone who hasn't chosen a theme.</p>
-        </Field>
-        <Field label="Accent color override">
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={accentColor}
-              onChange={(e) => setAccentColor(e.target.value)}
-              className="h-9 w-16 cursor-pointer rounded-lg border border-border bg-panel2 p-1"
-            />
-            <input
-              type="text"
-              value={accentColor}
-              onChange={(e) => setAccentColor(e.target.value)}
-              placeholder="#7c5cff"
-              maxLength={7}
-              className="w-32 rounded-lg border border-border bg-panel2 px-3 py-2 text-sm font-mono outline-none focus:border-accent"
-            />
-            <button
-              type="button"
-              onClick={() => setAccentColor("#7c5cff")}
-              className="text-xs text-muted hover:text-text"
-            >
-              Reset
-            </button>
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            Overrides the accent color for all themes. Leave as default (#7c5cff) to use each theme's built-in accent.
-          </p>
         </Field>
       </Section>
 

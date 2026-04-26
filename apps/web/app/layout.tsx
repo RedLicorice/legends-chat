@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import "./globals.css";
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
+import { themes } from "@legends/db/schema";
+import { asc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -33,35 +35,56 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-function hexToChannels(hex: string): string | null {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const r = parseInt(m[1]!.slice(0, 2), 16);
-  const g = parseInt(m[1]!.slice(2, 4), 16);
-  const b = parseInt(m[1]!.slice(4, 6), 16);
-  return `${r} ${g} ${b}`;
+function buildThemeCss(
+  themeRows: { id: string; colors: Record<string, string>; isGlass: boolean; bgGradient: string | null }[],
+): string {
+  return themeRows.map((t) => {
+    const colors = t.colors ?? {};
+    const vars = Object.entries(colors)
+      .map(([k, v]) => `--ch-${k}:${v}`)
+      .join(";");
+
+    let css = `[data-theme="${t.id}"]{${vars}}`;
+
+    if (t.isGlass) {
+      const grad =
+        t.bgGradient ??
+        "radial-gradient(ellipse 90% 90% at 15% 10%, #1c1448 0%, #0b0e22 55%, #070c14 100%)";
+      css += `[data-theme="${t.id}"] body{background:${grad};background-attachment:fixed}`;
+    }
+
+    return css;
+  }).join("");
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const jar = await cookies();
   const userTheme = jar.get("lc_theme")?.value;
 
-  const [defaultTheme, accentHex] = await Promise.all([
+  const [allThemes, defaultTheme] = await Promise.all([
+    db.select().from(themes).orderBy(asc(themes.createdAt)).catch(() => []),
     getSetting(db, "default_theme").catch(() => null),
-    getSetting(db, "theme_accent_color").catch(() => null),
   ]);
 
-  const validThemes = ["dark", "matte-glass"];
-  const theme = validThemes.includes(userTheme ?? "") ? userTheme! : (validThemes.includes(defaultTheme ?? "") ? defaultTheme! : "dark");
+  const validIds = new Set(allThemes.map((t) => t.id));
+  const resolved = validIds.has(userTheme ?? "") ? userTheme! : (validIds.has(defaultTheme ?? "") ? defaultTheme! : "dark");
+  const activeTheme = allThemes.find((t) => t.id === resolved);
+  const isGlass = activeTheme?.isGlass ?? false;
 
-  const accentChannels = accentHex ? hexToChannels(accentHex) : null;
-  const customCss = accentChannels ? `:root,[data-theme]{--ch-accent:${accentChannels};}` : "";
+  const themeCss = buildThemeCss(
+    allThemes.map((t) => ({
+      id: t.id,
+      colors: (t.colors as Record<string, string>) ?? {},
+      isGlass: t.isGlass,
+      bgGradient: t.bgGradient,
+    })),
+  );
 
   return (
-    <html lang="en" data-theme={theme} suppressHydrationWarning>
+    <html lang="en" data-theme={resolved} data-glass={isGlass ? "1" : "0"} suppressHydrationWarning>
       <head>
-        {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
-        {/* Block pinch-to-zoom on iOS Safari (ignores viewport user-scalable=no since iOS 10) */}
+        {themeCss && <style dangerouslySetInnerHTML={{ __html: themeCss }} />}
+        {/* Block pinch-to-zoom on iOS Safari */}
         <script dangerouslySetInnerHTML={{ __html: `
           document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
           document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });

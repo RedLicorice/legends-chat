@@ -59,6 +59,16 @@ export const users = pgTable(
   }),
 );
 
+export const themes = pgTable("themes", {
+  id: text("id").primaryKey().notNull(),
+  name: text("name").notNull(),
+  isBuiltin: boolean("is_builtin").notNull().default(false),
+  colors: jsonb("colors").$type<Record<string, string>>().notNull().default({}),
+  isGlass: boolean("is_glass").notNull().default(false),
+  bgGradient: text("bg_gradient"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const roles = pgTable("roles", {
   name: text("name").primaryKey().notNull(),
   label: text("label").notNull(),
