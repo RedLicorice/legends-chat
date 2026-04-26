@@ -111,15 +111,6 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
         // Desktop: width-based collapse
         desktopCollapsed ? "md:w-0 md:border-r-0" : "md:w-72",
       )}>
-        {/* Close button (mobile) */}
-        <button
-          type="button"
-          onClick={close}
-          className="absolute right-3 top-3 rounded-md p-1 hover:bg-panel2 transition md:hidden"
-        >
-          <X className="h-5 w-5" />
-        </button>
-
         {/* Header */}
         <div className="flex items-center gap-1 border-b border-border px-3 py-3">
           <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-accent">
@@ -168,6 +159,15 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>
+          {/* Mobile close — in-row so it never overlaps other buttons */}
+          <button
+            type="button"
+            onClick={close}
+            className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
+            aria-label="Close menu"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Middle — scrollable content (topics list or admin nav) */}
@@ -186,6 +186,12 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
             </Link>
           ) : (
             <>
+              <Link
+                href="/"
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+              >
+                <Home className="h-4 w-4" /> Home
+              </Link>
               <Link
                 href="/settings"
                 className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"

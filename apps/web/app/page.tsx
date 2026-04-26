@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listTopicsForUser } from "@/lib/topics";
 import { HomeLayout } from "@/components/HomeLayout";
+import { db } from "@/lib/db";
+import { getAllSettings } from "@legends/db/system-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +15,12 @@ export default async function HomePage() {
   const homeTopic = topics.find((t) => t.isHomeTopic);
   if (homeTopic) redirect(`/t/${homeTopic.slug}`);
 
+  const settings = await getAllSettings(db);
+  const communityName = settings.community_name ?? "Topics";
+
   return (
     <HomeLayout
+      communityName={communityName}
       user={{
         id: user.id,
         displayName: user.displayName,
