@@ -598,11 +598,13 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
         >
           <Menu className="h-5 w-5" />
         </button>
-        {topic.isE2ee && <Lock className="h-4 w-4 text-accent2" />}
         <div className="flex-1">
           <h1 className="text-lg font-semibold">{topic.title}</h1>
-          <p className="flex items-center gap-1 text-xs text-muted">
-            {topic.isE2ee && <Lock className="h-3 w-3 text-accent2" />}
+          <p className="flex items-center gap-1.5 text-xs text-muted">
+            {topic.isE2ee
+              ? <Lock className="h-3 w-3 text-accent2" />
+              : <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
+            }
             {connected ? "connected" : "connecting…"}
           </p>
         </div>

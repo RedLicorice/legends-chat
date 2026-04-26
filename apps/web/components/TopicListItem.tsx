@@ -41,12 +41,11 @@ export function TopicListItem({
         href={`/t/${topic.slug}`}
         className="flex items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-panel2"
       >
-        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-panel2 text-sm font-semibold">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-panel2 text-sm font-semibold">
           {topic.iconUrl
             ? <img src={topic.iconUrl} alt="" className="h-full w-full object-cover" />
             : topic.title.slice(0, 1).toUpperCase()
           }
-          {connectionStatus && <StatusBadge isE2ee={topic.isE2ee} status={connectionStatus} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
@@ -72,12 +71,11 @@ export function TopicListItem({
       href={`/t/${topic.slug}`}
       className="flex items-start gap-3 rounded-xl border border-transparent px-4 py-3 transition hover:border-border hover:bg-panel2"
     >
-      <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-panel2 text-base font-semibold">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-panel2 text-base font-semibold">
         {topic.iconUrl
           ? <img src={topic.iconUrl} alt="" className="h-full w-full object-cover" />
           : topic.title.slice(0, 1).toUpperCase()
         }
-        {connectionStatus && <StatusBadge isE2ee={topic.isE2ee} status={connectionStatus} />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
