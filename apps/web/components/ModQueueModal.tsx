@@ -21,9 +21,10 @@ interface FlagView {
 
 interface Props {
   onClose: () => void;
+  onCountChange?: (count: number) => void;
 }
 
-export function ModQueueModal({ onClose }: Props) {
+export function ModQueueModal({ onClose, onCountChange }: Props) {
   const [flags, setFlags] = useState<FlagView[]>([]);
   const [canBan, setCanBan] = useState(false);
   const [canMute, setCanMute] = useState(false);
@@ -39,12 +40,13 @@ export function ModQueueModal({ onClose }: Props) {
       setFlags(data.flags);
       setCanBan(data.canBan);
       setCanMute(data.canMute);
+      onCountChange?.(data.flags.length);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onCountChange]);
 
   useEffect(() => { fetchFlags(); }, [fetchFlags]);
 

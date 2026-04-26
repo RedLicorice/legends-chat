@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film,
@@ -63,13 +63,20 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
   const isAdmin = has(PERMISSIONS.ADMIN_CONFIG);
   const canModQueue = has(PERMISSIONS.MODERATION_QUEUE_REVIEW);
 
-  useEffect(() => {
+  const refreshFlagCount = useCallback(() => {
     if (!canModQueue) return;
     fetch("/api/admin/moderation/flags")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setPendingFlags((d.flags as unknown[]).length); })
       .catch(() => {});
   }, [canModQueue]);
+
+  useEffect(() => {
+    refreshFlagCount();
+    if (!canModQueue) return;
+    const id = setInterval(refreshFlagCount, 30_000);
+    return () => clearInterval(id);
+  }, [canModQueue, refreshFlagCount]);
 
   const initials = profile.displayName.slice(0, 1).toUpperCase();
 
@@ -237,7 +244,12 @@ export function AppSidebar({ user, children, variant = "chat", isOpen: isOpenPro
         />
       )}
 
-      {showModQueue && <ModQueueModal onClose={() => setShowModQueue(false)} />}
+      {showModQueue && (
+        <ModQueueModal
+          onClose={() => setShowModQueue(false)}
+          onCountChange={(n) => setPendingFlags(n)}
+        />
+      )}
 
       {showIosInstall && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 md:items-center">

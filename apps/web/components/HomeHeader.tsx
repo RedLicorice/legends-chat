@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Shield, AlertTriangle, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { PERMISSIONS } from "@legends/shared";
@@ -31,13 +31,20 @@ export function HomeHeader({ user }: Props) {
   const canModQueue = user.permissions.includes(PERMISSIONS.MODERATION_QUEUE_REVIEW);
   const initials = profile.displayName.slice(0, 1).toUpperCase();
 
-  useEffect(() => {
+  const refreshFlagCount = useCallback(() => {
     if (!canModQueue) return;
     fetch("/api/admin/moderation/flags")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setPendingFlags((d.flags as unknown[]).length); })
       .catch(() => {});
   }, [canModQueue]);
+
+  useEffect(() => {
+    refreshFlagCount();
+    if (!canModQueue) return;
+    const id = setInterval(refreshFlagCount, 30_000);
+    return () => clearInterval(id);
+  }, [canModQueue, refreshFlagCount]);
 
   return (
     <>
@@ -140,7 +147,12 @@ export function HomeHeader({ user }: Props) {
           onUpdate={(patch) => setProfile((p) => ({ ...p, ...patch }))}
         />
       )}
-      {showModQueue && <ModQueueModal onClose={() => setShowModQueue(false)} />}
+      {showModQueue && (
+        <ModQueueModal
+          onClose={() => setShowModQueue(false)}
+          onCountChange={(n) => setPendingFlags(n)}
+        />
+      )}
     </>
   );
 }
