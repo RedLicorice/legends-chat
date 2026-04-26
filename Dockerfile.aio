@@ -1,0 +1,87 @@
+###############################################################################
+# Legends Chat — All-in-One image
+#
+# Bundles the app (Next.js + WebSocket server + Telegram bot), nginx,
+# PostgreSQL 16, and Redis 7 in a single container.
+#
+# VOLUME  /data          — persistent data (Postgres + Redis)
+# EXPOSE  80             — single public port (nginx reverse proxy)
+#
+# Required env vars (no defaults — must be supplied at runtime):
+#   JWT_SECRET            — HS256 secret for access tokens
+#   JWT_REFRESH_SECRET    — HS256 secret for refresh tokens
+#   ENCRYPTION_KEY        — 32-char key used to wrap DB encryption keys
+#   APP_PUBLIC_URL        — public-facing base URL, e.g. https://chat.example.com
+#
+# Optional env vars:
+#   DB_USER               — Postgres role name          (default: legends)
+#   DB_PASS               — Postgres role password      (default: legends)
+#   DB_NAME               — Postgres database name      (default: legends)
+#   TELEGRAM_BOT_TOKEN    — Required only if Telegram bot is used
+#   WEB_PUSH_*            — VAPID keys for web push notifications
+#   SMTP_*                — Mail relay for email auth
+###############################################################################
+
+# ── Shared base ──────────────────────────────────────────────────────────────
+FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+# ── Install workspace dependencies ───────────────────────────────────────────
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/web/package.json        ./apps/web/
+COPY apps/ws/package.json         ./apps/ws/
+COPY apps/bot/package.json        ./apps/bot/
+COPY packages/crypto/package.json ./packages/crypto/
+COPY packages/db/package.json     ./packages/db/
+COPY packages/shared/package.json ./packages/shared/
+RUN pnpm install --frozen-lockfile
+
+# ── Build Next.js standalone ─────────────────────────────────────────────────
+FROM deps AS builder
+COPY . .
+RUN pnpm --filter @legends/web build
+
+# ── AIO runtime ──────────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+RUN apk add --no-cache \
+        nginx supervisor \
+        postgresql16 postgresql16-client \
+        redis \
+    && mkdir -p /var/log/supervisor /run/nginx
+
+ENV NODE_ENV=production
+ENV PGDATA=/data/postgres
+
+# Pre-create data directories with correct ownership so a new named volume
+# inherits the directory structure from the image layer on first mount.
+RUN mkdir -p /data/postgres /data/redis \
+    && chown postgres:postgres /data/postgres \
+    && chmod 700 /data/postgres
+
+WORKDIR /app
+
+# Next.js standalone (self-contained, includes its own minimal node_modules)
+COPY --from=builder /app/apps/web/.next/standalone         /app/web/
+COPY --from=builder /app/apps/web/.next/static             /app/web/apps/web/.next/static
+COPY --from=builder /app/apps/web/public                   /app/web/apps/web/public
+
+# WS + Bot + DB package (Docker COPY dereferences pnpm symlinks)
+COPY --from=builder /app/node_modules    ./node_modules
+COPY --from=builder /app/packages        ./packages
+COPY --from=builder /app/apps/ws         ./apps/ws
+COPY --from=builder /app/apps/bot        ./apps/bot
+COPY --from=builder /app/package.json    /app/pnpm-workspace.yaml \
+                    /app/tsconfig.base.json ./
+
+COPY deploy/nginx.conf           /etc/nginx/nginx.conf
+COPY deploy/supervisord.aio.conf /etc/supervisord.conf
+COPY deploy/entrypoint-aio.sh    /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+VOLUME ["/data"]
+EXPOSE 80
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -42,6 +42,8 @@ COPY --from=builder /app/package.json    /app/pnpm-workspace.yaml \
 
 COPY deploy/nginx.conf       /etc/nginx/nginx.conf
 COPY deploy/supervisord.conf /etc/supervisord.conf
+COPY deploy/entrypoint.sh    /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 80
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
+ENTRYPOINT ["/entrypoint.sh"]
