@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   }
   await redis.del(`legends:wallet:nonce:${normalized}`);
 
-  const [nonce, issuedAt] = stored.split(":");
+  const [nonce, issuedAt] = stored.split("|");
   const message = buildChallengeMessage(address, nonce!, issuedAt!);
 
   let recovered: string;

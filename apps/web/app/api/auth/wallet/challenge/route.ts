@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const issuedAt = new Date().toISOString();
 
   // Store nonce + issuedAt for later verification
-  await redis.set(`legends:wallet:nonce:${normalized}`, `${nonce}:${issuedAt}`, "EX", NONCE_TTL);
+  await redis.set(`legends:wallet:nonce:${normalized}`, `${nonce}|${issuedAt}`, "EX", NONCE_TTL);
 
   const message = buildChallengeMessage(address, nonce, issuedAt);
   return NextResponse.json({ message });

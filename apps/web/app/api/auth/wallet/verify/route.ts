@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   // Consume immediately — single-use nonce
   await redis.del(`legends:wallet:nonce:${normalized}`);
 
-  const [nonce, issuedAt] = stored.split(":");
+  const [nonce, issuedAt] = stored.split("|");
   const message = buildChallengeMessage(address, nonce!, issuedAt!);
 
   // Recover signer from the EIP-191 personal_sign signature
