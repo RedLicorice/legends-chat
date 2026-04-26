@@ -21,9 +21,10 @@ interface Props {
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   hasEmail: boolean;
+  giphyEnabled?: boolean;
 }
 
-export function TopicLayout({ user, topics, currentSlug, topic, mute, hasEmail }: Props) {
+export function TopicLayout({ user, topics, currentSlug, topic, mute, hasEmail, giphyEnabled }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
 
@@ -60,6 +61,7 @@ export function TopicLayout({ user, topics, currentSlug, topic, mute, hasEmail }
             permissions: user.permissions,
           }}
           mute={mute}
+          giphyEnabled={giphyEnabled}
           onMenuOpen={() => setSidebarOpen(true)}
           onConnectionChange={setConnected}
         />

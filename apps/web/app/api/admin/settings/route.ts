@@ -39,6 +39,8 @@ export async function PATCH(req: Request) {
     "community_banner_url",
     "pwa_icon_url",
     "registration_mode",
+    "giphy_enabled",
+    "giphy_api_key",
   ] as const;
 
   for (const key of allowed) {

@@ -1,11 +1,14 @@
 import { z } from "zod";
 
 export const attachmentSchema = z.object({
-  type: z.enum(["image", "gif"]),
+  type: z.enum(["image", "gif", "file"]),
   url: z.string().min(1).max(2048),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   thumbnailUrl: z.string().min(1).max(2048).optional(),
+  filename: z.string().max(255).optional(),
+  mimeType: z.string().max(128).optional(),
+  size: z.number().int().nonnegative().optional(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
 

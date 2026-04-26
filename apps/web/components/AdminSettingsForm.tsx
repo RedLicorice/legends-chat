@@ -18,6 +18,8 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [defaultTopicId, setDefaultTopicId] = useState(settings.default_topic_id ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcome_message ?? "Welcome, {nickname}!");
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
+  const [giphyEnabled, setGiphyEnabled] = useState(settings.giphy_enabled === "true");
+  const [giphyApiKey, setGiphyApiKey] = useState(settings.giphy_api_key ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -39,6 +41,8 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           default_topic_id: defaultTopicId || null,
           welcome_message: welcomeMessage.trim() || null,
           farewell_message: farewellMessage.trim() || null,
+          giphy_enabled: String(giphyEnabled),
+          giphy_api_key: giphyApiKey.trim() || null,
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -149,6 +153,33 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           <p className="mt-1 text-xs text-muted">
             Use <code className="rounded bg-panel2 px-1">{"{nickname}"}</code> for their display name.
           </p>
+        </Field>
+      </Section>
+
+      {/* Giphy */}
+      <Section title="GIF — Giphy integration">
+        <Field label="Enable Giphy">
+          <label className="flex cursor-pointer items-center gap-3">
+            <div
+              role="switch"
+              aria-checked={giphyEnabled}
+              onClick={() => setGiphyEnabled((v) => !v)}
+              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${giphyEnabled ? "bg-accent" : "bg-border"}`}
+            >
+              <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${giphyEnabled ? "translate-x-6" : "translate-x-1"}`} />
+            </div>
+            <span className="text-sm">{giphyEnabled ? "Giphy search enabled" : "Giphy disabled (library only)"}</span>
+          </label>
+        </Field>
+        <Field label="Giphy API key">
+          <input
+            type="password"
+            value={giphyApiKey}
+            onChange={(e) => setGiphyApiKey(e.target.value)}
+            placeholder="Paste your Giphy API key"
+            className={inputCls}
+          />
+          <p className="mt-1 text-xs text-muted">Required when Giphy is enabled. Get one at developers.giphy.com.</p>
         </Field>
       </Section>
 

@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { getAllSettings } from "@legends/db/system-settings";
 
-const GIPHY_API_KEY = process.env.GIPHY_API_KEY ?? "";
 const GIPHY_BASE = "https://api.giphy.com/v1/gifs";
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!GIPHY_API_KEY) return NextResponse.json({ error: "GIPHY_API_KEY not configured" }, { status: 503 });
+
+  const settings = await getAllSettings(db);
+  const giphyEnabled = settings.giphy_enabled === "true";
+  const giphyKey = settings.giphy_api_key ?? process.env.GIPHY_API_KEY ?? "";
+
+  if (!giphyEnabled || !giphyKey) {
+    return NextResponse.json({ error: "Giphy not enabled" }, { status: 503 });
+  }
 
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") ?? "";
@@ -16,7 +24,7 @@ export async function GET(req: Request) {
 
   const endpoint = q.trim() ? "search" : "trending";
   const params = new URLSearchParams({
-    api_key: GIPHY_API_KEY,
+    api_key: giphyKey,
     limit: String(limit),
     rating: "g",
     ...(q.trim() && { q }),

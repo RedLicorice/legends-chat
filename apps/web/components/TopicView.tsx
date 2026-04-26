@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart2, CornerDownLeft, Flag, ImagePlus, Lock, Menu, MessageSquareText, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
+import { BarChart2, CornerDownLeft, FileText, Flag, ImagePlus, Lock, Menu, MessageSquareText, Paperclip, Search, Send, SmilePlus, Sticker, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { io, type Socket } from "socket.io-client";
-import { WS_EVENTS } from "@legends/shared";
+import { WS_EVENTS, PERMISSIONS } from "@legends/shared";
 import { cn } from "@/lib/cn";
 import { GifPicker } from "@/components/GifPicker";
 import { EmojiPickerPopover } from "@/components/EmojiPickerPopover";
@@ -22,11 +22,14 @@ import type {
 } from "@/lib/e2ee";
 
 interface Attachment {
-  type: "image" | "gif";
+  type: "image" | "gif" | "file";
   url: string;
   width?: number;
   height?: number;
   thumbnailUrl?: string;
+  filename?: string;
+  mimeType?: string;
+  size?: number;
 }
 
 interface PollOption {
@@ -91,6 +94,7 @@ interface TopicViewProps {
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
   currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
+  giphyEnabled?: boolean;
   onMenuOpen?: () => void;
   onConnectionChange?: (connected: boolean) => void;
 }
@@ -134,7 +138,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionChange }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, onConnectionChange }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -167,13 +171,15 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
   const socketRef = useRef<Socket | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const fileUploadRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<RichTextEditorHandle | null>(null);
   const composeEmojiRef = useRef<HTMLButtonElement | null>(null);
   const reactionBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const canCreatePoll = currentUser.role !== "user";
-
   const canPost = topic.postRoles.length === 0 || topic.postRoles.includes(currentUser.role);
+  const canAttach = currentUser.permissions.includes(PERMISSIONS.CONTENT_ATTACHMENT);
+  const canUploadGif = currentUser.permissions.includes(PERMISSIONS.CONTENT_GIF_UPLOAD);
 
   useEffect(() => {
     const saved = localStorage.getItem(draftKey);
@@ -439,14 +445,18 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
     return decryptedTexts.get(msg.id) ?? "(encrypted…)";
   }
 
-  async function uploadFile(file: File): Promise<Attachment | null> {
+  async function uploadFile(file: File, bucket: "uploads" | "files" = "uploads"): Promise<Attachment | null> {
     setUploading(true);
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("bucket", bucket);
       const res = await fetch("/api/upload", { method: "POST", body: form });
-      const data = await res.json() as { url?: string; error?: string };
+      const data = await res.json() as { url?: string; filename?: string; mimeType?: string; size?: number; error?: string };
       if (!res.ok || !data.url) return null;
+      if (bucket === "files") {
+        return { type: "file", url: data.url, filename: data.filename, mimeType: data.mimeType, size: data.size };
+      }
       return { type: "image", url: data.url };
     } finally {
       setUploading(false);
@@ -720,9 +730,18 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
 
                   {m.attachments.length > 0 && (
                     <div className="mb-3 flex flex-col gap-2">
-                      {m.attachments.map((att, ai) => (
-                        <img key={ai} src={att.url} alt="" className="max-h-96 w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
-                      ))}
+                      {m.attachments.map((att, ai) =>
+                        att.type === "file" ? (
+                          <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-2 rounded-xl border border-border bg-panel2 px-3 py-2 text-sm hover:bg-panel">
+                            <FileText className="h-4 w-4 shrink-0 text-muted" />
+                            <span className="truncate">{att.filename ?? "Download file"}</span>
+                            {att.size && <span className="ml-auto shrink-0 text-xs text-muted">{(att.size / 1024).toFixed(0)} KB</span>}
+                          </a>
+                        ) : (
+                          <img key={ai} src={att.url} alt="" className="max-h-96 w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
+                        )
+                      )}
                     </div>
                   )}
 
@@ -842,9 +861,18 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
                     m.text.trim() === "" && m.attachments.length > 0 && "p-1")}>
                     {m.attachments.length > 0 && (
                       <div className={cn("flex flex-col gap-1", m.text.trim() && "mb-2")}>
-                        {m.attachments.map((att, ai) => (
-                          <img key={ai} src={att.url} alt="" className="max-h-64 max-w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
-                        ))}
+                        {m.attachments.map((att, ai) =>
+                          att.type === "file" ? (
+                            <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
+                              className={cn("flex items-center gap-2 rounded-xl border px-3 py-2 text-xs hover:opacity-90", mine ? "border-white/20 bg-white/10" : "border-border bg-panel")}>
+                              <FileText className="h-4 w-4 shrink-0" />
+                              <span className="truncate">{att.filename ?? "Download file"}</span>
+                              {att.size && <span className="ml-auto shrink-0 opacity-70">{(att.size / 1024).toFixed(0)} KB</span>}
+                            </a>
+                          ) : (
+                            <img key={ai} src={att.url} alt="" className="max-h-64 max-w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
+                          )
+                        )}
                       </div>
                     )}
                     {m.text.trim() && (
@@ -973,7 +1001,14 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
             <div className="mb-2 flex flex-wrap gap-2 px-1">
               {pendingAttachments.map((att, i) => (
                 <div key={i} className="relative">
-                  <img src={att.thumbnailUrl ?? att.url} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                  {att.type === "file" ? (
+                    <div className="flex h-16 w-32 items-center gap-1.5 rounded-lg border border-border bg-panel2 px-2">
+                      <FileText className="h-5 w-5 shrink-0 text-muted" />
+                      <span className="truncate text-xs text-muted">{att.filename ?? "file"}</span>
+                    </div>
+                  ) : (
+                    <img src={att.thumbnailUrl ?? att.url} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                  )}
                   <button type="button" onClick={() => removePendingAttachment(i)}
                     className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-danger text-white">
                     <X className="h-3 w-3" />
@@ -984,7 +1019,7 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
           )}
 
           <div className="relative">
-            {showGifPicker && <GifPicker onSelect={addGif} onClose={() => setShowGifPicker(false)} />}
+            {showGifPicker && <GifPicker onSelect={addGif} onClose={() => setShowGifPicker(false)} canUploadGif={canUploadGif} giphyEnabled={giphyEnabled} />}
             {showComposeEmoji && (
               <EmojiPickerPopover
                 anchorRef={composeEmojiRef}
@@ -1004,10 +1039,18 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
                 disabled={uploading}
               />
               <div className="flex items-center gap-2">
-                <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-                  className="text-muted hover:text-text disabled:opacity-50" title="Attach image">
-                  <ImagePlus className="h-4 w-4" />
-                </button>
+                {canAttach && (
+                  <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                    className="text-muted hover:text-text disabled:opacity-50" title="Attach image">
+                    <ImagePlus className="h-4 w-4" />
+                  </button>
+                )}
+                {canAttach && (
+                  <button type="button" onClick={() => fileUploadRef.current?.click()} disabled={uploading}
+                    className="text-muted hover:text-text disabled:opacity-50" title="Attach file">
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                )}
                 <button type="button" onClick={() => setShowGifPicker((v) => !v)}
                   className={cn("text-muted hover:text-text", showGifPicker && "text-accent")} title="GIF">
                   <Sticker className="h-4 w-4" />
@@ -1040,7 +1083,15 @@ export function TopicView({ topic, currentUser, mute, onMenuOpen, onConnectionCh
                 const file = e.target.files?.[0];
                 if (!file) return;
                 e.target.value = "";
-                const att = await uploadFile(file);
+                const att = await uploadFile(file, "uploads");
+                if (att) setPendingAttachments((prev) => [...prev, att]);
+              }} />
+            <input ref={fileUploadRef} type="file" className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                e.target.value = "";
+                const att = await uploadFile(file, "files");
                 if (att) setPendingAttachments((prev) => [...prev, att]);
               }} />
           </div>

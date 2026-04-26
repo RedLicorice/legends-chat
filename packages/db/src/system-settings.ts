@@ -10,7 +10,9 @@ export type SystemSettingKey =
   | "community_logo_url"
   | "community_banner_url"
   | "pwa_icon_url"
-  | "registration_mode"; // "telegram_only" | "open" | "closed"
+  | "registration_mode" // "telegram_only" | "open" | "closed"
+  | "giphy_enabled"
+  | "giphy_api_key";
 
 export async function getSetting(
   dbInstance: DB,

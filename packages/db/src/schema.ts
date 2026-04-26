@@ -451,3 +451,13 @@ export const e2eeSenderKeys = pgTable(
     uniqIdx: uniqueIndex("e2ee_sender_keys_uniq_idx").on(t.topicId, t.distributorUserId, t.recipientUserId),
   }),
 );
+
+export const customGifs = pgTable("custom_gifs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  url: text("url").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  title: text("title").notNull().default(""),
+  tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+  uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

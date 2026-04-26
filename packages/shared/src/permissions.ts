@@ -13,6 +13,8 @@ export const PERMISSIONS = {
   USERS_MUTE_DIRECT: "users.mute.direct",
   USERS_MUTE_LIFT: "users.mute.lift",
   ADMIN_CONFIG: "admin.config",
+  CONTENT_ATTACHMENT: "content.attachment",
+  CONTENT_GIF_UPLOAD: "content.gif.upload",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -23,6 +25,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MESSAGES_DELETE_OWN,
     PERMISSIONS.MESSAGES_FLAG,
     PERMISSIONS.INVITES_CREATE,
+    PERMISSIONS.CONTENT_ATTACHMENT,
   ],
   moderator: [
     PERMISSIONS.MESSAGES_DELETE_OWN,
@@ -34,6 +37,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.USERS_MUTE_DIRECT,
     PERMISSIONS.USERS_MUTE_LIFT,
     PERMISSIONS.TOPICS_CREATE,
+    PERMISSIONS.CONTENT_ATTACHMENT,
+    PERMISSIONS.CONTENT_GIF_UPLOAD,
   ],
   admin: Object.values(PERMISSIONS),
 };
