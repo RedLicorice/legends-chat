@@ -13,7 +13,9 @@ export type SystemSettingKey =
   | "registration_mode" // "telegram_only" | "open" | "closed"
   | "giphy_enabled"
   | "giphy_api_key"
-  | "invite_code_prefix";
+  | "invite_code_prefix"
+  | "default_theme"
+  | "theme_accent_color";
 
 export async function getSetting(
   dbInstance: DB,

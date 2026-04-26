@@ -2,10 +2,65 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ──────────────────────────────────────────────────────
+   Theme tokens (channel format: R G B, no commas)
+   Used by Tailwind via rgb(var(--ch-X) / <alpha>)
+────────────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  --ch-bg:      11  13  18;
+  --ch-panel:   20  24  33;
+  --ch-panel2:  26  31  43;
+  --ch-border:  38  45  59;
+  --ch-text:   230 233 242;
+  --ch-muted:  138 147 166;
+  --ch-accent: 124  92 255;
+  --ch-accent2: 92 200 255;
+  --ch-danger: 255  92 124;
+}
+
+[data-theme="matte-glass"] {
+  --ch-bg:      15  12  35;
+  --ch-panel:   27  22  54;
+  --ch-panel2:  35  30  68;
+  --ch-border:  61  53 101;
+  --ch-text:   238 239 252;
+  --ch-muted:  154 156 192;
+  --ch-accent: 139 112 255;
+  --ch-accent2: 92 212 255;
+  --ch-danger: 255  98 132;
+}
+
+/* ──────────────────────────────────────────────────────
+   Matte-glass: gradient background + frosted panels
+────────────────────────────────────────────────────── */
+[data-theme="matte-glass"] body {
+  background: radial-gradient(ellipse 90% 90% at 15% 10%, #1c1448 0%, #0b0e22 55%, #070c14 100%) fixed;
+}
+
+[data-theme="matte-glass"] .bg-panel {
+  background-color: rgba(27, 22, 54, 0.60);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+[data-theme="matte-glass"] .bg-panel2 {
+  background-color: rgba(35, 30, 68, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+[data-theme="matte-glass"] .border-border {
+  border-color: rgba(61, 53, 101, 0.70);
+}
+
+/* ──────────────────────────────────────────────────────
+   Base
+────────────────────────────────────────────────────── */
 html,
 body {
-  background: #0b0d12;
-  color: #e6e9f2;
+  background: rgb(var(--ch-bg));
+  color: rgb(var(--ch-text));
   font-family: Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   touch-action: pan-x pan-y;
@@ -21,23 +76,24 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262d3b;
+  background: rgb(var(--ch-border));
   border-radius: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Tiptap editor placeholder */
+/* ──────────────────────────────────────────────────────
+   Tiptap editor
+────────────────────────────────────────────────────── */
 .tiptap p.is-editor-empty:first-child::before {
-  color: #5a6480;
+  color: rgb(var(--ch-muted));
   content: attr(data-placeholder);
   float: left;
   height: 0;
   pointer-events: none;
 }
 
-/* Tiptap content inside chat bubbles and feed */
 .tiptap { outline: none; }
 .tiptap > * + * { margin-top: 0.5em; }
 .tiptap p { margin: 0; }
@@ -46,10 +102,10 @@ body {
 .tiptap code { font-family: ui-monospace, monospace; font-size: 0.85em; padding: 0.1em 0.3em; border-radius: 4px; background: rgba(255,255,255,0.1); }
 .tiptap pre { background: rgba(255,255,255,0.07); border-radius: 8px; padding: 0.75rem 1rem; margin: 0.5rem 0; overflow-x: auto; }
 .tiptap pre code { background: none; padding: 0; font-size: 0.82em; }
-.tiptap blockquote { border-left: 3px solid #3d4563; padding-left: 0.75rem; margin: 0.5rem 0; color: #8892ab; }
+.tiptap blockquote { border-left: 3px solid rgb(var(--ch-border)); padding-left: 0.75rem; margin: 0.5rem 0; color: rgb(var(--ch-muted)); }
 .tiptap h1 { font-size: 1.4em; font-weight: 700; margin: 0.5rem 0 0.25rem; }
 .tiptap h2 { font-size: 1.2em; font-weight: 700; margin: 0.5rem 0 0.25rem; }
 .tiptap h3 { font-size: 1.05em; font-weight: 600; margin: 0.5rem 0 0.25rem; }
 .tiptap strong { font-weight: 700; }
 .tiptap em { font-style: italic; }
-.tiptap hr { border: none; border-top: 1px solid #262d3b; margin: 0.5rem 0; }
+.tiptap hr { border: none; border-top: 1px solid rgb(var(--ch-border)); margin: 0.5rem 0; }

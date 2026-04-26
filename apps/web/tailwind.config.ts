@@ -6,15 +6,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#0b0d12",
-        panel: "#141821",
-        panel2: "#1a1f2b",
-        border: "#262d3b",
-        text: "#e6e9f2",
-        muted: "#8a93a6",
-        accent: "#7c5cff",
-        accent2: "#5cc8ff",
-        danger: "#ff5c7c",
+        bg:      "rgb(var(--ch-bg)      / <alpha-value>)",
+        panel:   "rgb(var(--ch-panel)   / <alpha-value>)",
+        panel2:  "rgb(var(--ch-panel2)  / <alpha-value>)",
+        border:  "rgb(var(--ch-border)  / <alpha-value>)",
+        text:    "rgb(var(--ch-text)    / <alpha-value>)",
+        muted:   "rgb(var(--ch-muted)   / <alpha-value>)",
+        accent:  "rgb(var(--ch-accent)  / <alpha-value>)",
+        accent2: "rgb(var(--ch-accent2) / <alpha-value>)",
+        danger:  "rgb(var(--ch-danger)  / <alpha-value>)",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
