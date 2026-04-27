@@ -477,6 +477,24 @@ export const e2eeSenderKeys = pgTable(
   }),
 );
 
+export const passkeyCredentials = pgTable(
+  "passkey_credentials",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull().default("Passkey"),
+    publicKey: bytea("public_key").notNull(),
+    counter: bigint("counter", { mode: "bigint" }).notNull().default(0n),
+    deviceType: text("device_type").notNull().default("unknown"),
+    backedUp: boolean("backed_up").notNull().default(false),
+    transports: text("transports"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdIdx: index("passkey_credentials_user_id_idx").on(t.userId),
+  }),
+);
+
 export const customGifs = pgTable("custom_gifs", {
   id: uuid("id").primaryKey().defaultRandom(),
   url: text("url").notNull(),

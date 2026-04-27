@@ -4,10 +4,11 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { WalletAuthButton } from "@/components/WalletAuthButton";
+import { PasskeyAuthButton } from "@/components/PasskeyAuthButton";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"telegram" | "email" | "wallet">("telegram");
+  const [tab, setTab] = useState<"telegram" | "email" | "wallet" | "passkey">("telegram");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +48,7 @@ export default function LoginPage() {
           <TabBtn active={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</TabBtn>
           <TabBtn active={tab === "email"} onClick={() => setTab("email")}>Email</TabBtn>
           <TabBtn active={tab === "wallet"} onClick={() => setTab("wallet")}>Wallet</TabBtn>
+          <TabBtn active={tab === "passkey"} onClick={() => setTab("passkey")}>Passkey</TabBtn>
         </div>
 
         {tab === "telegram" ? (
@@ -54,6 +56,13 @@ export default function LoginPage() {
             <p>Open Telegram and message the community bot.</p>
             <p>Send <code className="rounded bg-panel2 px-1 text-accent">/start</code> and tap the link it sends back.</p>
             <p className="text-xs">No invite code yet? Ask a member to generate one for you.</p>
+          </div>
+        ) : tab === "passkey" ? (
+          <div className="space-y-3">
+            <PasskeyAuthButton onSuccess={() => router.push("/")} />
+            <p className="text-center text-xs text-muted">
+              Use a registered passkey to sign in instantly.
+            </p>
           </div>
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Camera, LogOut, Mail, CheckCircle, Wallet } from "lucide-react";
 import { WalletAuthButton } from "@/components/WalletAuthButton";
+import { PasskeyPanel } from "@/components/PasskeyPanel";
 
 interface Props {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut?: boolean; permissions?: string[] };
@@ -345,6 +346,11 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
             {walletError && <p className="text-xs text-danger">{walletError}</p>}
           </div>
         )}
+
+        {/* Passkeys */}
+        <div className="rounded-lg border border-border p-3">
+          <PasskeyPanel />
+        </div>
 
         {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 

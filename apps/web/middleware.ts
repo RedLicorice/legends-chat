@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   "/api/auth/register",
   "/api/auth/wallet/challenge",
   "/api/auth/wallet/verify",
+  "/api/auth/passkey/authenticate",
   "/api/register-config",
   "/api/invite-check",
   "/api/user/email-link/verify",
