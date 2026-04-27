@@ -9,8 +9,9 @@ import { TopicLayout } from "@/components/TopicLayout";
 
 export const dynamic = "force-dynamic";
 
-export default async function TopicPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default async function TopicPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const [{ slug }, sp] = await Promise.all([params, searchParams ?? Promise.resolve({} as Record<string, string | string[] | undefined>)]);
+  const highlightMessageId = typeof sp["msg"] === "string" ? sp["msg"] : undefined;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
@@ -36,6 +37,7 @@ export default async function TopicPage({ params }: { params: Promise<{ slug: st
       hasEmail={!!user.email}
       hasWallet={!!user.walletAddress}
       giphyEnabled={giphySetting === "true"}
+      highlightMessageId={highlightMessageId}
     />
   );
 }

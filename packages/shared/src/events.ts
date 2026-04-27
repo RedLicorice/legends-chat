@@ -58,6 +58,7 @@ export const REDIS_CHANNELS = {
   BOT_MESSAGE_EDIT: "legends:bot:message:edit",
   BOT_MESSAGE_DELETE: "legends:bot:message:delete",
   BOT_NEW_MEMBER: "legends:bot:new_member",
+  NOTIFICATION_BROADCAST: "legends:notification:broadcast",
 } as const;
 
 export const REDIS_KEYS = {

@@ -179,6 +179,7 @@ io.on("connection", async (socket: AuthedSocket) => {
       dispatchMessageNotifications(io, {
         messageId: msg.id,
         topicId: parsed.topicId,
+        topicSlug: topic?.slug ?? "",
         topicTitle: topic?.title ?? "",
         senderUserId: user.sub,
         senderName: msg.senderDisplayName ?? "Unknown",
@@ -332,6 +333,7 @@ subClient.subscribe(
   REDIS_CHANNELS.BOT_MESSAGE_EDIT,
   REDIS_CHANNELS.BOT_MESSAGE_DELETE,
   REDIS_CHANNELS.BOT_NEW_MEMBER,
+  REDIS_CHANNELS.NOTIFICATION_BROADCAST,
   (err) => { if (err) console.error("redis subscribe failed", err); },
 );
 
@@ -369,6 +371,19 @@ subClient.on("message", (channel, message) => {
       };
       deliverNewMemberToWebhooks(userId, displayName, username, topicId)
         .catch((e) => console.error("[webhook] new_member delivery failed", e));
+    } else if (channel === REDIS_CHANNELS.NOTIFICATION_BROADCAST) {
+      const { notifs } = JSON.parse(message) as {
+        notifs: Array<{ id: string; userId: string; type: string; payload: unknown; createdAt: string }>;
+      };
+      for (const n of notifs) {
+        io.to(`user:${n.userId}`).emit(WS_EVENTS.NOTIFICATION_NEW, {
+          id: n.id,
+          type: n.type,
+          payload: n.payload,
+          readAt: null,
+          createdAt: n.createdAt,
+        });
+      }
     }
   } catch (e) {
     console.error("pubsub parse failed", e);

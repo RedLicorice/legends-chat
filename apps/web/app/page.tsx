@@ -17,10 +17,12 @@ export default async function HomePage() {
 
   const settings = await getAllSettings(db);
   const communityName = settings.community_name ?? "Topics";
+  const communityBannerUrl = settings.community_banner_url ?? null;
 
   return (
     <HomeLayout
       communityName={communityName}
+      communityBannerUrl={communityBannerUrl}
       user={{
         id: user.id,
         displayName: user.displayName,

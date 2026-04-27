@@ -102,6 +102,7 @@ interface TopicViewProps {
   currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   giphyEnabled?: boolean;
+  highlightMessageId?: string;
   onMenuOpen?: () => void;
   onConnectionChange?: (connected: boolean) => void;
   showExpandSidebar?: boolean;
@@ -148,7 +149,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -185,6 +186,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
   const editorRef = useRef<RichTextEditorHandle | null>(null);
   const composeEmojiRef = useRef<HTMLButtonElement | null>(null);
   const reactionBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const hasScrolledToMsgRef = useRef(false);
 
   const canCreatePoll = currentUser.role !== "user";
   const canPost = topic.postRoles.length === 0 || topic.postRoles.includes(currentUser.role);
@@ -313,10 +316,21 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
     const last = messages[messages.length - 1];
+    if (highlightMessageId && !hasScrolledToMsgRef.current && messages.length > 0) {
+      const target = el.querySelector<HTMLElement>(`[data-msg-id="${highlightMessageId}"]`);
+      if (target) {
+        hasScrolledToMsgRef.current = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightedId(highlightMessageId);
+        setTimeout(() => setHighlightedId(null), 2500);
+        if (last) socketRef.current?.emit(WS_EVENTS.TOPIC_READ, { topicId: topic.id, lastReadMessageId: last.id });
+        return;
+      }
+    }
+    el.scrollTop = el.scrollHeight;
     if (last) socketRef.current?.emit(WS_EVENTS.TOPIC_READ, { topicId: topic.id, lastReadMessageId: last.id });
-  }, [messages, topic.id]);
+  }, [messages, topic.id, highlightMessageId]);
 
   useEffect(() => {
     if (!showUsers || members.length > 0) return;
@@ -722,10 +736,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
               return (
                 <motion.div
                   key={m.id}
+                  data-msg-id={m.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  className="group rounded-2xl border border-border bg-panel p-5"
+                  className={cn("group rounded-2xl border bg-panel p-5", highlightedId === m.id ? "border-accent ring-2 ring-accent/30" : "border-border")}
                 >
                   <div className="mb-3 flex items-center gap-3">
                     <Avatar
@@ -801,10 +816,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, onMenuOpen, 
             return (
               <motion.div
                 key={m.id}
+                data-msg-id={m.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className={cn("group flex gap-2", mine ? "flex-row-reverse" : "flex-row")}
+                className={cn("group flex gap-2 rounded-lg", mine ? "flex-row-reverse" : "flex-row", highlightedId === m.id && "ring-2 ring-accent/50 bg-accent/5")}
               >
                 {!mine ? (
                   <div className="mt-1 w-8 shrink-0">

@@ -1,14 +1,15 @@
 /**
- * Starts ngrok tunnels for the web (3000) and ws (3001) services.
- * Writes the public URLs to logs/ngrok.env so start.sh can source them
- * before launching the app processes.
+ * Starts an ngrok tunnel for the web service and keeps it alive.
+ * On disconnect, reconnects automatically and rewrites logs/ngrok.env
+ * so the app picks up the new URL without a restart.
  *
- * Usage (called automatically by start.sh when NGROK_AUTHTOKEN is set):
+ * Usage (called by start.sh when NGROK_AUTHTOKEN is set):
  *   node scripts/ngrok.mjs
  */
 import ngrok from "@ngrok/ngrok";
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,50 +23,104 @@ if (!authtoken) {
 }
 
 const webPort = parseInt(process.env.WEB_PORT ?? "3000", 10);
+const domain = process.env.NGROK_DOMAIN || undefined;
 
-// Catch unhandled errors so they appear in logs/ngrok.log instead of
-// silently killing the process.
 process.on("uncaughtException", (err) => {
   console.error("[ngrok] uncaught exception:", err);
-  process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
   console.error("[ngrok] unhandled rejection:", reason);
-  process.exit(1);
 });
 
-console.log(`[ngrok] connecting (web :${webPort})…`);
+function writeEnvFile(webUrl) {
+  fs.mkdirSync(logsDir, { recursive: true });
+  fs.writeFileSync(
+    envFile,
+    [
+      `APP_PUBLIC_URL=${webUrl}`,
+      `WEB_URL=${webUrl}`,
+      `NEXT_PUBLIC_WS_URL=${webUrl}`,
+      `WS_URL=http://localhost:3001`,
+    ].join("\n") + "\n",
+  );
+}
 
-const webListener = await ngrok.forward({ addr: webPort, authtoken });
+function tryReloadPm2(webUrl) {
+  try {
+    // Pass new URL into pm2's environment via process.env so --update-env picks it up.
+    const env = {
+      ...process.env,
+      APP_PUBLIC_URL: webUrl,
+      WEB_URL: webUrl,
+      NEXT_PUBLIC_WS_URL: webUrl,
+    };
+    execSync("pm2 reload ecosystem.config.cjs --update-env --silent", {
+      cwd: root,
+      env,
+      timeout: 15_000,
+      stdio: "ignore",
+    });
+    console.log("[ngrok] signaled pm2 to reload with new URL");
+  } catch {
+    // pm2 not running yet, or no managed processes — fine on first start
+  }
+}
 
-const webUrl = webListener.url();
-// WS traffic proxied through Next.js (/socket.io/* rewrite) — same URL.
-const wsUrl = webUrl;
+let currentListener = null;
+let stopping = false;
 
-fs.mkdirSync(logsDir, { recursive: true });
-fs.writeFileSync(
-  envFile,
-  [`APP_PUBLIC_URL=${webUrl}`, `WEB_URL=${webUrl}`, `NEXT_PUBLIC_WS_URL=${wsUrl}`, `WS_URL=http://localhost:3001`].join("\n") + "\n",
-);
+async function connect() {
+  console.log(`[ngrok] connecting (web :${webPort})${domain ? ` → ${domain}` : ""}…`);
+  currentListener = await ngrok.forward({
+    addr: webPort,
+    authtoken,
+    ...(domain ? { domain } : {}),
+  });
 
-console.log(`[ngrok] web → ${webUrl}`);
-console.log(`[ngrok] URLs written to logs/ngrok.env`);
+  const webUrl = currentListener.url();
+  writeEnvFile(webUrl);
+  console.log(`[ngrok] web → ${webUrl}`);
+  console.log("[ngrok] URLs written to logs/ngrok.env");
 
-// Keep the process alive to hold the tunnels open.
-// The setInterval prevents Node's event loop from draining if the @ngrok/ngrok
-// SDK doesn't maintain its own references after the initial connect.
+  currentListener.on?.("close", async () => {
+    if (stopping) return;
+    console.error("[ngrok] tunnel closed — reconnecting in 5s…");
+    await new Promise((r) => setTimeout(r, 5_000));
+    reconnectLoop();
+  });
+
+  return webUrl;
+}
+
+async function reconnectLoop() {
+  while (!stopping) {
+    try {
+      const webUrl = await connect();
+      tryReloadPm2(webUrl);
+      return; // connected — exit loop
+    } catch (err) {
+      if (stopping) return;
+      console.error("[ngrok] reconnect failed:", err.message, "— retrying in 10s…");
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+  }
+}
+
+// Initial connect (no pm2 reload on first start — pm2 isn't running yet)
+await connect();
+
+// Keep event loop alive.
 const keepAlive = setInterval(() => {}, 30_000);
 
-process.on("SIGTERM", async () => {
+async function shutdown() {
+  stopping = true;
   clearInterval(keepAlive);
-  await ngrok.disconnect();
+  if (currentListener) {
+    try { await currentListener.close(); } catch { /* ignore */ }
+  }
+  await ngrok.disconnect().catch(() => {});
   process.exit(0);
-});
-process.on("SIGINT", async () => {
-  clearInterval(keepAlive);
-  await ngrok.disconnect();
-  process.exit(0);
-});
+}
 
-// Also log if the session closes unexpectedly.
-webListener.on?.("close", () => console.error("[ngrok] web tunnel closed unexpectedly"));
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

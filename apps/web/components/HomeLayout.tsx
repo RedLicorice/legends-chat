@@ -22,9 +22,10 @@ interface Props {
   };
   topics: TopicItem[];
   communityName?: string;
+  communityBannerUrl?: string | null;
 }
 
-export function HomeLayout({ user, topics: initialTopics, communityName = "Topics" }: Props) {
+export function HomeLayout({ user, topics: initialTopics, communityName = "Topics", communityBannerUrl }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
 
@@ -95,6 +96,11 @@ export function HomeLayout({ user, topics: initialTopics, communityName = "Topic
         </div>
       </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-y-auto">
+        {communityBannerUrl && (
+          <div className="w-full h-36 sm:h-48 shrink-0 overflow-hidden">
+            <img src={communityBannerUrl} alt="" className="h-full w-full object-cover" />
+          </div>
+        )}
         <div className="mx-auto w-full max-w-xl py-4 px-3">
           <div className="mb-4 px-1 flex items-center gap-3">
             <button

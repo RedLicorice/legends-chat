@@ -26,9 +26,10 @@ interface Props {
   hasEmail: boolean;
   hasWallet?: boolean;
   giphyEnabled?: boolean;
+  highlightMessageId?: string;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, hasWallet, giphyEnabled }: Props) {
+export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, hasWallet, giphyEnabled, highlightMessageId }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
@@ -123,6 +124,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
             }}
             mute={mute}
             giphyEnabled={giphyEnabled}
+            highlightMessageId={highlightMessageId}
             onMenuOpen={() => setSidebarOpen(true)}
             onConnectionChange={setConnected}
             showExpandSidebar={desktopCollapsed && compactMode === "minimal"}

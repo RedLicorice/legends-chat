@@ -2,19 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bell } from "lucide-react";
+import { io } from "socket.io-client";
+import { Bell, Megaphone } from "lucide-react";
 import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
-import type { Socket } from "socket.io-client";
 
 interface Notification {
   id: string;
-  type: "mention" | "reply";
+  type: "mention" | "reply" | "broadcast";
   payload: {
-    messageId: string;
-    topicId: string;
-    topicTitle: string;
-    senderName: string;
+    messageId?: string | null;
+    topicId?: string | null;
+    topicSlug?: string | null;
+    topicTitle?: string | null;
+    senderName?: string;
     preview: string;
   };
   readAt: string | null;
@@ -31,7 +32,7 @@ function timeAgo(date: string): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-export function NotificationBell({ socket, align = "right" }: { socket: Socket | null; align?: "left" | "right" }) {
+export function NotificationBell({ align = "right" }: { align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -52,15 +53,18 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
 
   useEffect(() => { void load(); }, [load]);
 
+  // Own socket connection — bell is always in AppSidebar (no prop to thread through)
   useEffect(() => {
-    if (!socket) return;
-    const handler = (notif: Notification) => {
+    const socket = io(window.location.origin, {
+      withCredentials: true,
+      transports: ["polling", "websocket"],
+    });
+    socket.on(WS_EVENTS.NOTIFICATION_NEW, (notif: Notification) => {
       setItems((prev) => [notif, ...prev].slice(0, 50));
       setUnread((n) => n + 1);
-    };
-    socket.on(WS_EVENTS.NOTIFICATION_NEW, handler);
-    return () => { socket.off(WS_EVENTS.NOTIFICATION_NEW, handler); };
-  }, [socket]);
+    });
+    return () => { socket.disconnect(); };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -81,8 +85,14 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return {};
     const top = rect.bottom + 8;
-    if (align === "left") return { position: "fixed", top, left: rect.left, zIndex: 9999 };
-    return { position: "fixed", top, right: window.innerWidth - rect.right, zIndex: 9999 };
+    const panelWidth = Math.min(320, window.innerWidth - 16);
+    if (align === "left") {
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
+      return { position: "fixed", top, left, width: panelWidth, zIndex: 9999 };
+    }
+    const right = window.innerWidth - rect.right;
+    const clampedRight = Math.max(8, Math.min(right, window.innerWidth - panelWidth - 8));
+    return { position: "fixed", top, right: clampedRight, width: panelWidth, zIndex: 9999 };
   }
 
   async function openPanel() {
@@ -94,6 +104,46 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
       setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
       await fetch("/api/user/notifications", { method: "PATCH" });
     }
+  }
+
+  function renderItem(n: Notification) {
+    const isUnread = !n.readAt;
+    const baseClass = cn("flex flex-col gap-0.5 px-4 py-3 text-sm", isUnread && "bg-panel2/40");
+    const typeLabel =
+      n.type === "mention" ? "Mention" : n.type === "reply" ? "Reply" : "Broadcast";
+    const typeColor =
+      n.type === "mention" ? "text-accent" : n.type === "reply" ? "text-accent2" : "text-muted";
+
+    const inner = (
+      <>
+        <div className="flex items-center gap-2">
+          {n.type === "broadcast" && <Megaphone className="h-3 w-3 text-muted" />}
+          <span className={cn("text-xs font-semibold uppercase tracking-wide", typeColor)}>
+            {typeLabel}
+          </span>
+          <span className="ml-auto text-xs text-muted">{timeAgo(n.createdAt)}</span>
+        </div>
+        {n.payload.topicTitle && <div className="font-medium">{n.payload.topicTitle}</div>}
+        <div className="truncate text-muted">
+          {n.payload.senderName ? `${n.payload.senderName}: ` : ""}{n.payload.preview}
+        </div>
+      </>
+    );
+
+    const href =
+      n.payload.topicSlug && n.payload.messageId
+        ? `/t/${n.payload.topicSlug}?msg=${n.payload.messageId}`
+        : null;
+
+    if (href) {
+      return (
+        <a key={n.id} href={href} onClick={() => setOpen(false)}
+          className={cn(baseClass, "transition hover:bg-panel2")}>
+          {inner}
+        </a>
+      );
+    }
+    return <div key={n.id} className={baseClass}>{inner}</div>;
   }
 
   return (
@@ -117,33 +167,14 @@ export function NotificationBell({ socket, align = "right" }: { socket: Socket |
         <div
           ref={panelRef}
           style={panelStyle}
-          className="w-80 rounded-xl border border-border bg-panel shadow-lg"
+          className="rounded-xl border border-border bg-panel shadow-lg"
         >
           <div className="border-b border-border px-4 py-2.5 text-sm font-semibold">Notifications</div>
           {items.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-muted">No notifications yet.</div>
           ) : (
             <div className="max-h-96 overflow-y-auto">
-              {items.map((n) => (
-                <a
-                  key={n.id}
-                  href={`/t/${n.payload.topicId}`}
-                  onClick={() => setOpen(false)}
-                  className={cn(
-                    "flex flex-col gap-0.5 px-4 py-3 text-sm transition hover:bg-panel2",
-                    !n.readAt && "bg-panel2/40",
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={cn("text-xs font-semibold uppercase tracking-wide", n.type === "mention" ? "text-accent" : "text-accent2")}>
-                      {n.type === "mention" ? "Mention" : "Reply"}
-                    </span>
-                    <span className="ml-auto text-xs text-muted">{timeAgo(n.createdAt)}</span>
-                  </div>
-                  <div className="font-medium">{n.payload.topicTitle}</div>
-                  <div className="truncate text-muted">{n.payload.senderName}: {n.payload.preview}</div>
-                </a>
-              ))}
+              {items.map((n) => renderItem(n))}
             </div>
           )}
         </div>,

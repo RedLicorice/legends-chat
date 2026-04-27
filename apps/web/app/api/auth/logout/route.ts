@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { clearAuthCookies } from "@/lib/auth";
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   await clearAuthCookies();
-  return NextResponse.redirect(new URL("/login", process.env.APP_PUBLIC_URL ?? "http://localhost:3000"));
+  return NextResponse.redirect(new URL("/login", req.nextUrl.origin));
 }

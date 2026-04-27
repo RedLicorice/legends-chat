@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
-  MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette,
+  MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -228,7 +228,7 @@ export function AppSidebar({
             >
               <User className="h-4 w-4" />
             </button>
-            <NotificationBell socket={null} align="left" />
+            <NotificationBell align="left" />
             {canModQueue && (
               <button
                 type="button"
@@ -401,6 +401,7 @@ export function AdminNav({ permissions }: { permissions: string[] }) {
       {isAdmin && <NavLink href="/admin/invites" icon={<Mail className="h-4 w-4" />} label="Invites" />}
       {isAdmin && <NavLink href="/admin/bans" icon={<Ban className="h-4 w-4" />} label="Bans & Mutes" />}
       {isAdmin && <NavLink href="/admin/gifs" icon={<Film className="h-4 w-4" />} label="GIF Library" />}
+      {isAdmin && <NavLink href="/admin/notifications" icon={<BellRing className="h-4 w-4" />} label="Broadcast" />}
 
       {isAdmin && (
         <>
