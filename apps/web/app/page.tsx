@@ -19,10 +19,20 @@ export default async function HomePage() {
   const communityName = settings.community_name ?? "Topics";
   const communityBannerUrl = settings.community_banner_url ?? null;
 
+  const bannerConfig = settings.banner_in_topics === "true" && communityBannerUrl ? {
+    url: communityBannerUrl,
+    height: parseInt(settings.banner_topic_height ?? "180", 10),
+    overlap: parseInt(settings.banner_topic_overlap ?? "60", 10),
+    overlayEnabled: settings.banner_overlay_enabled === "true",
+    overlayOpacity: parseInt(settings.banner_overlay_opacity ?? "40", 10),
+    fadeEnabled: settings.banner_fade_enabled !== "false",
+  } : null;
+
   return (
     <HomeLayout
       communityName={communityName}
       communityBannerUrl={communityBannerUrl}
+      bannerConfig={bannerConfig}
       user={{
         id: user.id,
         displayName: user.displayName,

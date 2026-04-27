@@ -15,18 +15,11 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const [topic, topicList, mute, giphySetting, bannerUrl, bannerInTopics, bannerHeight, bannerOverlap, bannerOverlayEnabled, bannerOverlayOpacity, bannerFadeEnabled] = await Promise.all([
+  const [topic, topicList, mute, giphySetting] = await Promise.all([
     db.select().from(topics).where(eq(topics.slug, slug)).limit(1).then((r) => r[0]),
     listTopicsForUser(user.id, user.role, user.permissions),
     getUserMute(user.id),
     getSetting(db, "giphy_enabled"),
-    getSetting(db, "community_banner_url"),
-    getSetting(db, "banner_in_topics"),
-    getSetting(db, "banner_topic_height"),
-    getSetting(db, "banner_topic_overlap"),
-    getSetting(db, "banner_overlay_enabled"),
-    getSetting(db, "banner_overlay_opacity"),
-    getSetting(db, "banner_fade_enabled"),
   ]);
   if (!topic) notFound();
 
@@ -45,14 +38,6 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
       hasWallet={!!user.walletAddress}
       giphyEnabled={giphySetting === "true"}
       highlightMessageId={highlightMessageId}
-      bannerConfig={bannerInTopics === "true" && bannerUrl ? {
-        url: bannerUrl,
-        height: parseInt(bannerHeight ?? "180", 10),
-        overlap: parseInt(bannerOverlap ?? "60", 10),
-        overlayEnabled: bannerOverlayEnabled === "true",
-        overlayOpacity: parseInt(bannerOverlayOpacity ?? "40", 10),
-        fadeEnabled: bannerFadeEnabled !== "false",
-      } : null}
     />
   );
 }

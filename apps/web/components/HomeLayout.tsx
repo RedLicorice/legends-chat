@@ -11,6 +11,15 @@ import { PushSetup } from "@/components/PushSetup";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
 import type { TopicListItem as TopicItem } from "@/lib/topics";
 
+interface BannerConfig {
+  url: string;
+  height: number;
+  overlap: number;
+  overlayEnabled: boolean;
+  overlayOpacity: number;
+  fadeEnabled: boolean;
+}
+
 interface Props {
   user: {
     id: string;
@@ -23,9 +32,10 @@ interface Props {
   topics: TopicItem[];
   communityName?: string;
   communityBannerUrl?: string | null;
+  bannerConfig?: BannerConfig | null;
 }
 
-export function HomeLayout({ user, topics: initialTopics, communityName = "Topics", communityBannerUrl }: Props) {
+export function HomeLayout({ user, topics: initialTopics, communityName = "Topics", communityBannerUrl, bannerConfig }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
 
@@ -96,12 +106,36 @@ export function HomeLayout({ user, topics: initialTopics, communityName = "Topic
         </div>
       </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-y-auto">
-        {communityBannerUrl && (
+        {bannerConfig ? (
+          <>
+            {/* Banner — absolute, behind content */}
+            <div
+              className="absolute left-0 right-0 top-0 z-0 overflow-hidden"
+              style={{ height: `${bannerConfig.height}px` }}
+            >
+              <img src={bannerConfig.url} alt="" className="h-full w-full object-cover" />
+              {bannerConfig.overlayEnabled && (
+                <div
+                  className="absolute inset-0"
+                  style={{ background: `rgba(0,0,0,${bannerConfig.overlayOpacity / 100})` }}
+                />
+              )}
+              {bannerConfig.fadeEnabled && (
+                <div
+                  className="absolute inset-0"
+                  style={{ background: "linear-gradient(to bottom, transparent 30%, rgb(var(--ch-bg)) 100%)" }}
+                />
+              )}
+            </div>
+            {/* Spacer — visible banner height minus overlap */}
+            <div className="shrink-0" style={{ height: `${Math.max(0, bannerConfig.height - bannerConfig.overlap)}px` }} />
+          </>
+        ) : communityBannerUrl ? (
           <div className="w-full h-36 sm:h-48 shrink-0 overflow-hidden">
             <img src={communityBannerUrl} alt="" className="h-full w-full object-cover" />
           </div>
-        )}
-        <div className="mx-auto w-full max-w-xl py-4 px-3">
+        ) : null}
+        <div className="relative z-10 mx-auto w-full max-w-xl py-4 px-3">
           <div className="mb-4 px-1 flex items-center gap-3">
             <button
               type="button"
