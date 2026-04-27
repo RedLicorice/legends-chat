@@ -28,9 +28,11 @@ export function PasskeyBanner() {
       if (!verRes.ok) throw new Error(vd.error ?? "Registration failed.");
       setDone(true);
     } catch (e) {
-      const msg = (e as Error).message;
-      if (!msg.includes("cancelled") && !msg.includes("AbortError") && !msg.includes("NotAllowedError")) {
-        setError(msg);
+      const err = e as Error;
+      const isAbort = err.name === "AbortError" || err.message?.includes("cancelled") || err.message?.includes("The operation was aborted");
+      if (!isAbort) {
+        const isNotAllowed = err.name === "NotAllowedError" || err.message?.includes("NotAllowedError");
+        setError(isNotAllowed ? "Not allowed — check your device has a screen lock enabled." : err.message ?? "Unknown error.");
       }
     } finally {
       setRegistering(false);
