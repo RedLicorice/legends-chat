@@ -6,7 +6,7 @@ import { getAllSettings } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { issueSession, setAuthCookies } from "@/lib/auth";
-import { buildChallengeMessage } from "../challenge/route";
+import { buildChallengeMessage } from "@/lib/wallet-challenge";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const SIG_RE = /^0x[0-9a-fA-F]{130}$/;

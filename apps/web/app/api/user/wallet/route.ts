@@ -5,7 +5,7 @@ import { users } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
-import { buildChallengeMessage } from "@/app/api/auth/wallet/challenge/route";
+import { buildChallengeMessage } from "@/lib/wallet-challenge";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const SIG_RE = /^0x[0-9a-fA-F]{130}$/;

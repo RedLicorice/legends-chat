@@ -1,13 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { buildChallengeMessage } from "@/lib/wallet-challenge";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const NONCE_TTL = 300; // 5 minutes
-
-export function buildChallengeMessage(address: string, nonce: string, issuedAt: string): string {
-  return `Sign in to Legends Chat\n\nAddress: ${address}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
-}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
