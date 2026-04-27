@@ -24,17 +24,25 @@ export async function generateMetadata(): Promise<Metadata> {
       icon: [{ url: icon }],
       apple: [{ url: icon }],
     },
+    appleWebApp: {
+      capable: true,
+      title: name ?? "Legends Chat",
+      statusBarStyle: "black-translucent",
+    },
   };
 }
 
-export const viewport: Viewport = {
-  themeColor: "#0b0d12",
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  viewportFit: "cover",
-};
+export async function generateViewport(): Promise<Viewport> {
+  const accentColor = await getSetting(db, "theme_accent_color").catch(() => null);
+  return {
+    themeColor: accentColor ?? "#0b0d12",
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+    viewportFit: "cover",
+  };
+}
 
 function buildThemeCss(
   themeRows: { id: string; colors: Record<string, string>; isGlass: boolean; bgGradient: string | null }[],

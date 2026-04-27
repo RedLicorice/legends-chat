@@ -60,6 +60,14 @@ body {
 
 * {
   box-sizing: border-box;
+  /* Remove blue tap flash on Android/iOS */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Disable long-press context menu on non-content elements */
+button, a, [role="button"], img, video,
+nav, aside, header, footer {
+  -webkit-touch-callout: none;
 }
 
 /* Re-enable selection for message content, editor, inputs, and doc pages */
