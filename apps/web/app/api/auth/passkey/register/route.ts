@@ -5,7 +5,7 @@ import {
 } from "@simplewebauthn/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/browser";
 import { eq } from "drizzle-orm";
-import { passkeyCredentials, users } from "@legends/db/schema";
+import { passkeyCredentials } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
@@ -13,11 +13,11 @@ import { getRpConfig } from "@/lib/passkey";
 
 const CHALLENGE_TTL = 300; // 5 min
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { rpName, rpID, origin: _o } = getRpConfig();
+  const { rpName, rpID, origin: _o } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
 
   const existingCreds = await db
     .select({ id: passkeyCredentials.id, transports: passkeyCredentials.transports })
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { rpID, origin } = getRpConfig();
+  const { rpID, origin } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
   const body = await req.json() as { response: RegistrationResponseJSON; name?: string };
 
   const challenge = await redis.get(`passkey:reg:${user.id}`);
@@ -85,9 +85,6 @@ export async function POST(req: Request) {
     backedUp: verification.registrationInfo.credentialBackedUp,
     transports: body.response.response.transports?.join(",") ?? null,
   });
-
-  // Also ensure the user record exists for profile linkage (no-op if it does)
-  await db.update(users).set({ updatedAt: undefined } as Record<string, unknown>).where(eq(users.id, user.id)).catch(() => {});
 
   return NextResponse.json({ ok: true });
 }

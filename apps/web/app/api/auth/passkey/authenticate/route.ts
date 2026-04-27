@@ -14,8 +14,8 @@ import { getRpConfig } from "@/lib/passkey";
 const CHALLENGE_TTL = 300;
 const CHALLENGE_KEY = "passkey:auth:global";
 
-export async function GET() {
-  const { rpID } = getRpConfig();
+export async function GET(req: Request) {
+  const { rpID } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
 
   const options = await generateAuthenticationOptions({
     rpID,
@@ -29,7 +29,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { rpID, origin } = getRpConfig();
+  const { rpID, origin } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
   const body = await req.json() as { response: AuthenticationResponseJSON };
 
   const challenge = await redis.get(CHALLENGE_KEY);
