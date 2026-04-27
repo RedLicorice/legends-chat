@@ -86,7 +86,7 @@ export function HomeLayout({ user, topics: initialTopics, communityName = "Topic
   );
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       <AppSidebar
         user={user}
         variant="chat"
