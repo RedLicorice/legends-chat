@@ -8,7 +8,7 @@ module.exports = {
       name: "legends-web",
       cwd: `${ROOT}/apps/web`,
       script: "node_modules/next/dist/bin/next",
-      args: "dev --turbo -p 3000",
+      args: "dev -p 3000",
       interpreter: "node",
       env_file: ENV_FILE,
       autorestart: true,
