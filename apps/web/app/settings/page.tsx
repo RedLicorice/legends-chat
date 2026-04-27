@@ -31,7 +31,7 @@ export default async function SettingsPage() {
   const currentCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
 
   return (
-    <main className="flex min-h-screen items-start justify-center p-8">
+    <main className="selectable flex min-h-screen items-start justify-center p-8">
       <div className="w-full max-w-lg space-y-8">
         <div>
           <Link

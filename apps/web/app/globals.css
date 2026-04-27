@@ -53,10 +53,24 @@ body {
   overscroll-behavior: none;
   /* dvh: adapts to visible viewport on mobile (excludes browser chrome) */
   height: 100dvh;
+  /* Disable selection on UI shell by default */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Re-enable selection for message content, editor, inputs, and doc pages */
+.prose,
+.tiptap,
+input, textarea, select,
+[contenteditable],
+code, pre,
+main.selectable {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 ::-webkit-scrollbar {
