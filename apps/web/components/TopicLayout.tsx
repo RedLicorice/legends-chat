@@ -6,7 +6,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { TopicListItem } from "@/components/TopicListItem";
 import { TopicView } from "@/components/TopicView";
 import { P2PView } from "@/components/P2PView";
-import { EmailLinkBanner } from "@/components/EmailLinkBanner";
+import { PasskeyBanner } from "@/components/PasskeyBanner";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
 import type { TopicListItem as TopicItem } from "@/lib/topics";
 
@@ -23,13 +23,12 @@ interface Props {
   currentSlug: string;
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
-  hasEmail: boolean;
-  hasWallet?: boolean;
+  hasPasskey: boolean;
   giphyEnabled?: boolean;
   highlightMessageId?: string;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, hasWallet, giphyEnabled, highlightMessageId }: Props) {
+export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasPasskey, giphyEnabled, highlightMessageId }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
@@ -102,7 +101,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
         </div>
       </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-hidden">
-        {!hasEmail && !hasWallet && <EmailLinkBanner />}
+        {!hasPasskey && <PasskeyBanner />}
         {topic.isP2p ? (
           <P2PView
             topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, p2pFallbackE2ee: topic.p2pFallbackE2ee }}
