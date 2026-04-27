@@ -21,7 +21,13 @@ export type SystemSettingKey =
   | "stun_servers"
   | "turn_url"
   | "turn_username"
-  | "turn_credential";
+  | "turn_credential"
+  | "banner_in_topics"
+  | "banner_topic_height"
+  | "banner_topic_overlap"
+  | "banner_overlay_enabled"
+  | "banner_overlay_opacity"
+  | "banner_fade_enabled";
 
 export async function getSetting(
   dbInstance: DB,

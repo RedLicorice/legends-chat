@@ -47,6 +47,12 @@ export async function PATCH(req: Request) {
     "turn_url",
     "turn_username",
     "turn_credential",
+    "banner_in_topics",
+    "banner_topic_height",
+    "banner_topic_overlap",
+    "banner_overlay_enabled",
+    "banner_overlay_opacity",
+    "banner_fade_enabled",
   ] as const;
 
   for (const key of allowed) {

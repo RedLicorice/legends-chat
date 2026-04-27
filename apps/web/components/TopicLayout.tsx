@@ -27,9 +27,17 @@ interface Props {
   hasWallet?: boolean;
   giphyEnabled?: boolean;
   highlightMessageId?: string;
+  bannerConfig?: {
+    url: string;
+    height: number;
+    overlap: number;
+    overlayEnabled: boolean;
+    overlayOpacity: number;
+    fadeEnabled: boolean;
+  } | null;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, hasWallet, giphyEnabled, highlightMessageId }: Props) {
+export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasEmail, hasWallet, giphyEnabled, highlightMessageId, bannerConfig }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
@@ -102,6 +110,32 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
         </div>
       </AppSidebar>
       <main className="relative flex flex-1 flex-col overflow-hidden">
+        {bannerConfig && (
+          <>
+            {/* Banner — absolute, behind content */}
+            <div
+              className="absolute left-0 right-0 top-0 z-0 overflow-hidden"
+              style={{ height: `${bannerConfig.height}px` }}
+            >
+              <img src={bannerConfig.url} alt="" className="h-full w-full object-cover" />
+              {bannerConfig.overlayEnabled && (
+                <div
+                  className="absolute inset-0"
+                  style={{ background: `rgba(0,0,0,${bannerConfig.overlayOpacity / 100})` }}
+                />
+              )}
+              {bannerConfig.fadeEnabled && (
+                <div
+                  className="absolute inset-0"
+                  style={{ background: "linear-gradient(to bottom, transparent 30%, rgb(var(--ch-bg)) 100%)" }}
+                />
+              )}
+            </div>
+            {/* Spacer — visible portion of banner above content */}
+            <div className="shrink-0 z-10" style={{ height: `${Math.max(0, bannerConfig.height - bannerConfig.overlap)}px` }} />
+          </>
+        )}
+        <div className="relative z-10 flex flex-1 flex-col overflow-hidden min-h-0">
         {!hasEmail && !hasWallet && <EmailLinkBanner />}
         {topic.isP2p ? (
           <P2PView
@@ -132,6 +166,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
             onSidebarUpdate={handleSidebarUpdate}
           />
         )}
+        </div>
       </main>
     </div>
   );

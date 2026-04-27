@@ -15,6 +15,12 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [communityLogo, setCommunityLogo] = useState(settings.community_logo_url ?? "");
   const [communityBanner, setCommunityBanner] = useState(settings.community_banner_url ?? "");
   const [pwaIcon, setPwaIcon] = useState(settings.pwa_icon_url ?? "");
+  const [bannerInTopics, setBannerInTopics] = useState(settings.banner_in_topics === "true");
+  const [bannerTopicHeight, setBannerTopicHeight] = useState(settings.banner_topic_height ?? "180");
+  const [bannerTopicOverlap, setBannerTopicOverlap] = useState(settings.banner_topic_overlap ?? "60");
+  const [bannerOverlayEnabled, setBannerOverlayEnabled] = useState(settings.banner_overlay_enabled === "true");
+  const [bannerOverlayOpacity, setBannerOverlayOpacity] = useState(settings.banner_overlay_opacity ?? "40");
+  const [bannerFadeEnabled, setBannerFadeEnabled] = useState(settings.banner_fade_enabled !== "false");
   const [registrationMode, setRegistrationMode] = useState<string>(settings.registration_mode ?? "telegram_only");
   const [defaultTopicId, setDefaultTopicId] = useState(settings.default_topic_id ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcome_message ?? "Welcome, {nickname}!");
@@ -48,6 +54,12 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           community_logo_url: communityLogo.trim() || null,
           community_banner_url: communityBanner.trim() || null,
           pwa_icon_url: pwaIcon.trim() || null,
+          banner_in_topics: String(bannerInTopics),
+          banner_topic_height: bannerTopicHeight || "180",
+          banner_topic_overlap: bannerTopicOverlap || "60",
+          banner_overlay_enabled: String(bannerOverlayEnabled),
+          banner_overlay_opacity: bannerOverlayOpacity || "40",
+          banner_fade_enabled: String(bannerFadeEnabled),
           registration_mode: registrationMode,
           default_topic_id: defaultTopicId || null,
           welcome_message: welcomeMessage.trim() || null,
@@ -108,8 +120,97 @@ export function AdminSettingsForm({ settings, topics }: Props) {
             />
             <ImageUploadButton bucket="avatars" onUploaded={setCommunityBanner} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
           </div>
-          <p className="mt-1 text-xs text-muted">Decorative banner shown on the login/register pages.</p>
+          <p className="mt-1 text-xs text-muted">Decorative banner shown on the login/register pages and optionally in topics.</p>
         </Field>
+
+        {/* Banner-in-topics options */}
+        <Field label="Show banner in topics">
+          <label className="flex cursor-pointer items-center gap-3">
+            <div
+              role="switch"
+              aria-checked={bannerInTopics}
+              onClick={() => setBannerInTopics((v) => !v)}
+              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${bannerInTopics ? "bg-accent" : "bg-border"}`}
+            >
+              <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${bannerInTopics ? "translate-x-6" : "translate-x-1"}`} />
+            </div>
+            <span className="text-sm">{bannerInTopics ? "Banner shown as topic background" : "Banner hidden in topics"}</span>
+          </label>
+        </Field>
+
+        {bannerInTopics && (
+          <>
+            <Field label="Banner height (px)">
+              <input
+                type="number"
+                min="60"
+                max="600"
+                value={bannerTopicHeight}
+                onChange={(e) => setBannerTopicHeight(e.target.value)}
+                className={inputCls}
+              />
+              <p className="mt-1 text-xs text-muted">Total height of the banner area in the topic view.</p>
+            </Field>
+
+            <Field label="Content overlap (px)">
+              <input
+                type="number"
+                min="0"
+                max="400"
+                value={bannerTopicOverlap}
+                onChange={(e) => setBannerTopicOverlap(e.target.value)}
+                className={inputCls}
+              />
+              <p className="mt-1 text-xs text-muted">How many pixels of the banner the content slides over. 0 = no overlap, content starts below banner.</p>
+            </Field>
+
+            <Field label="Semi-transparent overlay">
+              <label className="flex cursor-pointer items-center gap-3">
+                <div
+                  role="switch"
+                  aria-checked={bannerOverlayEnabled}
+                  onClick={() => setBannerOverlayEnabled((v) => !v)}
+                  className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${bannerOverlayEnabled ? "bg-accent" : "bg-border"}`}
+                >
+                  <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${bannerOverlayEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                </div>
+                <span className="text-sm">{bannerOverlayEnabled ? "Overlay enabled" : "No overlay"}</span>
+              </label>
+            </Field>
+
+            {bannerOverlayEnabled && (
+              <Field label="Overlay opacity (0–100)">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={bannerOverlayOpacity}
+                    onChange={(e) => setBannerOverlayOpacity(e.target.value)}
+                    className="flex-1 accent-accent"
+                  />
+                  <span className="w-10 text-right text-sm tabular-nums">{bannerOverlayOpacity}%</span>
+                </div>
+                <p className="mt-1 text-xs text-muted">Opacity of the dark overlay on top of the banner image.</p>
+              </Field>
+            )}
+
+            <Field label="Fade to background">
+              <label className="flex cursor-pointer items-center gap-3">
+                <div
+                  role="switch"
+                  aria-checked={bannerFadeEnabled}
+                  onClick={() => setBannerFadeEnabled((v) => !v)}
+                  className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${bannerFadeEnabled ? "bg-accent" : "bg-border"}`}
+                >
+                  <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${bannerFadeEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                </div>
+                <span className="text-sm">{bannerFadeEnabled ? "Banner fades to transparent at the bottom" : "Hard edge"}</span>
+              </label>
+            </Field>
+          </>
+        )}
+
         <Field label="PWA icon URL">
           <div className="flex gap-2">
             <input
