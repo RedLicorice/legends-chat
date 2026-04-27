@@ -5,6 +5,7 @@ import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 import { themes } from "@legends/db/schema";
 import { asc } from "drizzle-orm";
+import { PushSetup } from "@/components/PushSetup";
 
 export const dynamic = "force-dynamic";
 
@@ -96,7 +97,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           document.addEventListener('touchmove', function(e) { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
         `}} />
       </head>
-      <body className="min-h-screen bg-bg text-text">{children}</body>
+      <body className="min-h-screen bg-bg text-text"><PushSetup />{children}</body>
     </html>
   );
 }

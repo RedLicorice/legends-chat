@@ -7,7 +7,6 @@ import { io } from "socket.io-client";
 import { WS_EVENTS } from "@legends/shared";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopicListItem } from "@/components/TopicListItem";
-import { PushSetup } from "@/components/PushSetup";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
 import type { TopicListItem as TopicItem } from "@/lib/topics";
 
@@ -88,7 +87,6 @@ export function HomeLayout({ user, topics: initialTopics, communityName = "Topic
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <PushSetup />
       <AppSidebar
         user={user}
         variant="chat"
