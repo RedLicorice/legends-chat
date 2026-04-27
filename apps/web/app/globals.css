@@ -95,3 +95,193 @@ body {
 .tiptap strong { font-weight: 700; }
 .tiptap em { font-style: italic; }
 .tiptap hr { border: none; border-top: 1px solid rgb(var(--ch-border)); margin: 0.5rem 0; }
+
+/* ──────────────────────────────────────────────────────
+   Cyberpunk theme — effects & animations
+────────────────────────────────────────────────────── */
+
+@keyframes cp-neon-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 6px  rgb(var(--ch-accent) / 0.55),
+      0 0 18px rgb(var(--ch-accent) / 0.25),
+      0 0 36px rgb(var(--ch-accent) / 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 12px rgb(var(--ch-accent) / 0.85),
+      0 0 28px rgb(var(--ch-accent) / 0.45),
+      0 0 56px rgb(var(--ch-accent) / 0.20);
+  }
+}
+
+@keyframes cp-border-breathe {
+  0%, 100% { box-shadow: 0 0 6px rgb(var(--ch-accent) / 0.12), inset 0 0 6px rgb(var(--ch-accent) / 0.04); }
+  50%       { box-shadow: 0 0 12px rgb(var(--ch-accent) / 0.22), inset 0 0 10px rgb(var(--ch-accent) / 0.07); }
+}
+
+@keyframes cp-flicker {
+  0%,92%,100% { opacity: 1; }
+  93%          { opacity: 0.45; }
+  95%          { opacity: 0.95; }
+  97%          { opacity: 0.5; }
+}
+
+@keyframes cp-scan {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(100vh); }
+}
+
+@keyframes cp-text-flicker {
+  0%,90%,100% { text-shadow: 0 0 8px rgb(var(--ch-accent)/0.8), 0 0 20px rgb(var(--ch-accent)/0.35); }
+  91%          { text-shadow: 0 0 2px rgb(var(--ch-accent)/0.3); }
+  93%          { text-shadow: 0 0 8px rgb(var(--ch-accent)/0.8), 0 0 20px rgb(var(--ch-accent)/0.35); }
+}
+
+/* Body: scanlines + grid + glow */
+[data-theme="cyberpunk"] body {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px, transparent 3px,
+      rgb(0 0 0 / 0.09) 3px, rgb(0 0 0 / 0.09) 4px
+    ),
+    linear-gradient(rgb(0 210 255 / 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(0 210 255 / 0.028) 1px, transparent 1px),
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgb(0 40 80 / 0.55) 0%, transparent 70%);
+  background-size: auto, 44px 44px, 44px 44px, auto;
+  background-attachment: fixed;
+  background-color: rgb(var(--ch-bg));
+}
+
+/* Moving scan line sweep */
+[data-theme="cyberpunk"] body::before {
+  content: '';
+  position: fixed;
+  left: 0; right: 0; top: 0;
+  height: 180px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(0 225 255 / 0.035),
+    transparent
+  );
+  animation: cp-scan 10s linear infinite;
+  pointer-events: none;
+  z-index: 9990;
+}
+
+/* Border glow — all bordered elements */
+[data-theme="cyberpunk"] .border-border {
+  box-shadow: 0 0 8px rgb(var(--ch-accent) / 0.09);
+}
+
+/* Panels breathe */
+[data-theme="cyberpunk"] .bg-panel {
+  animation: cp-border-breathe 4s ease-in-out infinite;
+}
+[data-theme="cyberpunk"] .bg-panel2 {
+  animation: cp-border-breathe 4s ease-in-out infinite 1s;
+}
+
+/* Accent text — neon glow + flicker */
+[data-theme="cyberpunk"] .text-accent {
+  animation: cp-text-flicker 9s step-end infinite;
+}
+[data-theme="cyberpunk"] .text-accent2 {
+  text-shadow: 0 0 8px rgb(var(--ch-accent2) / 0.8), 0 0 20px rgb(var(--ch-accent2) / 0.35);
+}
+[data-theme="cyberpunk"] .text-danger {
+  text-shadow: 0 0 8px rgb(var(--ch-danger) / 0.7), 0 0 16px rgb(var(--ch-danger) / 0.3);
+}
+
+/* Accent bg — neon pulse (buttons, badges, send btn) */
+[data-theme="cyberpunk"] .bg-accent {
+  animation: cp-neon-pulse 3s ease-in-out infinite;
+}
+
+/* Accent bg hover — intensify glow */
+[data-theme="cyberpunk"] .bg-accent:hover {
+  animation: cp-neon-pulse 1.2s ease-in-out infinite;
+}
+
+/* Notification badge — flicker */
+[data-theme="cyberpunk"] .bg-accent.rounded-full {
+  animation: cp-neon-pulse 3s ease-in-out infinite, cp-flicker 8s step-end infinite;
+}
+
+/* Rounded panels — neon hover edge */
+[data-theme="cyberpunk"] .rounded-xl,
+[data-theme="cyberpunk"] .rounded-2xl {
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+[data-theme="cyberpunk"] .rounded-xl:hover,
+[data-theme="cyberpunk"] .rounded-2xl:hover {
+  box-shadow:
+    0 0 0 1px rgb(var(--ch-accent) / 0.2),
+    0 0 20px rgb(var(--ch-accent) / 0.08),
+    0 0 40px rgb(var(--ch-accent) / 0.04);
+}
+
+/* Rounded lg hover (list items, nav links) */
+[data-theme="cyberpunk"] .rounded-lg {
+  transition: box-shadow 0.2s ease;
+}
+[data-theme="cyberpunk"] .rounded-lg:hover {
+  box-shadow: 0 0 0 1px rgb(var(--ch-accent) / 0.12), 0 0 10px rgb(var(--ch-accent) / 0.06);
+}
+
+/* Input / textarea focus — neon ring */
+[data-theme="cyberpunk"] input:focus,
+[data-theme="cyberpunk"] textarea:focus,
+[data-theme="cyberpunk"] select:focus {
+  outline: none !important;
+  box-shadow:
+    0 0 0 1px rgb(var(--ch-accent) / 0.7),
+    0 0 14px rgb(var(--ch-accent) / 0.35),
+    inset 0 0 8px rgb(var(--ch-accent) / 0.06) !important;
+}
+
+/* Tiptap editor focus */
+[data-theme="cyberpunk"] .tiptap:focus-within {
+  box-shadow:
+    0 0 0 1px rgb(var(--ch-accent) / 0.5),
+    0 0 14px rgb(var(--ch-accent) / 0.25);
+}
+
+/* Scrollbar — neon cyan/pink gradient */
+[data-theme="cyberpunk"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg,
+    rgb(var(--ch-accent) / 0.5) 0%,
+    rgb(var(--ch-accent2) / 0.4) 100%
+  );
+  box-shadow: 0 0 8px rgb(var(--ch-accent) / 0.4);
+}
+[data-theme="cyberpunk"] ::-webkit-scrollbar-track {
+  background: rgb(var(--ch-panel));
+}
+
+/* Avatar hover — neon ring */
+[data-theme="cyberpunk"] .rounded-full:hover {
+  box-shadow: 0 0 0 2px rgb(var(--ch-accent) / 0.6), 0 0 10px rgb(var(--ch-accent) / 0.3);
+  transition: box-shadow 0.2s ease;
+}
+
+/* Sidebar active item — left neon bar */
+[data-theme="cyberpunk"] .bg-panel2.rounded-lg {
+  border-left: 2px solid rgb(var(--ch-accent) / 0.7);
+  box-shadow: inset 4px 0 12px rgb(var(--ch-accent) / 0.08);
+}
+
+/* Code blocks — neon border */
+[data-theme="cyberpunk"] .tiptap pre,
+[data-theme="cyberpunk"] .tiptap code {
+  border: 1px solid rgb(var(--ch-accent) / 0.25);
+  box-shadow: 0 0 8px rgb(var(--ch-accent) / 0.1);
+}
+
+/* Blockquote — neon left bar */
+[data-theme="cyberpunk"] .tiptap blockquote {
+  border-left-color: rgb(var(--ch-accent2) / 0.7);
+  box-shadow: 0 0 8px rgb(var(--ch-accent2) / 0.1);
+}
