@@ -10,11 +10,17 @@ interface BeforeInstallPromptEvent extends Event {
 export type InstallState =
   | { type: "unavailable" }
   | { type: "native"; install: () => Promise<void> }
-  | { type: "ios" }; // show manual instructions
+  | { type: "ios" }
+  | { type: "android" }; // manual instructions fallback
 
 function isIos() {
   if (typeof navigator === "undefined") return false;
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
+function isAndroid() {
+  if (typeof navigator === "undefined") return false;
+  return /android/i.test(navigator.userAgent);
 }
 
 function isInStandaloneMode() {
@@ -27,11 +33,16 @@ export function useInstallPrompt(): InstallState {
   const [state, setState] = useState<InstallState>({ type: "unavailable" });
 
   useEffect(() => {
-    if (isInStandaloneMode()) return; // already installed
+    if (isInStandaloneMode()) return;
 
     if (isIos()) {
       setState({ type: "ios" });
       return;
+    }
+
+    if (isAndroid()) {
+      // Show manual fallback immediately; upgrade to native if/when prompt fires.
+      setState({ type: "android" });
     }
 
     const handler = (e: Event) => {

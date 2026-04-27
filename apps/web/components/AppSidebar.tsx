@@ -104,6 +104,7 @@ export function AppSidebar({
   const [showModQueue, setShowModQueue] = useState(false);
   const [pendingFlags, setPendingFlags] = useState<number | null>(null);
   const [showIosInstall, setShowIosInstall] = useState(false);
+  const [showAndroidInstall, setShowAndroidInstall] = useState(false);
 
   const installState = useInstallPrompt();
 
@@ -320,6 +321,15 @@ export function AppSidebar({
                 <Download className="h-4 w-4" /> Install app
               </button>
             )}
+            {installState.type === "android" && (
+              <button
+                type="button"
+                onClick={() => setShowAndroidInstall(true)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+              >
+                <Download className="h-4 w-4" /> Install app
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -365,6 +375,40 @@ export function AppSidebar({
             <button
               type="button"
               onClick={() => setShowIosInstall(false)}
+              className="w-full rounded-lg bg-accent py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showAndroidInstall && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 md:items-center">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-panel p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">Install on Android</h2>
+              <button type="button" onClick={() => setShowAndroidInstall(false)} className="text-muted hover:text-text">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <ol className="space-y-3 text-sm text-muted">
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">1</span>
+                Tap the <strong className="text-text">menu</strong> button (⋮) in the top-right corner of Chrome.
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">2</span>
+                Tap <strong className="text-text">Add to Home screen</strong>.
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">3</span>
+                Tap <strong className="text-text">Add</strong> to confirm.
+              </li>
+            </ol>
+            <button
+              type="button"
+              onClick={() => setShowAndroidInstall(false)}
               className="w-full rounded-lg bg-accent py-2 text-sm font-medium text-white hover:opacity-90"
             >
               Got it
