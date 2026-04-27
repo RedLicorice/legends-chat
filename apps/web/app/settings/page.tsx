@@ -7,6 +7,8 @@ import { TotpPanel } from "@/components/TotpPanel";
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
 import { WalletPanel } from "@/components/WalletPanel";
+import { EmailLinkPanel } from "@/components/EmailLinkPanel";
+import { PasskeyPanel } from "@/components/PasskeyPanel";
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 
@@ -53,7 +55,15 @@ export default async function SettingsPage() {
         </div>
 
         <div className="rounded-xl border border-border bg-panel p-5">
+          <EmailLinkPanel />
+        </div>
+
+        <div className="rounded-xl border border-border bg-panel p-5">
           <WalletPanel />
+        </div>
+
+        <div className="rounded-xl border border-border bg-panel p-5">
+          <PasskeyPanel />
         </div>
       </div>
     </main>
