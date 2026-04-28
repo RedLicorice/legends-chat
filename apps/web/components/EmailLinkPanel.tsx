@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
 import { Mail, CheckCircle } from "lucide-react";
@@ -14,7 +15,7 @@ export function EmailLinkPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/user/profile")
+    apiFetch("/api/user/profile")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d?.email) setLinkedEmail(d.email); })
       .catch(() => {})
@@ -24,7 +25,7 @@ export function EmailLinkPanel() {
   async function sendOtp() {
     setBusy(true); setError(null);
     try {
-      const res = await fetch("/api/user/email-link", {
+      const res = await apiFetch("/api/user/email-link", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: emailInput.trim().toLowerCase() }),
@@ -39,7 +40,7 @@ export function EmailLinkPanel() {
   async function verifyOtp() {
     setBusy(true); setError(null);
     try {
-      const res = await fetch("/api/user/email-link/verify", {
+      const res = await apiFetch("/api/user/email-link/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ otp: otpInput.trim() }),

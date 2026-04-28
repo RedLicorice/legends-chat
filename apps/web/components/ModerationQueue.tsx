@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -49,7 +50,7 @@ export function ModerationQueue({
 
   async function act(flagId: string, body: Record<string, unknown>) {
     setError(null);
-    const res = await fetch(`/api/admin/moderation/flags/${flagId}`, {
+    const res = await apiFetch(`/api/admin/moderation/flags/${flagId}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),

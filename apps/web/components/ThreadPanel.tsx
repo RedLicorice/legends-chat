@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
@@ -67,7 +68,7 @@ export function ThreadPanel({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetch(`/api/topics/${topicId}/messages?replyTo=${rootMessage.id}`)
+    apiFetch(`/api/topics/${topicId}/messages?replyTo=${rootMessage.id}`)
       .then((r) => r.json())
       .then((data) => { if (active) setReplies(Array.isArray(data) ? data : []); })
       .catch(() => {})

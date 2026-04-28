@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
 import { Shield } from "lucide-react";
@@ -19,7 +20,7 @@ export function TotpPanel() {
   const [success, setSuccess] = useState<string | null>(null);
 
   async function load() {
-    const res = await fetch("/api/user/totp");
+    const res = await apiFetch("/api/user/totp");
     if (res.ok) {
       const data = await res.json() as TotpStatus;
       setStatus(data);
@@ -38,7 +39,7 @@ export function TotpPanel() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch("/api/user/totp", {
+      const res = await apiFetch("/api/user/totp", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
@@ -57,7 +58,7 @@ export function TotpPanel() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch("/api/user/totp", {
+      const res = await apiFetch("/api/user/totp", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),

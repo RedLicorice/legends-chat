@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
 import { ImageUploadButton } from "@/components/ImageUploadButton";
@@ -46,7 +47,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/admin/settings", {
+      const res = await apiFetch("/api/admin/settings", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -402,7 +403,7 @@ function InviteConfigSection() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/invite-config")
+    apiFetch("/api/admin/invite-config")
       .then((r) => r.json())
       .then((d: { invitesEnabled: boolean; quotas: Record<string, number>; codePrefix?: string }) => {
         setInvitesEnabled(d.invitesEnabled);
@@ -417,7 +418,7 @@ function InviteConfigSection() {
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/admin/invite-config", {
+      const res = await apiFetch("/api/admin/invite-config", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ invitesEnabled, quotas, codePrefix: codePrefix.trim() || "LGND" }),

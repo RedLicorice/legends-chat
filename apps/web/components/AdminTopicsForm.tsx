@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -102,7 +103,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/admin/roles")
+    apiFetch("/api/admin/roles")
       .then((r) => r.ok ? r.json() : null)
       .then((data: { name: string; permissions: string[] }[] | null) => {
         if (!data) return;
@@ -118,7 +119,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
     setSaving(id);
     setErrors((e) => ({ ...e, [id]: "" }));
     try {
-      const res = await fetch(`/api/admin/topics/${id}`, {
+      const res = await apiFetch(`/api/admin/topics/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...patch, ...extra }),
@@ -173,7 +174,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
     setPurging(id);
     setErrors((e) => ({ ...e, [id]: "" }));
     try {
-      const res = await fetch(`/api/admin/topics/${id}/messages`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/topics/${id}/messages`, { method: "DELETE" });
       if (!res.ok) throw new Error("purge failed");
     } catch {
       setErrors((e) => ({ ...e, [id]: "Purge failed" }));
@@ -186,7 +187,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
     if (!window.confirm(`Delete topic "${title}"? This cannot be undone.`)) return;
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/topics/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/topics/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("delete failed");
       setTopics((prev) => prev.filter((t) => t.id !== id));
       router.refresh();
@@ -201,7 +202,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await fetch("/api/admin/topics", {
+      const res = await apiFetch("/api/admin/topics", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

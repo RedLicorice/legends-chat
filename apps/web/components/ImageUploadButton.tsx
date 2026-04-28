@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
@@ -19,7 +20,7 @@ export function ImageUploadButton({ onUploaded, bucket = "avatars", className }:
       const form = new FormData();
       form.append("file", file);
       form.append("bucket", bucket);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await apiFetch("/api/upload", { method: "POST", body: form });
       const data = await res.json() as { url?: string };
       if (res.ok && data.url) onUploaded(data.url);
     } finally {

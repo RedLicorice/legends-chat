@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
@@ -34,7 +35,7 @@ export function ModQueueModal({ onClose, onCountChange }: Props) {
   const fetchFlags = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch("/api/admin/moderation/flags");
+      const res = await apiFetch("/api/admin/moderation/flags");
       if (!res.ok) throw new Error("failed to load");
       const data = await res.json() as { flags: FlagView[]; canBan: boolean; canMute: boolean };
       setFlags(data.flags);

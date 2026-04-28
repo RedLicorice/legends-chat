@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
@@ -74,7 +75,7 @@ export function ThemeSelector({ defaultTheme }: { defaultTheme?: string }) {
     const active = document.documentElement.dataset.theme ?? defaultTheme ?? "dark";
     setCurrent(active);
 
-    fetch("/api/themes")
+    apiFetch("/api/themes")
       .then((r) => r.ok ? r.json() : [])
       .then((data: ThemeInfo[]) => { if (Array.isArray(data)) setAvailableThemes(data); })
       .catch(() => {});

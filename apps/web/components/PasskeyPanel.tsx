@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Trash2, Plus, Pencil, Check, X, ShieldCheck } from "lucide-react";
@@ -27,7 +28,7 @@ export function PasskeyPanel() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/user/passkeys");
+      const r = await apiFetch("/api/user/passkeys");
       if (r.ok) {
         const d = await r.json() as { passkeys: PasskeyRow[] };
         setPasskeys(d.passkeys);
@@ -43,13 +44,13 @@ export function PasskeyPanel() {
     setError(null);
     setRegistering(true);
     try {
-      const optRes = await fetch("/api/auth/passkey/register");
+      const optRes = await apiFetch("/api/auth/passkey/register");
       if (!optRes.ok) throw new Error("Failed to get registration options.");
       const options = await optRes.json() as PublicKeyCredentialCreationOptionsJSON;
 
       const response = await startRegistration({ optionsJSON: options });
 
-      const verRes = await fetch("/api/auth/passkey/register", {
+      const verRes = await apiFetch("/api/auth/passkey/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ response, name: newName.trim() || "Passkey" }),
@@ -74,7 +75,7 @@ export function PasskeyPanel() {
 
   async function remove(id: string) {
     try {
-      await fetch("/api/user/passkeys", {
+      await apiFetch("/api/user/passkeys", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id }),
@@ -87,7 +88,7 @@ export function PasskeyPanel() {
 
   async function rename(id: string) {
     try {
-      await fetch("/api/user/passkeys", {
+      await apiFetch("/api/user/passkeys", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id, name: editName }),

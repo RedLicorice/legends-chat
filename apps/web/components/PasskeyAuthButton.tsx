@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
@@ -19,13 +20,13 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
     setError(null);
     setLoading(true);
     try {
-      const optRes = await fetch("/api/auth/passkey/authenticate");
+      const optRes = await apiFetch("/api/auth/passkey/authenticate");
       if (!optRes.ok) throw new Error("Failed to get authentication options.");
       const options = await optRes.json() as PublicKeyCredentialRequestOptionsJSON;
 
       const response = await startAuthentication({ optionsJSON: options });
 
-      const verRes = await fetch("/api/auth/passkey/authenticate", {
+      const verRes = await apiFetch("/api/auth/passkey/authenticate", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ response }),

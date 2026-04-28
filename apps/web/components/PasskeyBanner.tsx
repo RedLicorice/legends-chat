@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
 import { KeyRound, X } from "lucide-react";
@@ -15,11 +16,11 @@ export function PasskeyBanner() {
     setRegistering(true);
     setError(null);
     try {
-      const optRes = await fetch("/api/auth/passkey/register");
+      const optRes = await apiFetch("/api/auth/passkey/register");
       if (!optRes.ok) throw new Error("Failed to get registration options.");
       const options = await optRes.json() as PublicKeyCredentialCreationOptionsJSON;
       const response = await startRegistration({ optionsJSON: options });
-      const verRes = await fetch("/api/auth/passkey/register", {
+      const verRes = await apiFetch("/api/auth/passkey/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ response, name: "My Passkey" }),

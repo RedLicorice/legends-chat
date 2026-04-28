@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -42,7 +43,7 @@ export function SearchModal({ onClose, currentTopicId }: SearchModalProps) {
       try {
         const params = new URLSearchParams({ q: query.trim() });
         if (currentTopicId) params.set("topic", currentTopicId);
-        const res = await fetch(`/api/search?${params}`);
+        const res = await apiFetch(`/api/search?${params}`);
         const data = await res.json() as SearchResult[];
         setResults(Array.isArray(data) ? data : []);
         setSearched(true);

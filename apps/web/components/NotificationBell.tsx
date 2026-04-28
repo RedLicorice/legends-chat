@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -44,7 +45,7 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
   useEffect(() => { setMounted(true); }, []);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/user/notifications");
+    const res = await apiFetch("/api/user/notifications");
     if (!res.ok) return;
     const data = await res.json() as { items: Notification[]; unread: number };
     setItems(data.items);
@@ -102,7 +103,7 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
     if (nextOpen && unread > 0) {
       setUnread(0);
       setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
-      await fetch("/api/user/notifications", { method: "PATCH" });
+      await apiFetch("/api/user/notifications", { method: "PATCH" });
     }
   }
 

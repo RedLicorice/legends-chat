@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -28,7 +29,7 @@ export default function RegisterPage() {
   const [formLoading, setFormLoading] = useState(false);
 
   useEffect(() => {
-    fetch("/api/register-config")
+    apiFetch("/api/register-config")
       .then((r) => r.json())
       .then((data: { invitesRequired: boolean; registrationMode: string }) => {
         if (data.registrationMode !== "open") {
@@ -53,7 +54,7 @@ export default function RegisterPage() {
     }
     setInviteLoading(true);
     try {
-      const res = await fetch(`/api/invite-check?code=${encodeURIComponent(code)}`);
+      const res = await apiFetch(`/api/invite-check?code=${encodeURIComponent(code)}`);
       const data = await res.json() as { valid: boolean; error?: string };
       if (!data.valid) {
         setInviteError(data.error ?? "Invalid or expired invite code.");
@@ -79,7 +80,7 @@ export default function RegisterPage() {
     setFormError(null);
     setFormLoading(true);
     try {
-      const res = await fetch("/api/auth/register", {
+      const res = await apiFetch("/api/auth/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

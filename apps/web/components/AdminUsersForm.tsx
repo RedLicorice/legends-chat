@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 import { Search, Pencil, Trash2, Ban, VolumeX, Check, X } from "lucide-react";
@@ -33,7 +34,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
   const search = useCallback((q: string) => {
     setLoading(true);
     const url = q.trim() ? `/api/admin/users?q=${encodeURIComponent(q.trim())}` : "/api/admin/users";
-    fetch(url)
+    apiFetch(url)
       .then((r) => r.json())
       .then((data) => setUsers(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -50,7 +51,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
     setSaving(userId);
     setErrors((e) => ({ ...e, [userId]: "" }));
     try {
-      const res = await fetch(`/api/admin/users/${userId}`, {
+      const res = await apiFetch(`/api/admin/users/${userId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ role }),
@@ -68,7 +69,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
     setSaving(userId);
     setErrors((e) => ({ ...e, [userId]: "" }));
     try {
-      const res = await fetch(`/api/admin/users/${userId}`, {
+      const res = await apiFetch(`/api/admin/users/${userId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ displayName }),
@@ -87,7 +88,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
     if (!window.confirm(`Delete user "${name}"? This cannot be undone.`)) return;
     setDeleting(userId);
     try {
-      const res = await fetch(`/api/admin/users/${userId}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("failed");
       setUsers((prev) => prev.filter((u) => u.id !== userId));
     } catch {
@@ -112,7 +113,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
           body.expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
         }
       }
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),

@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -21,7 +22,7 @@ export function BansPanel() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch("/api/admin/bans")
+    apiFetch("/api/admin/bans")
       .then((r) => r.json())
       .then((d) => {
         setBans(d.bans ?? []);
@@ -34,7 +35,7 @@ export function BansPanel() {
 
   async function lift(id: string, type: "ban" | "mute") {
     setLifting(id);
-    await fetch(`/api/admin/bans/${id}?type=${type}`, { method: "DELETE" });
+    await apiFetch(`/api/admin/bans/${id}?type=${type}`, { method: "DELETE" });
     setLifting(null);
     load();
   }

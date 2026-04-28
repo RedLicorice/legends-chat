@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useRef, useState } from "react";
 import { Search, X, Upload, Plus, Check, ArrowLeft } from "lucide-react";
@@ -82,7 +83,7 @@ function LibraryTab({
   function load(q: string) {
     setLoading(true);
     const qs = q ? `?q=${encodeURIComponent(q)}&limit=50` : "?limit=50";
-    fetch(`/api/gif/custom${qs}`)
+    apiFetch(`/api/gif/custom${qs}`)
       .then((r) => r.json())
       .then((d: { gifs: CustomGif[] }) => setGifs(d.gifs ?? []))
       .catch(() => {})
@@ -173,7 +174,7 @@ function GiphyTab({ onSelect }: { onSelect: Props["onSelect"] }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/gif?q=${encodeURIComponent(q)}&limit=20`);
+      const res = await apiFetch(`/api/gif?q=${encodeURIComponent(q)}&limit=20`);
       const data = await res.json() as { gifs?: GifResult[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? "failed");
       setGifs(data.gifs ?? []);
@@ -263,11 +264,11 @@ function UploadForm({
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const upRes = await fetch("/api/upload?bucket=gifs", { method: "POST", body: fd });
+      const upRes = await apiFetch("/api/upload?bucket=gifs", { method: "POST", body: fd });
       const upData = await upRes.json() as { url?: string; error?: string };
       if (!upRes.ok) throw new Error(upData.error ?? "upload failed");
 
-      const gifRes = await fetch("/api/gif/custom", {
+      const gifRes = await apiFetch("/api/gif/custom", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

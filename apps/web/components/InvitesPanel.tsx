@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Plus, RefreshCw } from "lucide-react";
@@ -41,7 +42,7 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/invites", { cache: "no-store" });
+      const res = await apiFetch("/api/admin/invites", { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       setData(await res.json());
     } catch (e) {
@@ -66,7 +67,7 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
       if (role === "user") {
         body.maxUses = unlimited ? null : Math.max(1, Number(maxUses) || 1);
       }
-      const res = await fetch("/api/admin/invites", {
+      const res = await apiFetch("/api/admin/invites", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),

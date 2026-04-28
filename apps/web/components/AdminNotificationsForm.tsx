@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
 import { Megaphone, Send } from "lucide-react";
@@ -18,7 +19,7 @@ export function AdminNotificationsForm() {
   const [result, setResult] = useState<{ ok: boolean; sent?: number; error?: string } | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/roles")
+    apiFetch("/api/admin/roles")
       .then((r) => r.json())
       .then((data: unknown) => { if (Array.isArray(data)) setRoles(data as Role[]); })
       .catch(() => {});
@@ -30,7 +31,7 @@ export function AdminNotificationsForm() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch("/api/admin/notifications/broadcast", {
+      const res = await apiFetch("/api/admin/notifications/broadcast", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: message.trim(), target, role: target === "role" ? role : undefined }),

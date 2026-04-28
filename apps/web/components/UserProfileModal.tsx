@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useRef, useState } from "react";
 import { X, Camera, LogOut } from "lucide-react";
@@ -24,7 +25,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   const bannerRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("/api/user/profile").then((r) => r.ok ? r.json() : null).catch(() => null).then((profile) => {
+    apiFetch("/api/user/profile").then((r) => r.ok ? r.json() : null).catch(() => null).then((profile) => {
       if (profile?.bannerUrl != null) setBannerUrl(profile.bannerUrl);
     });
   }, []);
@@ -36,11 +37,11 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       const form = new FormData();
       form.append("file", file);
       form.append("bucket", "avatars");
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await apiFetch("/api/upload", { method: "POST", body: form });
       const data = await res.json() as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "upload failed");
       setBannerUrl(data.url);
-      await fetch("/api/user/profile", {
+      await apiFetch("/api/user/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ bannerUrl: data.url }),
@@ -59,7 +60,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       const form = new FormData();
       form.append("file", file);
       form.append("bucket", "avatars");
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await apiFetch("/api/upload", { method: "POST", body: form });
       const data = await res.json() as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "upload failed");
       setAvatarUrl(data.url);
@@ -74,7 +75,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/user/profile", {
+      const res = await apiFetch("/api/user/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ displayName: displayName.trim(), avatarUrl, bannerUrl, presenceOptOut }),

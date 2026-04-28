@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
 import { X, Shield } from "lucide-react";
@@ -25,7 +26,7 @@ export function UserViewModal({ userId, viewerPermissions, onClose }: Props) {
   const canAdmin = viewerPermissions.includes(PERMISSIONS.ADMIN_CONFIG);
 
   useEffect(() => {
-    fetch(`/api/users/${userId}`)
+    apiFetch(`/api/users/${userId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d: UserProfile | null) => { if (d) setProfile(d); })
       .catch(() => {})

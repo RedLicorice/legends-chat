@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
 import { Plus, Trash2, Copy, Star, StarOff, ChevronDown, ChevronUp } from "lucide-react";
@@ -132,7 +133,7 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
     setErrors((e) => ({ ...e, [id]: "" }));
     setSaved((s) => ({ ...s, [id]: false }));
     try {
-      const res = await fetch(`/api/admin/themes/${id}`, {
+      const res = await apiFetch(`/api/admin/themes/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -154,7 +155,7 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
   }
 
   async function setDefault(id: string) {
-    await fetch(`/api/admin/themes/${id}`, {
+    await apiFetch(`/api/admin/themes/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ setDefault: true }),
@@ -167,7 +168,7 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
     if (!window.confirm(`Delete theme "${name}"? Users who selected it will fall back to the default.`)) return;
     setDeleting(id);
     try {
-      const res = await fetch(`/api/admin/themes/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/themes/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const d = await res.json();
         throw new Error(d.error ?? "delete failed");
@@ -186,7 +187,7 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await fetch("/api/admin/themes", {
+      const res = await apiFetch("/api/admin/themes", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id, name: createName.trim(), cloneFrom: cloneFrom || undefined }),

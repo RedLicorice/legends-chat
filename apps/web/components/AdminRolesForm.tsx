@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
 import { Plus, Trash2, Copy } from "lucide-react";
@@ -61,7 +62,7 @@ export function AdminRolesForm({ roles: initial }: Props) {
     setErrors((e) => ({ ...e, [name]: "" }));
     setSaved((s) => ({ ...s, [name]: false }));
     try {
-      const res = await fetch(`/api/admin/roles/${name}`, {
+      const res = await apiFetch(`/api/admin/roles/${name}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ label: editLabels[name], permissions: editPerms[name] ?? [] }),
@@ -80,7 +81,7 @@ export function AdminRolesForm({ roles: initial }: Props) {
     if (!window.confirm(`Delete role "${label}"? Users with this role will still have it assigned but gain no permissions.`)) return;
     setDeleting(name);
     try {
-      const res = await fetch(`/api/admin/roles/${name}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/admin/roles/${name}`, { method: "DELETE" });
       if (!res.ok) {
         const d = await res.json();
         throw new Error(d.error ?? "delete failed");
@@ -99,7 +100,7 @@ export function AdminRolesForm({ roles: initial }: Props) {
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await fetch("/api/admin/roles", {
+      const res = await apiFetch("/api/admin/roles", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, label: createLabel.trim(), cloneFrom: cloneFrom || undefined }),

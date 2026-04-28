@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
 import { Bot, ChevronDown, ChevronUp, Copy, Plus, RefreshCw, Trash2, X } from "lucide-react";
@@ -50,7 +51,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/bots", {
+      const res = await apiFetch("/api/admin/bots", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: newBotName.trim() }),
@@ -68,7 +69,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
 
   async function rotateToken(botId: string) {
     if (!window.confirm("Rotate token? The current token will stop working immediately.")) return;
-    const res = await fetch(`/api/admin/bots/${botId}/rotate-token`, { method: "POST" });
+    const res = await apiFetch(`/api/admin/bots/${botId}/rotate-token`, { method: "POST" });
     const data = await res.json() as { token: string; error?: string };
     if (!res.ok) { setError(data.error ?? "Failed to rotate token"); return; }
     setRevealedToken({ botId, token: data.token });
@@ -83,7 +84,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
       if (editDescriptions[botId] !== undefined) patch.description = editDescriptions[botId] || null;
       if (editWebhooks[botId] !== undefined) patch.webhookUrl = editWebhooks[botId] || null;
       if (Object.keys(patch).length === 0) return;
-      const res = await fetch(`/api/admin/bots/${botId}`, {
+      const res = await apiFetch(`/api/admin/bots/${botId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
@@ -100,7 +101,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
   }
 
   async function toggleActive(bot: BotRow) {
-    const res = await fetch(`/api/admin/bots/${bot.id}`, {
+    const res = await apiFetch(`/api/admin/bots/${bot.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ isActive: !bot.isActive }),
@@ -111,7 +112,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
 
   async function deleteBot(botId: string) {
     if (!window.confirm("Delete this bot? All its messages will remain but unowned.")) return;
-    const res = await fetch(`/api/admin/bots/${botId}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/admin/bots/${botId}`, { method: "DELETE" });
     if (res.ok) {
       setBots((prev) => prev.filter((b) => b.id !== botId));
       setAssignments((prev) => prev.filter((a) => a.botId !== botId));
@@ -119,7 +120,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
   }
 
   async function addToTopic(botId: string, topicId: string) {
-    const res = await fetch(`/api/admin/topics/${topicId}/bots`, {
+    const res = await apiFetch(`/api/admin/topics/${topicId}/bots`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ botId }),
@@ -130,7 +131,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
   }
 
   async function removeFromTopic(botId: string, topicId: string) {
-    const res = await fetch(`/api/admin/topics/${topicId}/bots/${botId}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/admin/topics/${topicId}/bots/${botId}`, { method: "DELETE" });
     if (res.ok) setAssignments((prev) => prev.filter((a) => !(a.botId === botId && a.topicId === topicId)));
   }
 
@@ -218,7 +219,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                     <ImageUploadButton
                       bucket="avatars"
                       onUploaded={(url) => {
-                        fetch(`/api/admin/bots/${bot.id}`, {
+                        apiFetch(`/api/admin/bots/${bot.id}`, {
                           method: "PATCH",
                           headers: { "content-type": "application/json" },
                           body: JSON.stringify({ avatarUrl: url }),
@@ -233,7 +234,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                         type="button"
                         className="text-xs text-muted hover:text-danger"
                         onClick={() => {
-                          fetch(`/api/admin/bots/${bot.id}`, {
+                          apiFetch(`/api/admin/bots/${bot.id}`, {
                             method: "PATCH",
                             headers: { "content-type": "application/json" },
                             body: JSON.stringify({ avatarUrl: null }),

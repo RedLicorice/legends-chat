@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
 import { Mail, X } from "lucide-react";
@@ -13,14 +14,14 @@ export function EmailLinkBanner() {
 
   async function dismiss() {
     setDismissed(true);
-    await fetch("/api/user/email-link", { method: "DELETE" });
+    await apiFetch("/api/user/email-link", { method: "DELETE" });
   }
 
   async function sendOtp() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/user/email-link", {
+      const res = await apiFetch("/api/user/email-link", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),
@@ -36,7 +37,7 @@ export function EmailLinkBanner() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/user/email-link/verify", {
+      const res = await apiFetch("/api/user/email-link/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ otp }),

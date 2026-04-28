@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useEffect } from "react";
 
@@ -25,7 +26,7 @@ export function PushSetup() {
         const existing = await reg.pushManager.getSubscription();
         if (existing) return;
 
-        const vapid = await fetch("/api/push/vapid").then((r) => r.json());
+        const vapid = await apiFetch("/api/push/vapid").then((r) => r.json());
         if (!vapid.publicKey) return;
         const permission = await Notification.requestPermission();
         if (permission !== "granted") return;
@@ -36,7 +37,7 @@ export function PushSetup() {
         });
         const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
         if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return;
-        await fetch("/api/push/subscribe", {
+        await apiFetch("/api/push/subscribe", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
