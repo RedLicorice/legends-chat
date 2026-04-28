@@ -10,8 +10,7 @@ const PUBLIC_PATHS = [
   "/api/health",
   "/api/auth/login",
   "/api/auth/register",
-  "/api/auth/wallet/challenge",
-  "/api/auth/wallet/verify",
+  "/api/auth/refresh",
   "/api/auth/passkey/authenticate",
   "/api/register-config",
   "/api/invite-check",
@@ -53,5 +52,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|uploads/avatars/|uploads/gifs/).*)"],
 };

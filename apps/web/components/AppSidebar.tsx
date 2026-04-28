@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -115,7 +116,7 @@ export function AppSidebar({
 
   const refreshFlagCount = useCallback(() => {
     if (!canModQueue) return;
-    fetch("/api/admin/moderation/flags")
+    apiFetch("/api/admin/moderation/flags")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d) setPendingFlags((d.flags as unknown[]).length); })
       .catch(() => {});

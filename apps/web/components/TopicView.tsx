@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -207,7 +208,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
     void (async () => {
       try {
         const { getOrCreateIdentityKeyPair, exportPublicKey } = await import("@/lib/e2ee");
-        const res = await fetch("/api/user/keys");
+        const res = await apiFetch("/api/user/keys");
         const data = await res.json() as { registered: boolean; identityPublicKey?: string; backup?: string | null };
         if (!data.registered) { setE2eeSetupNeeded(true); return; }
         const kp = await getOrCreateIdentityKeyPair();
@@ -335,7 +336,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   useEffect(() => {
     if (!showUsers || members.length > 0) return;
     setMembersLoading(true);
-    fetch(`/api/topics/${topic.id}/members`)
+    apiFetch(`/api/topics/${topic.id}/members`)
       .then((r) => r.json())
       .then((data) => setMembers(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -373,7 +374,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   const reportMessage = useCallback(async (messageId: string) => {
     const reason = window.prompt("Why are you reporting this message?")?.trim();
     if (!reason || reason.length < 3) return;
-    const res = await fetch("/api/messages/flag", {
+    const res = await apiFetch("/api/messages/flag", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ messageId, reason }),
@@ -430,7 +431,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         for (const sid of missing) {
           const local = await getSenderKey(topic.id, sid);
           if (local) { senderKeyCache.current.set(sid, local as Uint8Array<ArrayBuffer>); continue; }
-          const res = await fetch(`/api/topics/${topic.id}/e2ee?distributorId=${sid}`);
+          const res = await apiFetch(`/api/topics/${topic.id}/e2ee?distributorId=${sid}`);
           if (!res.ok) continue;
           const dist = await res.json() as { encryptedKey: string; distributorPublicKey: string | null };
           if (!dist.distributorPublicKey) continue;
@@ -479,7 +480,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       const form = new FormData();
       form.append("file", file);
       form.append("bucket", bucket);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const res = await apiFetch("/api/upload", { method: "POST", body: form });
       const data = await res.json() as { url?: string; filename?: string; mimeType?: string; size?: number; error?: string };
       if (!res.ok || !data.url) return null;
       if (bucket === "files") {
@@ -531,7 +532,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         } = await import("@/lib/e2ee");
 
         // Fetch current members + already-distributed list
-        const distRes = await fetch(`/api/topics/${topic.id}/e2ee/distribute`);
+        const distRes = await apiFetch(`/api/topics/${topic.id}/e2ee/distribute`);
         const distData = distRes.ok
           ? await distRes.json() as { members: { userId: string; identityPublicKey: string }[]; alreadyDistributed: string[] }
           : { members: [], alreadyDistributed: [] };
@@ -564,7 +565,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
             distributions.push({ recipientUserId: currentUser.id, encryptedKey: encSelf });
           }
           if (distributions.length > 0) {
-            await fetch(`/api/topics/${topic.id}/e2ee/distribute`, {
+            await apiFetch(`/api/topics/${topic.id}/e2ee/distribute`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ distributions }),

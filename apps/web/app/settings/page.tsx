@@ -6,7 +6,6 @@ import { getCurrentUser } from "@/lib/auth";
 import { TotpPanel } from "@/components/TotpPanel";
 import { ThemeSelector } from "@/components/ThemeSelector";
 import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
-import { WalletPanel } from "@/components/WalletPanel";
 import { EmailLinkPanel } from "@/components/EmailLinkPanel";
 import { PasskeyPanel } from "@/components/PasskeyPanel";
 import { getSetting } from "@legends/db/system-settings";
@@ -31,7 +30,7 @@ export default async function SettingsPage() {
   const currentCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
 
   return (
-    <main className="selectable flex min-h-screen items-start justify-center p-8">
+    <main className="selectable h-full overflow-y-auto flex items-start justify-center p-8">
       <div className="w-full max-w-lg space-y-8">
         <div>
           <Link
@@ -56,10 +55,6 @@ export default async function SettingsPage() {
 
         <div className="rounded-xl border border-border bg-panel p-5">
           <EmailLinkPanel />
-        </div>
-
-        <div className="rounded-xl border border-border bg-panel p-5">
-          <WalletPanel />
         </div>
 
         <div className="rounded-xl border border-border bg-panel p-5">

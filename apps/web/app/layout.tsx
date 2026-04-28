@@ -105,7 +105,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           document.addEventListener('touchmove', function(e) { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
         `}} />
       </head>
-      <body className="min-h-screen bg-bg text-text"><PushSetup />{children}</body>
+      <body className="bg-bg text-text"><PushSetup />{children}</body>
     </html>
   );
 }

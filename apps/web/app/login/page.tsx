@@ -3,12 +3,11 @@
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { WalletAuthButton } from "@/components/WalletAuthButton";
 import { PasskeyAuthButton } from "@/components/PasskeyAuthButton";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"telegram" | "email" | "wallet" | "passkey">("telegram");
+  const [tab, setTab] = useState<"passkey" | "email" | "telegram">("passkey");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -45,10 +44,9 @@ export default function LoginPage() {
 
         {/* Tab switcher */}
         <div className="mb-6 flex rounded-lg border border-border bg-panel p-1">
-          <TabBtn active={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</TabBtn>
-          <TabBtn active={tab === "email"} onClick={() => setTab("email")}>Email</TabBtn>
-          <TabBtn active={tab === "wallet"} onClick={() => setTab("wallet")}>Wallet</TabBtn>
           <TabBtn active={tab === "passkey"} onClick={() => setTab("passkey")}>Passkey</TabBtn>
+          <TabBtn active={tab === "email"} onClick={() => setTab("email")}>Email</TabBtn>
+          <TabBtn active={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</TabBtn>
         </div>
 
         {tab === "telegram" ? (
@@ -97,15 +95,6 @@ export default function LoginPage() {
               {loading ? "Signing in…" : "Sign in"}
             </button>
           </form>
-        )}
-
-        {tab === "wallet" && (
-          <div className="space-y-3">
-            <WalletAuthButton mode="login" onSuccess={() => router.push("/")} />
-            <p className="text-center text-xs text-muted">
-              First time? A new account is created automatically when registration is open.
-            </p>
-          </div>
         )}
 
         <p className="mt-4 text-center text-sm text-muted">

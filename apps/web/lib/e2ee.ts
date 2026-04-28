@@ -59,6 +59,12 @@ function fromB64(s: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+// base64url (WebAuthn credential IDs) → Uint8Array
+function fromB64Url(s: string): Uint8Array<ArrayBuffer> {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  return fromB64(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+}
+
 const IDB_IDENTITY = "identity-kp";
 
 export async function getOrCreateIdentityKeyPair(): Promise<CryptoKeyPair> {
@@ -145,6 +151,32 @@ export async function clearSenderKeysForTopic(topicId: string, userIds: string[]
   for (const uid of userIds) await idbDel(`${IDB_SENDER_KEY_PREFIX}${topicId}:${uid}`);
 }
 
+export async function clearAllSenderKeys(): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    const store = tx.objectStore(STORE);
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) { resolve(); return; }
+      if ((cursor.key as string).startsWith(IDB_SENDER_KEY_PREFIX)) cursor.delete();
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function generateNewIdentityKeyPair(): Promise<CryptoKeyPair> {
+  const kp = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveKey", "deriveBits"],
+  );
+  await idbSet(IDB_IDENTITY, kp);
+  return kp;
+}
+
 export interface E2EEPayload {
   e: 1;
   kid: string;
@@ -178,32 +210,65 @@ export async function decryptE2EEMessage(text: string, senderKey: Uint8Array<Arr
   return new TextDecoder().decode(plain);
 }
 
-export async function exportIdentityBackup(kp: CryptoKeyPair, passphrase: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  const wrapKey = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
-    ppKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["wrapKey"],
-  );
-  const wrapped = await crypto.subtle.wrapKey("pkcs8", kp.privateKey, wrapKey, { name: "AES-GCM", iv });
-  const pubBuf = await crypto.subtle.exportKey("spki", kp.publicKey);
-  return JSON.stringify({ salt: toB64(salt), iv: toB64(iv), wrapped: toB64(wrapped), pub: toB64(pubBuf) });
+// ── PRF-based backup (WebAuthn PRF extension, Chrome 116+/Safari 17+) ──────────
+
+interface PrfBackupPayload {
+  type: "prf";
+  credentialId: string;   // base64url — which passkey to use for unlock
+  credentialName: string; // display name captured at backup time
+  prfSalt: string;        // base64 — PRF eval input (stored so restore uses same input)
+  iv: string;
+  wrapped: string;
+  pub: string;
 }
 
-export async function importIdentityBackup(backup: string, passphrase: string): Promise<CryptoKeyPair> {
-  const { salt, iv, wrapped, pub } = JSON.parse(backup) as { salt: string; iv: string; wrapped: string; pub: string };
-  const ppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  const unwrapKey = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: fromB64(salt), iterations: 200000, hash: "SHA-256" },
-    ppKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["unwrapKey"],
-  );
+export function getPrfCredentialName(backup: string): string | null {
+  try { return (JSON.parse(backup) as { credentialName?: string }).credentialName ?? null; } catch { return null; }
+}
+
+async function prfAssert(credentialId: string, prfSalt: Uint8Array): Promise<ArrayBuffer> {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const credential = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      allowCredentials: [{ type: "public-key", id: fromB64Url(credentialId) }],
+      userVerification: "required",
+      extensions: { prf: { eval: { first: prfSalt } } } as AuthenticationExtensionsClientInputs,
+    },
+  }) as PublicKeyCredential;
+  const results = credential.getClientExtensionResults() as { prf?: { results?: { first?: ArrayBuffer } } };
+  const prfOutput = results.prf?.results?.first;
+  if (!prfOutput) throw new Error("Passkey does not support the PRF extension. Use passphrase backup instead.");
+  return prfOutput;
+}
+
+export async function exportIdentityBackupWithPrf(
+  kp: CryptoKeyPair,
+  credentialId: string,
+  credentialName: string,
+): Promise<string> {
+  const prfSalt = crypto.getRandomValues(new Uint8Array(32));
+  const prfOutput = await prfAssert(credentialId, prfSalt);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrapKey = await crypto.subtle.importKey("raw", prfOutput, { name: "AES-GCM" }, false, ["wrapKey"]);
+  const wrapped = await crypto.subtle.wrapKey("pkcs8", kp.privateKey, wrapKey, { name: "AES-GCM", iv });
+  const pubBuf = await crypto.subtle.exportKey("spki", kp.publicKey);
+  const payload: PrfBackupPayload = {
+    type: "prf",
+    credentialId,
+    credentialName,
+    prfSalt: toB64(prfSalt),
+    iv: toB64(iv),
+    wrapped: toB64(wrapped),
+    pub: toB64(pubBuf),
+  };
+  return JSON.stringify(payload);
+}
+
+export async function importIdentityBackupWithPrf(backup: string): Promise<CryptoKeyPair> {
+  const { credentialId, prfSalt, iv, wrapped, pub } = JSON.parse(backup) as PrfBackupPayload;
+  const prfOutput = await prfAssert(credentialId, fromB64(prfSalt));
+  const unwrapKey = await crypto.subtle.importKey("raw", prfOutput, { name: "AES-GCM" }, false, ["unwrapKey"]);
   const privateKey = await crypto.subtle.unwrapKey(
     "pkcs8",
     fromB64(wrapped),

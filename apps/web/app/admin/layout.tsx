@@ -13,7 +13,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const permissions = Array.from(user.permissions);
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-[100dvh] overflow-hidden">
       <AppSidebar
         user={{
           id: user.id,

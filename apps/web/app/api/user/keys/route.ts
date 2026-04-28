@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { userKeyBundles } from "@legends/db/schema";
+import { e2eeSenderKeys, userKeyBundles } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -23,6 +23,14 @@ export async function POST(req: Request) {
 
   const keyBundle = body.backup ? { backup: body.backup } : {};
 
+  const [existing] = await db
+    .select({ identityPublicKey: userKeyBundles.identityPublicKey })
+    .from(userKeyBundles)
+    .where(eq(userKeyBundles.userId, user.id))
+    .limit(1);
+
+  const keyChanged = !existing || existing.identityPublicKey !== body.identityPublicKey;
+
   await db
     .insert(userKeyBundles)
     .values({ userId: user.id, identityPublicKey: body.identityPublicKey, keyBundle })
@@ -30,6 +38,12 @@ export async function POST(req: Request) {
       target: userKeyBundles.userId,
       set: { identityPublicKey: body.identityPublicKey, keyBundle, updatedAt: new Date() },
     });
+
+  // New key → old sender key distributions (encrypted for old public key) are useless.
+  // Delete them so other users see needsRotation=true and re-distribute to the new key.
+  if (keyChanged) {
+    await db.delete(e2eeSenderKeys).where(eq(e2eeSenderKeys.recipientUserId, user.id));
+  }
 
   return NextResponse.json({ ok: true });
 }

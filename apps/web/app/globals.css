@@ -53,6 +53,7 @@ body {
   overscroll-behavior: none;
   /* dvh: adapts to visible viewport on mobile (excludes browser chrome) */
   height: 100dvh;
+  overflow: hidden;
   /* Disable selection on UI shell by default */
   user-select: none;
   -webkit-user-select: none;
