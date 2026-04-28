@@ -12,6 +12,14 @@ install:
         exit 1
     fi
 
+dev:
+    pnpm --filter @legends/web run dev
+
+prebuild:
+    pnpm --filter @legends/web run build
+
+dev-warm: prebuild dev
+
 start:
     ./start.sh
 

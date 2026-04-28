@@ -30,7 +30,7 @@ export async function GET(
         ),
       )
       .limit(1);
-    if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+    if (!row) return NextResponse.json({ encryptedKey: null, distributorPublicKey: null });
     // Also return distributor's public key so client can derive shared secret
     const [bundle] = await db
       .select({ identityPublicKey: userKeyBundles.identityPublicKey })
