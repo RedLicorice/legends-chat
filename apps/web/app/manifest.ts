@@ -20,13 +20,13 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
 
   const icons: MetadataRoute.Manifest["icons"] = iconUrl
     ? [
-        { src: iconUrl, sizes: "512x512", type: "image/png", purpose: "any maskable" },
+        { src: iconUrl, sizes: "512x512", type: "image/png", purpose: "any maskable" as "any" },
         { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
         { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
       ]
     : [
         { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" as "any" },
       ];
 
   const shortcuts: MetadataRoute.Manifest["shortcuts"] = [
