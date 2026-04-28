@@ -250,8 +250,11 @@ export async function exportIdentityBackupWithPrf(
   const prfSalt = crypto.getRandomValues(new Uint8Array(32));
   const prfOutput = await prfAssert(credentialId, prfSalt);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const wrapKey = await crypto.subtle.importKey("raw", prfOutput, { name: "AES-GCM" }, false, ["wrapKey"]);
-  const wrapped = await crypto.subtle.wrapKey("pkcs8", kp.privateKey, wrapKey, { name: "AES-GCM", iv });
+  const aesKey = await crypto.subtle.importKey("raw", prfOutput, { name: "AES-GCM" }, false, ["encrypt"]);
+  // Use explicit exportKey→encrypt rather than wrapKey — wrapKey has patchy
+  // support for ECDH/pkcs8 on some Android WebViews despite extractable:true.
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
+  const wrapped = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, pkcs8);
   const pubBuf = await crypto.subtle.exportKey("spki", kp.publicKey);
   const payload: PrfBackupPayload = {
     type: "prf",
@@ -268,17 +271,12 @@ export async function exportIdentityBackupWithPrf(
 export async function importIdentityBackupWithPrf(backup: string): Promise<CryptoKeyPair> {
   const { credentialId, prfSalt, iv, wrapped, pub } = JSON.parse(backup) as PrfBackupPayload;
   const prfOutput = await prfAssert(credentialId, fromB64(prfSalt));
-  const unwrapKey = await crypto.subtle.importKey("raw", prfOutput, { name: "AES-GCM" }, false, ["unwrapKey"]);
-  const privateKey = await crypto.subtle.unwrapKey(
-    "pkcs8",
-    fromB64(wrapped),
-    unwrapKey,
-    { name: "AES-GCM", iv: fromB64(iv) },
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    ["deriveKey", "deriveBits"],
+  const aesKey = await crypto.subtle.importKey("raw", prfOutput, { name: "AES-GCM" }, false, ["decrypt"]);
+  const pkcs8 = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(iv) }, aesKey, fromB64(wrapped));
+  const privateKey = await crypto.subtle.importKey(
+    "pkcs8", pkcs8, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"],
   );
-  const publicKey = await crypto.subtle.importKey("spki", fromB64(pub).buffer, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const publicKey = await crypto.subtle.importKey("spki", fromB64(pub).buffer, { name: "ECDH", namedCurve: "P-256" }, true, []);
   const kp = { privateKey, publicKey };
   await idbSet(IDB_IDENTITY, kp);
   return kp;
