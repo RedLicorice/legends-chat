@@ -8,6 +8,11 @@
    Tailwind reads these via rgb(var(--ch-X) / <alpha>).
 ────────────────────────────────────────────────────── */
 :root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
   --ch-bg:      11  13  18;
   --ch-panel:   20  24  33;
   --ch-panel2:  26  31  43;
@@ -54,6 +59,7 @@ body {
   /* dvh: adapts to visible viewport on mobile (excludes browser chrome) */
   height: 100dvh;
   overflow: hidden;
+  max-width: 100vw;
   /* Disable selection on UI shell by default */
   user-select: none;
   -webkit-user-select: none;
@@ -120,6 +126,23 @@ main.selectable {
 .tiptap strong { font-weight: 700; }
 .tiptap em { font-style: italic; }
 .tiptap hr { border: none; border-top: 1px solid rgb(var(--ch-border)); margin: 0.5rem 0; }
+
+/* Mention node in editor */
+.tiptap .mention-tag {
+  display: inline-block;
+  padding: 0.05em 0.35em;
+  border-radius: 4px;
+  background: rgb(var(--ch-accent2) / 0.15);
+  color: rgb(var(--ch-accent2));
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+/* Mention highlights in rendered messages */
+.prose .mention-tag {
+  color: rgb(var(--ch-accent2));
+  font-weight: 600;
+}
 
 /* ──────────────────────────────────────────────────────
    Cyberpunk theme — effects & animations

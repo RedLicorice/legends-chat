@@ -1,8 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { asc } from "drizzle-orm";
 import { topics } from "@legends/db/schema";
 import { createTopicSchema, PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+
+export async function GET() {
+  const user = await getCurrentUser();
+  if (!user || !user.permissions.has(PERMISSIONS.ADMIN_CONFIG)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  const rows = await db
+    .select({ id: topics.id, slug: topics.slug, title: topics.title })
+    .from(topics)
+    .orderBy(asc(topics.sortOrder), asc(topics.title));
+  return NextResponse.json({ topics: rows });
+}
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();

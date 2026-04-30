@@ -31,6 +31,8 @@ import {
   REDIS_CHANNELS,
   WS_EVENTS,
   createPollSchema,
+  messageDeleteSchema,
+  messageEditSchema,
   pollCloseSchema,
   pollVoteSchema,
   reactionToggleSchema,
@@ -47,7 +49,9 @@ import {
   castPollVote,
   closePollById,
   createPollMessage,
+  editMessage,
   ensureTopicMembership,
+  getMessageOwner,
   getMessageTopicId,
   getMyPollVotes,
   insertMessage,
@@ -55,6 +59,7 @@ import {
   listReactionsForTopic,
   listRecentMessages,
   setLastReadMessage,
+  softDeleteMessage,
   toggleReaction,
   getTopicById,
   getTopicMemberUserIds,
@@ -304,6 +309,52 @@ io.on("connection", async (socket: AuthedSocket) => {
         emojiKey: parsed.emojiKey,
       });
       ack?.({ ok: true, ...result });
+    } catch (err) {
+      ack?.({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  socket.on(WS_EVENTS.MESSAGE_EDIT_REQ, async (raw: unknown, ack?: (res: unknown) => void) => {
+    try {
+      const parsed = messageEditSchema.parse(raw);
+      const owner = await getMessageOwner(parsed.messageId);
+      if (!owner || owner.topicId !== parsed.topicId) {
+        ack?.({ ok: false, error: "not found" }); return;
+      }
+      const isOwn = owner.senderUserId === user.sub;
+      const canEditAny = user.role !== "user";
+      if (!isOwn && !canEditAny) {
+        ack?.({ ok: false, error: "forbidden" }); return;
+      }
+      const updated = await editMessage({
+        messageId: parsed.messageId,
+        topicId: parsed.topicId,
+        newText: parsed.text,
+        editedByUserId: user.sub,
+      });
+      if (!updated) { ack?.({ ok: false, error: "message not found or deleted" }); return; }
+      io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_EDIT, updated);
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  socket.on(WS_EVENTS.MESSAGE_DELETE_REQ, async (raw: unknown, ack?: (res: unknown) => void) => {
+    try {
+      const parsed = messageDeleteSchema.parse(raw);
+      const owner = await getMessageOwner(parsed.messageId);
+      if (!owner || owner.topicId !== parsed.topicId) {
+        ack?.({ ok: false, error: "not found" }); return;
+      }
+      const isOwn = owner.senderUserId === user.sub;
+      const canDeleteAny = user.role !== "user";
+      if (!isOwn && !canDeleteAny) {
+        ack?.({ ok: false, error: "forbidden" }); return;
+      }
+      await softDeleteMessage(parsed.messageId, parsed.topicId);
+      io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_DELETE, { id: parsed.messageId, topicId: parsed.topicId });
+      ack?.({ ok: true });
     } catch (err) {
       ack?.({ ok: false, error: (err as Error).message });
     }

@@ -100,7 +100,7 @@ export const registrationConfig = pgTable("registration_config", {
 
 export const inviteQuotaConfig = pgTable("invite_quota_config", {
   role: text("role").primaryKey(),
-  dailyLimit: integer("daily_limit").notNull().default(0),
+  dailyLimit: integer("daily_limit"),
 });
 
 export const inviteCodes = pgTable(
@@ -182,7 +182,7 @@ export const topics = pgTable(
     autoDeleteAgeSeconds: integer("auto_delete_age_seconds"),
     autoDeleteMaxMessages: integer("auto_delete_max_messages"),
     iconUrl: text("icon_url"),
-    visibilityPermission: text("visibility_permission"),
+    viewRoles: jsonb("view_roles").$type<string[]>().default([]),
     isFeed: boolean("is_feed").notNull().default(false),
     isHomeTopic: boolean("is_home_topic").notNull().default(false),
     postRoles: jsonb("post_roles").$type<string[]>().default([]),
@@ -239,6 +239,24 @@ export const messages = pgTable(
   (t) => ({
     topicCreatedIdx: index("messages_topic_created_idx").on(t.topicId, t.createdAt),
     topicIdIdx: index("messages_topic_id_idx").on(t.topicId, t.id),
+  }),
+);
+
+export const messageEdits = pgTable(
+  "message_edits",
+  {
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+    messageId: bigint("message_id", { mode: "bigint" })
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    editedByUserId: uuid("edited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    previousContent: bytea("previous_content").notNull(),
+    previousNonce: bytea("previous_nonce").notNull(),
+    keyId: uuid("key_id").notNull().references(() => encryptionKeys.id),
+    editedAt: timestamp("edited_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    messageIdx: index("message_edits_message_idx").on(t.messageId),
   }),
 );
 

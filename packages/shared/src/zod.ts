@@ -75,6 +75,19 @@ export const pollCloseSchema = z.object({
   pollId: z.string().uuid(),
 });
 
+export const messageEditSchema = z.object({
+  messageId: z.string(),
+  topicId: z.string().uuid(),
+  text: z.string().min(1).max(8000).trim(),
+});
+export type MessageEditInput = z.infer<typeof messageEditSchema>;
+
+export const messageDeleteSchema = z.object({
+  messageId: z.string(),
+  topicId: z.string().uuid(),
+});
+export type MessageDeleteInput = z.infer<typeof messageDeleteSchema>;
+
 export const createTopicSchema = z.object({
   slug: z
     .string()

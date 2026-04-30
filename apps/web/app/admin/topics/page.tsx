@@ -33,12 +33,12 @@ export default async function AdminTopicsPage() {
           isP2p: t.isP2p,
           p2pFallbackE2ee: t.p2pFallbackE2ee,
           p2pMaxParticipants: t.p2pMaxParticipants ?? null,
+          viewRoles: (t.viewRoles as string[] | null) ?? [],
           postRoles: (t.postRoles as string[] | null) ?? [],
           readRoles: (t.readRoles as string[] | null) ?? [],
           autoDeleteMode: t.autoDeleteMode,
           autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
           autoDeleteMaxMessages: t.autoDeleteMaxMessages,
-          visibilityPermission: t.visibilityPermission ?? null,
         }))} />
     </main>
   );

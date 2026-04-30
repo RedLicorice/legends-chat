@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   encryptionKeys,
+  messageEdits,
   messageReactions,
   messages,
   pollOptions,
@@ -519,5 +520,86 @@ export async function getMessageTopicId(messageId: string): Promise<string | nul
     .where(eq(messages.id, BigInt(messageId)))
     .limit(1);
   return rows[0]?.topicId ?? null;
+}
+
+export async function getMessageOwner(messageId: string): Promise<{ topicId: string; senderUserId: string | null } | null> {
+  const [row] = await db
+    .select({ topicId: messages.topicId, senderUserId: messages.senderUserId })
+    .from(messages)
+    .where(and(eq(messages.id, BigInt(messageId)), isNull(messages.deletedAt)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function editMessage(args: {
+  messageId: string;
+  topicId: string;
+  newText: string;
+  editedByUserId: string;
+}): Promise<InsertedMessage | null> {
+  const [current] = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.id, BigInt(args.messageId)), eq(messages.topicId, args.topicId), isNull(messages.deletedAt)))
+    .limit(1);
+  if (!current) return null;
+
+  // Archive previous ciphertext
+  await db.insert(messageEdits).values({
+    messageId: BigInt(args.messageId),
+    editedByUserId: args.editedByUserId,
+    previousContent: current.contentCiphertext,
+    previousNonce: current.contentNonce,
+    keyId: current.keyId,
+  });
+
+  // Encrypt new content
+  const key = await currentDataKey();
+  const aad = new TextEncoder().encode(args.topicId);
+  const encoded = encodeContent(args.newText);
+  const { ciphertext, nonce } = encryptMessage(key.data, encoded, aad);
+  const now = new Date();
+
+  await db.update(messages)
+    .set({ contentCiphertext: ciphertext, contentNonce: nonce, keyId: key.id, editedAt: now })
+    .where(eq(messages.id, BigInt(args.messageId)));
+
+  let senderDisplayName: string | null = null;
+  let senderAvatarUrl: string | null = null;
+  let senderIsAnon = false;
+  let senderRole: string | null = null;
+  if (current.senderUserId) {
+    const [u] = await db
+      .select({ displayName: users.displayName, isAnon: users.isAnon, avatarUrl: users.avatarUrl, role: users.role })
+      .from(users)
+      .where(eq(users.id, current.senderUserId))
+      .limit(1);
+    if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; senderAvatarUrl = u.avatarUrl; senderRole = u.role; }
+  }
+
+  const { attachments } = decodeContent(encodeContent(args.newText));
+
+  return {
+    id: args.messageId,
+    topicId: args.topicId,
+    senderUserId: current.senderUserId,
+    senderDisplayName,
+    senderAvatarUrl,
+    senderIsAnon,
+    senderRole,
+    botId: current.botId,
+    replyToMessageId: current.replyToMessageId?.toString() ?? null,
+    text: args.newText,
+    attachments,
+    createdAt: current.createdAt,
+    editedAt: now,
+  };
+}
+
+export async function softDeleteMessage(messageId: string, topicId: string): Promise<boolean> {
+  await db.update(messages)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(messages.id, BigInt(messageId)), eq(messages.topicId, topicId), isNull(messages.deletedAt)));
+  return true;
 }
 

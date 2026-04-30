@@ -1,7 +1,9 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
+import { uploadFile } from "@/lib/upload";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { X, Camera, LogOut } from "lucide-react";
 import Link from "next/link";
 import { Settings } from "lucide-react";
@@ -13,12 +15,15 @@ interface Props {
 }
 
 export function UserProfileModal({ user, onClose, onUpdate }: Props) {
+  const router = useRouter();
   const [displayName, setDisplayName] = useState(user.displayName);
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [presenceOptOut, setPresenceOptOut] = useState(user.presenceOptOut ?? false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [bannerProgress, setBannerProgress] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -32,19 +37,15 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
 
   async function uploadBanner(file: File) {
     setUploadingBanner(true);
+    setBannerProgress(0);
     setError(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("bucket", "avatars");
-      const res = await apiFetch("/api/upload", { method: "POST", body: form });
-      const data = await res.json() as { url?: string; error?: string };
-      if (!res.ok || !data.url) throw new Error(data.error ?? "upload failed");
-      setBannerUrl(data.url);
+      const url = await uploadFile(file, "avatars", setBannerProgress);
+      setBannerUrl(url);
       await apiFetch("/api/user/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ bannerUrl: data.url }),
+        body: JSON.stringify({ bannerUrl: url }),
       });
     } catch (e) {
       setError((e as Error).message);
@@ -55,15 +56,16 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
 
   async function uploadAvatar(file: File) {
     setUploading(true);
+    setUploadProgress(0);
     setError(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("bucket", "avatars");
-      const res = await apiFetch("/api/upload", { method: "POST", body: form });
-      const data = await res.json() as { url?: string; error?: string };
-      if (!res.ok || !data.url) throw new Error(data.error ?? "upload failed");
-      setAvatarUrl(data.url);
+      const url = await uploadFile(file, "avatars", setUploadProgress);
+      setAvatarUrl(url);
+      await apiFetch("/api/user/profile", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ avatarUrl: url }),
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -82,6 +84,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       });
       if (!res.ok) throw new Error("save failed");
       onUpdate({ displayName: displayName.trim(), avatarUrl, presenceOptOut });
+      router.refresh();
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -116,13 +119,15 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
             type="file"
             accept="image/jpeg,image/png,image/webp"
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBanner(f); }}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadBanner(f); }}
           />
           <button type="button" onClick={onClose} className="absolute top-3 right-3 rounded-full bg-black/40 p-1 text-white hover:bg-black/60">
             <X className="h-4 w-4" />
           </button>
           {uploadingBanner && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white">Uploading…</div>
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white">
+              {bannerProgress < 100 ? `${bannerProgress}%` : "Processing…"}
+            </div>
           )}
         </div>
 
@@ -151,12 +156,12 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
               type="file"
               accept="image/jpeg,image/png,image/webp"
               className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(f); }}
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadAvatar(f); }}
             />
           </div>
           <div className="pb-1 min-w-0">
             <p className="truncate font-semibold">{displayName}</p>
-            {uploading && <p className="text-xs text-muted">Uploading…</p>}
+            {uploading && <p className="text-xs text-muted">{uploadProgress < 100 ? `${uploadProgress}%` : "Processing…"}</p>}
           </div>
         </div>
 

@@ -57,23 +57,27 @@ export async function POST(req: NextRequest) {
     maxUses = 1;
   }
 
-  // Daily quota: fixed per caller role, counted for the calendar day in UTC.
-  const [quota] = await db
-    .select()
-    .from(inviteQuotaConfig)
-    .where(eq(inviteQuotaConfig.role, user.role))
-    .limit(1);
-  const dailyLimit = quota?.dailyLimit ?? 0;
+  let dailyLimit: number | null = null;
+  if (user.role !== "admin") {
+    const [quota] = await db
+      .select()
+      .from(inviteQuotaConfig)
+      .where(eq(inviteQuotaConfig.role, user.role))
+      .limit(1);
+    dailyLimit = quota?.dailyLimit ?? null;
+  }
 
-  const since = new Date();
-  since.setUTCHours(0, 0, 0, 0);
-  const countRows = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(inviteCodes)
-    .where(and(eq(inviteCodes.createdByUserId, user.id), gte(inviteCodes.createdAt, since)));
-  const used = countRows[0]?.count ?? 0;
-  if (Number(used) >= dailyLimit) {
-    return NextResponse.json({ error: "daily invite quota reached" }, { status: 429 });
+  if (dailyLimit !== null) {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    const countRows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(inviteCodes)
+      .where(and(eq(inviteCodes.createdByUserId, user.id), gte(inviteCodes.createdAt, since)));
+    const used = countRows[0]?.count ?? 0;
+    if (Number(used) >= dailyLimit) {
+      return NextResponse.json({ error: "daily invite quota reached" }, { status: 429 });
+    }
   }
 
   const code = await uniqueCode();
@@ -136,7 +140,7 @@ export async function GET() {
   return NextResponse.json({
     invites: rows,
     quota: {
-      dailyLimit: quota?.dailyLimit ?? 0,
+      dailyLimit: quota?.dailyLimit ?? null,
       usedToday: Number(countRows[0]?.count ?? 0),
     },
     canCreateElevated: user.permissions.has(PERMISSIONS.INVITES_CREATE_ELEVATED),

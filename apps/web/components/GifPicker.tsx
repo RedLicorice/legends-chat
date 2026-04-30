@@ -22,7 +22,7 @@ interface CustomGif {
 }
 
 interface Props {
-  onSelect: (gif: { url: string; thumbnailUrl: string; width: number; height: number }) => void;
+  onSelect: (gif: { url: string; thumbnailUrl: string; width?: number; height?: number }) => void;
   onClose: () => void;
   canUploadGif?: boolean;
   giphyEnabled?: boolean;
@@ -71,7 +71,7 @@ function LibraryTab({
   onSelect,
   canUploadGif,
 }: {
-  onSelect: Props["onSelect"];
+  onSelect: (gif: { url: string; thumbnailUrl: string }) => void;
   canUploadGif?: boolean;
 }) {
   const [gifs, setGifs] = useState<CustomGif[]>([]);
@@ -145,7 +145,7 @@ function LibraryTab({
               key={g.id}
               type="button"
               onClick={() =>
-                onSelect({ url: g.url, thumbnailUrl: g.thumbnailUrl ?? g.url, width: 0, height: 0 })
+                onSelect({ url: g.url, thumbnailUrl: g.thumbnailUrl ?? g.url })
               }
               className="overflow-hidden rounded-lg hover:opacity-90"
             >

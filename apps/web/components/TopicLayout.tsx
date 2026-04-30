@@ -77,7 +77,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
   );
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="fixed inset-0 flex overflow-hidden">
       <AppSidebar
         user={user}
         variant="chat"

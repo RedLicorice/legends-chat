@@ -2,13 +2,60 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
-import { ImageUploadButton } from "@/components/ImageUploadButton";
+import { ImageUrlField } from "@/components/ImageUrlField";
 
 interface Topic { id: string; title: string; slug: string }
 
 interface Props {
   settings: Record<string, string>;
   topics: Topic[];
+}
+
+const inputCls =
+  "w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent";
+
+function useSectionSave(keys: string[], getValues: () => Record<string, unknown>) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const res = await apiFetch("/api/admin/settings", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(getValues()),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setSaved(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return { saving, error, saved, save };
+}
+
+function SaveBar({ saving, error, saved, onSave }: { saving: boolean; error: string | null; saved: boolean; onSave: () => void }) {
+  return (
+    <div className="flex items-center gap-3 border-t border-border pt-4 mt-2">
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {saved && <p className="text-sm text-green-400">Saved.</p>}
+    </div>
+  );
 }
 
 export function AdminSettingsForm({ settings, topics }: Props) {
@@ -38,53 +85,48 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [turnUrl, setTurnUrl] = useState(settings.turn_url ?? "");
   const [turnUsername, setTurnUsername] = useState(settings.turn_username ?? "");
   const [turnCredential, setTurnCredential] = useState(settings.turn_credential ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
-  async function save() {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await apiFetch("/api/admin/settings", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          community_name: communityName.trim() || null,
-          community_logo_url: communityLogo.trim() || null,
-          community_banner_url: communityBanner.trim() || null,
-          pwa_icon_url: pwaIcon.trim() || null,
-          banner_in_topics: String(bannerInTopics),
-          banner_topic_height: bannerTopicHeight || "180",
-          banner_topic_overlap: bannerTopicOverlap || "60",
-          banner_overlay_enabled: String(bannerOverlayEnabled),
-          banner_overlay_opacity: bannerOverlayOpacity || "40",
-          banner_fade_enabled: String(bannerFadeEnabled),
-          registration_mode: registrationMode,
-          default_topic_id: defaultTopicId || null,
-          welcome_message: welcomeMessage.trim() || null,
-          farewell_message: farewellMessage.trim() || null,
-          giphy_enabled: String(giphyEnabled),
-          giphy_api_key: giphyApiKey.trim() || null,
-          sidebar_compact_default: sidebarCompactDefault,
-          p2p_max_participants: p2pMaxParticipants || "5",
-          stun_servers: JSON.stringify(
-            stunServers.split("\n").map((u) => u.trim()).filter(Boolean).map((urls) => ({ urls })),
-          ),
-          turn_url: turnUrl.trim() || null,
-          turn_username: turnUsername.trim() || null,
-          turn_credential: turnCredential.trim() || null,
-        }),
-      });
-      if (!res.ok) throw new Error("save failed");
-      setSaved(true);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
+  const community = useSectionSave([], () => ({
+    community_name: communityName.trim() || null,
+    community_logo_url: communityLogo.trim() || null,
+    community_banner_url: communityBanner.trim() || null,
+    pwa_icon_url: pwaIcon.trim() || null,
+    banner_in_topics: String(bannerInTopics),
+    banner_topic_height: bannerTopicHeight || "180",
+    banner_topic_overlap: bannerTopicOverlap || "60",
+    banner_overlay_enabled: String(bannerOverlayEnabled),
+    banner_overlay_opacity: bannerOverlayOpacity || "40",
+    banner_fade_enabled: String(bannerFadeEnabled),
+  }));
+
+  const registration = useSectionSave([], () => ({
+    registration_mode: registrationMode,
+  }));
+
+  const welcome = useSectionSave([], () => ({
+    default_topic_id: defaultTopicId || null,
+    welcome_message: welcomeMessage.trim() || null,
+    farewell_message: farewellMessage.trim() || null,
+  }));
+
+  const giphy = useSectionSave([], () => ({
+    giphy_enabled: String(giphyEnabled),
+    giphy_api_key: giphyApiKey.trim() || null,
+  }));
+
+  const sidebar = useSectionSave([], () => ({
+    sidebar_compact_default: sidebarCompactDefault,
+  }));
+
+  const p2p = useSectionSave([], () => ({
+    p2p_max_participants: p2pMaxParticipants || "5",
+    stun_servers: JSON.stringify(
+      stunServers.split("\n").map((u) => u.trim()).filter(Boolean).map((urls) => ({ urls })),
+    ),
+    turn_url: turnUrl.trim() || null,
+    turn_username: turnUsername.trim() || null,
+    turn_credential: turnCredential.trim() || null,
+  }));
 
   return (
     <div className="space-y-6">
@@ -100,41 +142,27 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           />
         </Field>
         <Field label="Logo URL">
-          <div className="flex gap-2">
-            <input
-              value={communityLogo}
-              onChange={(e) => setCommunityLogo(e.target.value)}
-              placeholder="https://example.com/logo.png"
-              className={inputCls}
-            />
-            <ImageUploadButton bucket="avatars" onUploaded={setCommunityLogo} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
-          </div>
-          <p className="mt-1 text-xs text-muted">Shown in the header and browser tab.</p>
+          <ImageUrlField
+            value={communityLogo}
+            onChange={setCommunityLogo}
+            bucket="avatars"
+            placeholder="https://example.com/logo.png"
+            hint="Shown in the header and browser tab. JPEG, PNG, GIF, WebP · max 10 MB."
+          />
         </Field>
         <Field label="Banner URL">
-          <div className="flex gap-2">
-            <input
-              value={communityBanner}
-              onChange={(e) => setCommunityBanner(e.target.value)}
-              placeholder="https://example.com/banner.png"
-              className={inputCls}
-            />
-            <ImageUploadButton bucket="avatars" onUploaded={setCommunityBanner} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
-          </div>
-          <p className="mt-1 text-xs text-muted">Decorative banner shown on the login/register pages and optionally in topics.</p>
+          <ImageUrlField
+            value={communityBanner}
+            onChange={setCommunityBanner}
+            bucket="avatars"
+            placeholder="https://example.com/banner.png"
+            hint="Decorative banner on login/register pages and optionally in topics. JPEG, PNG, GIF, WebP · max 10 MB."
+          />
         </Field>
 
-        {/* Banner-in-topics options */}
         <Field label="Show banner in topics">
           <label className="flex cursor-pointer items-center gap-3">
-            <div
-              role="switch"
-              aria-checked={bannerInTopics}
-              onClick={() => setBannerInTopics((v) => !v)}
-              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${bannerInTopics ? "bg-accent" : "bg-border"}`}
-            >
-              <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${bannerInTopics ? "translate-x-6" : "translate-x-1"}`} />
-            </div>
+            <Toggle value={bannerInTopics} onChange={setBannerInTopics} />
             <span className="text-sm">{bannerInTopics ? "Banner shown as topic background" : "Banner hidden in topics"}</span>
           </label>
         </Field>
@@ -142,70 +170,30 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         {bannerInTopics && (
           <>
             <Field label="Banner height (px)">
-              <input
-                type="number"
-                min="60"
-                max="600"
-                value={bannerTopicHeight}
-                onChange={(e) => setBannerTopicHeight(e.target.value)}
-                className={inputCls}
-              />
+              <input type="number" min="60" max="600" value={bannerTopicHeight} onChange={(e) => setBannerTopicHeight(e.target.value)} className={inputCls} />
               <p className="mt-1 text-xs text-muted">Total height of the banner area in the topic view.</p>
             </Field>
-
             <Field label="Content overlap (px)">
-              <input
-                type="number"
-                min="0"
-                max="400"
-                value={bannerTopicOverlap}
-                onChange={(e) => setBannerTopicOverlap(e.target.value)}
-                className={inputCls}
-              />
-              <p className="mt-1 text-xs text-muted">How many pixels of the banner the content slides over. 0 = no overlap, content starts below banner.</p>
+              <input type="number" min="0" max="400" value={bannerTopicOverlap} onChange={(e) => setBannerTopicOverlap(e.target.value)} className={inputCls} />
+              <p className="mt-1 text-xs text-muted">How many pixels of the banner the content slides over.</p>
             </Field>
-
             <Field label="Semi-transparent overlay">
               <label className="flex cursor-pointer items-center gap-3">
-                <div
-                  role="switch"
-                  aria-checked={bannerOverlayEnabled}
-                  onClick={() => setBannerOverlayEnabled((v) => !v)}
-                  className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${bannerOverlayEnabled ? "bg-accent" : "bg-border"}`}
-                >
-                  <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${bannerOverlayEnabled ? "translate-x-6" : "translate-x-1"}`} />
-                </div>
+                <Toggle value={bannerOverlayEnabled} onChange={setBannerOverlayEnabled} />
                 <span className="text-sm">{bannerOverlayEnabled ? "Overlay enabled" : "No overlay"}</span>
               </label>
             </Field>
-
             {bannerOverlayEnabled && (
               <Field label="Overlay opacity (0–100)">
                 <div className="flex items-center gap-3">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={bannerOverlayOpacity}
-                    onChange={(e) => setBannerOverlayOpacity(e.target.value)}
-                    className="flex-1 accent-accent"
-                  />
+                  <input type="range" min="0" max="100" value={bannerOverlayOpacity} onChange={(e) => setBannerOverlayOpacity(e.target.value)} className="flex-1 accent-accent" />
                   <span className="w-10 text-right text-sm tabular-nums">{bannerOverlayOpacity}%</span>
                 </div>
-                <p className="mt-1 text-xs text-muted">Opacity of the dark overlay on top of the banner image.</p>
               </Field>
             )}
-
             <Field label="Fade to background">
               <label className="flex cursor-pointer items-center gap-3">
-                <div
-                  role="switch"
-                  aria-checked={bannerFadeEnabled}
-                  onClick={() => setBannerFadeEnabled((v) => !v)}
-                  className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${bannerFadeEnabled ? "bg-accent" : "bg-border"}`}
-                >
-                  <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${bannerFadeEnabled ? "translate-x-6" : "translate-x-1"}`} />
-                </div>
+                <Toggle value={bannerFadeEnabled} onChange={setBannerFadeEnabled} />
                 <span className="text-sm">{bannerFadeEnabled ? "Banner fades to transparent at the bottom" : "Hard edge"}</span>
               </label>
             </Field>
@@ -213,155 +201,89 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         )}
 
         <Field label="PWA icon URL">
-          <div className="flex gap-2">
-            <input
-              value={pwaIcon}
-              onChange={(e) => setPwaIcon(e.target.value)}
-              placeholder="https://example.com/icon.png"
-              className={inputCls}
-            />
-            <ImageUploadButton bucket="avatars" onUploaded={setPwaIcon} className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2" />
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            Square PNG, at least 512×512. Used as the home screen icon when users install the app.
-            Leave blank to use the default purple icon.
-          </p>
+          <ImageUrlField
+            value={pwaIcon}
+            onChange={setPwaIcon}
+            bucket="avatars"
+            placeholder="https://example.com/icon.png"
+            hint="Square PNG, at least 512×512. Used as the home screen icon when users install the app."
+          />
         </Field>
+        <SaveBar {...community} onSave={community.save} />
       </Section>
 
       {/* Registration */}
       <Section title="Registration">
         <Field label="Registration mode">
-          <select
-            value={registrationMode}
-            onChange={(e) => setRegistrationMode(e.target.value)}
-            className={inputCls}
-          >
+          <select value={registrationMode} onChange={(e) => setRegistrationMode(e.target.value)} className={inputCls}>
             <option value="closed">Closed — no new registrations</option>
             <option value="telegram_only">Telegram only — link existing Telegram account</option>
             <option value="open">Open — email/username/password</option>
           </select>
-          <p className="mt-1 text-xs text-muted">
-            In "Telegram only" and "Open" modes, an invitation code may still be required (controlled by the invite flow).
-          </p>
+          <p className="mt-1 text-xs text-muted">In "Telegram only" and "Open" modes, an invitation code may still be required.</p>
         </Field>
+        <SaveBar {...registration} onSave={registration.save} />
       </Section>
 
-      {/* Default channel + messages */}
+      {/* Welcome flow */}
       <Section title="Welcome flow">
         <Field label="Default channel">
-          <select
-            value={defaultTopicId}
-            onChange={(e) => setDefaultTopicId(e.target.value)}
-            className={inputCls}
-          >
+          <select value={defaultTopicId} onChange={(e) => setDefaultTopicId(e.target.value)} className={inputCls}>
             <option value="">— none —</option>
             {topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
           </select>
           <p className="mt-1 text-xs text-muted">New members receive system messages in this channel.</p>
         </Field>
         <Field label="Welcome message">
-          <input
-            value={welcomeMessage}
-            onChange={(e) => setWelcomeMessage(e.target.value)}
-            maxLength={500}
-            placeholder="Welcome, {nickname}!"
-            className={inputCls}
-          />
-          <p className="mt-1 text-xs text-muted">
-            Use <code className="rounded bg-panel2 px-1">{"{nickname}"}</code> for their display name.
-          </p>
+          <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} maxLength={500} placeholder="Welcome, {nickname}!" className={inputCls} />
+          <p className="mt-1 text-xs text-muted">Use <code className="rounded bg-panel2 px-1">{"{nickname}"}</code> for their display name.</p>
         </Field>
         <Field label="Farewell message">
-          <input
-            value={farewellMessage}
-            onChange={(e) => setFarewellMessage(e.target.value)}
-            maxLength={500}
-            placeholder="Goodbye, {nickname}."
-            className={inputCls}
-          />
-          <p className="mt-1 text-xs text-muted">
-            Use <code className="rounded bg-panel2 px-1">{"{nickname}"}</code> for their display name.
-          </p>
+          <input value={farewellMessage} onChange={(e) => setFarewellMessage(e.target.value)} maxLength={500} placeholder="Goodbye, {nickname}." className={inputCls} />
+          <p className="mt-1 text-xs text-muted">Use <code className="rounded bg-panel2 px-1">{"{nickname}"}</code> for their display name.</p>
         </Field>
+        <SaveBar {...welcome} onSave={welcome.save} />
       </Section>
 
       {/* Giphy */}
       <Section title="GIF — Giphy integration">
         <Field label="Enable Giphy">
           <label className="flex cursor-pointer items-center gap-3">
-            <div
-              role="switch"
-              aria-checked={giphyEnabled}
-              onClick={() => setGiphyEnabled((v) => !v)}
-              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${giphyEnabled ? "bg-accent" : "bg-border"}`}
-            >
-              <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${giphyEnabled ? "translate-x-6" : "translate-x-1"}`} />
-            </div>
+            <Toggle value={giphyEnabled} onChange={setGiphyEnabled} />
             <span className="text-sm">{giphyEnabled ? "Giphy search enabled" : "Giphy disabled (library only)"}</span>
           </label>
         </Field>
         <Field label="Giphy API key">
-          <input
-            type="password"
-            value={giphyApiKey}
-            onChange={(e) => setGiphyApiKey(e.target.value)}
-            placeholder="Paste your Giphy API key"
-            className={inputCls}
-          />
+          <input type="password" value={giphyApiKey} onChange={(e) => setGiphyApiKey(e.target.value)} placeholder="Paste your Giphy API key" className={inputCls} />
           <p className="mt-1 text-xs text-muted">Required when Giphy is enabled. Get one at developers.giphy.com.</p>
         </Field>
+        <SaveBar {...giphy} onSave={giphy.save} />
       </Section>
 
       {/* Sidebar */}
       <Section title="Sidebar">
         <Field label="Default collapsed sidebar style">
-          <select
-            value={sidebarCompactDefault}
-            onChange={(e) => setSidebarCompactDefault(e.target.value)}
-            className={inputCls}
-          >
+          <select value={sidebarCompactDefault} onChange={(e) => setSidebarCompactDefault(e.target.value)} className={inputCls}>
             <option value="minimal">Minimal — button in header (no space used)</option>
             <option value="strip">Strip — icon bar at the side</option>
           </select>
-          <p className="mt-1 text-xs text-muted">
-            When users collapse the sidebar, this controls what happens. Users can override this in their own settings.
-          </p>
+          <p className="mt-1 text-xs text-muted">When users collapse the sidebar, this controls what happens. Users can override this in their own settings.</p>
         </Field>
+        <SaveBar {...sidebar} onSave={sidebar.save} />
       </Section>
 
       {/* P2P */}
       <Section title="P2P channels">
         <Field label="Default max participants">
-          <input
-            type="number"
-            min="2"
-            max="100"
-            value={p2pMaxParticipants}
-            onChange={(e) => setP2pMaxParticipants(e.target.value)}
-            className={inputCls}
-          />
-          <p className="mt-1 text-xs text-muted">
-            Max simultaneous peers in a P2P channel (2–100). Per-topic overrides take precedence.
-          </p>
+          <input type="number" min="2" max="100" value={p2pMaxParticipants} onChange={(e) => setP2pMaxParticipants(e.target.value)} className={inputCls} />
+          <p className="mt-1 text-xs text-muted">Max simultaneous peers in a P2P channel (2–100). Per-topic overrides take precedence.</p>
         </Field>
         <Field label="STUN servers (one URL per line)">
-          <textarea
-            value={stunServers}
-            onChange={(e) => setStunServers(e.target.value)}
-            rows={3}
-            className={`${inputCls} font-mono resize-y`}
-            placeholder="stun:stun.l.google.com:19302"
-          />
+          <textarea value={stunServers} onChange={(e) => setStunServers(e.target.value)} rows={3} className={`${inputCls} font-mono resize-y`} placeholder="stun:stun.l.google.com:19302" />
           <p className="mt-1 text-xs text-muted">Public STUN servers for WebRTC NAT traversal. Leave as default if unsure.</p>
         </Field>
         <Field label="TURN server URL">
-          <input
-            value={turnUrl}
-            onChange={(e) => setTurnUrl(e.target.value)}
-            placeholder="turn:turn.example.com:3478"
-            className={inputCls}
-          />
+          <input value={turnUrl} onChange={(e) => setTurnUrl(e.target.value)} placeholder="turn:turn.example.com:3478" className={inputCls} />
           <p className="mt-1 text-xs text-muted">Optional. Needed for users behind strict NAT (~15%). Leave blank to skip.</p>
         </Field>
         <Field label="TURN username">
@@ -370,27 +292,26 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         <Field label="TURN credential">
           <input type="password" value={turnCredential} onChange={(e) => setTurnCredential(e.target.value)} className={inputCls} />
         </Field>
+        <SaveBar {...p2p} onSave={p2p.save} />
       </Section>
 
       <InviteConfigSection />
-
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {saved && <p className="text-sm text-green-400">Settings saved.</p>}
-
-      <button
-        type="button"
-        onClick={save}
-        disabled={saving}
-        className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-      >
-        {saving ? "Saving…" : "Save settings"}
-      </button>
     </div>
   );
 }
 
-const inputCls =
-  "w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent";
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div
+      role="switch"
+      aria-checked={value}
+      onClick={() => onChange(!value)}
+      className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${value ? "bg-accent" : "bg-border"}`}
+    >
+      <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? "translate-x-6" : "translate-x-1"}`} />
+    </div>
+  );
+}
 
 const ROLES = ["user", "moderator", "admin"] as const;
 
@@ -436,21 +357,11 @@ function InviteConfigSection() {
     <Section title="Invite flow">
       <Field label="Require invite code">
         <label className="flex cursor-pointer items-center gap-3">
-          <div
-            role="switch"
-            aria-checked={invitesEnabled}
-            onClick={() => setInvitesEnabled((v) => !v)}
-            className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${invitesEnabled ? "bg-accent" : "bg-border"}`}
-          >
-            <span
-              className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${invitesEnabled ? "translate-x-6" : "translate-x-1"}`}
-            />
-          </div>
+          <Toggle value={invitesEnabled} onChange={setInvitesEnabled} />
           <span className="text-sm">{invitesEnabled ? "Invite code required" : "Anyone can register without invite"}</span>
         </label>
         <p className="mt-1 text-xs text-muted">When enabled, new users must present a valid invite code during registration.</p>
       </Field>
-
       <Field label="Invite code prefix">
         <div className="flex items-center gap-2">
           <input
@@ -462,9 +373,8 @@ function InviteConfigSection() {
           />
           <span className="text-sm text-muted">#XXXXXX</span>
         </div>
-        <p className="mt-1 text-xs text-muted">Prefix for generated invite codes (letters and numbers only, max 8 chars). Existing codes keep their original prefix.</p>
+        <p className="mt-1 text-xs text-muted">Prefix for generated invite codes. Existing codes keep their original prefix.</p>
       </Field>
-
       <Field label="Daily invite quota per role">
         <div className="space-y-2">
           {ROLES.map((role) => (
@@ -484,18 +394,7 @@ function InviteConfigSection() {
         </div>
         <p className="mt-2 text-xs text-muted">How many invite codes each role can generate per UTC calendar day. 0 = cannot create invites.</p>
       </Field>
-
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {saved && <p className="text-sm text-green-400">Saved.</p>}
-
-      <button
-        type="button"
-        onClick={save}
-        disabled={saving}
-        className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-      >
-        {saving ? "Saving…" : "Save invite settings"}
-      </button>
+      <SaveBar saving={saving} error={error} saved={saved} onSave={save} />
     </Section>
   );
 }

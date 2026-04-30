@@ -49,7 +49,7 @@ export function HomeHeader({ user }: Props) {
 
   return (
     <>
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+      <header className="flex items-center justify-between border-b border-border px-4 pb-3 pt-[calc(0.75rem+var(--sat))]">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -81,7 +81,7 @@ export function HomeHeader({ user }: Props) {
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-panel transition-transform duration-200 ${showSidebar ? "translate-x-0" : "-translate-x-full"}`}
       >
-        <div className="flex items-center justify-between border-b border-border p-4">
+        <div className="flex items-center justify-between border-b border-border px-4 pb-4 pt-[calc(1rem+var(--sat))]">
           <span className="font-semibold tracking-tight">Legends Chat</span>
           <button
             type="button"

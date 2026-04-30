@@ -66,7 +66,7 @@ export default function AdminGifsPage() {
   }
 
   return (
-    <div>
+    <main className="flex-1 p-4 sm:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold">GIF Library</h1>
         <p className="mt-1 text-sm text-muted">{gifs.length} uploaded GIFs. Edit titles and search tags.</p>
@@ -148,6 +148,6 @@ export default function AdminGifsPage() {
           </div>
         ))}
       </div>
-    </div>
+    </main>
   );
 }

@@ -226,8 +226,9 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                         })
                           .then((r) => r.json())
                           .then((d: { bot: BotRow }) => setBots((prev) => prev.map((b) => b.id === bot.id ? d.bot : b)))
-                          .catch(() => {});
+                          .catch(() => setError("Failed to save avatar"));
                       }}
+                      onError={setError}
                     />
                     {bot.avatarUrl && (
                       <button

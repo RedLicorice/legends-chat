@@ -2,6 +2,9 @@
 .github
 node_modules
 **/node_modules
+# Allow standalone's bundled node_modules through for Dockerfile.runtime
+!artifacts/standalone/node_modules
+!artifacts/standalone/**/node_modules
 .next
 **/.next/cache
 logs

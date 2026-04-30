@@ -5,7 +5,9 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { PERMISSIONS } from "@legends/shared";
 
-const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
+const UPLOAD_DIR = process.env.NODE_ENV === "production"
+  ? "/app/uploads"
+  : join(process.cwd(), "public", "uploads");
 const AVATAR_DIR = join(UPLOAD_DIR, "avatars");
 const GIF_DIR = join(UPLOAD_DIR, "gifs");
 const FILE_DIR = join(UPLOAD_DIR, "files");

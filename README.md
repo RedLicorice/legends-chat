@@ -1,6 +1,6 @@
 # Legends Chat
 
-Community PWA chat. See [the architecture plan](/root/.claude/plans/recursive-mapping-prism.md) (or the equivalent in this repo's docs once copied over) for the full design.
+Community PWA chat.
 
 ## Stack
 
@@ -11,62 +11,85 @@ Community PWA chat. See [the architecture plan](/root/.claude/plans/recursive-ma
 - Shared zod / permissions / events — `packages/shared`
 - XChaCha20-Poly1305 at-rest encryption — `packages/crypto`
 
-## First-time setup
+## Local dev
 
 ```bash
 cp .env.example .env
-# generate strong secrets:
-#   openssl rand -base64 32   -> ENCRYPTION_MASTER_KEY
-#   openssl rand -hex 32      -> JWT_ACCESS_SECRET
-#   openssl rand -hex 32      -> JWT_REFRESH_SECRET
-# create a Telegram bot via @BotFather and put the token in TELEGRAM_BOT_TOKEN
+# fill in secrets (see .env.example for instructions)
 
 pnpm install
-docker compose up -d              # postgres + redis
-pnpm db:generate                  # generate initial migration from schema
-pnpm db:migrate                   # apply migrations
-pnpm db:seed                      # admin user, topics, encryption key, invite code
+docker compose up -d   # postgres + redis
+just migrate           # apply migrations
+just dev               # web :3000, ws :3001, bot
 ```
 
-## Run
+`just dev-warm` runs a full build first (avoids slow first page loads).
+
+## Auth
+
+Supported login methods: **passkey**, **email/password**, **Telegram**.  
+Passkey is the primary method. E2EE keys are backed up via WebAuthn PRF extension.
+
+## Production deployment
+
+### 1. Build the deploy package (on your machine)
 
 ```bash
-pnpm dev   # starts web (3000), ws (3001), bot in parallel
+just docker-pack
+# outputs dist/legends-chat-deploy.tgz
 ```
 
-Open Telegram, DM your bot, send `/start`, send the seeded invite code `WELCOME-SEED` (or generate fresh ones from `/admin`), tap the login link.
+### 2. Transfer to target
+
+```bash
+scp dist/legends-chat-deploy.tgz user@target:~/
+```
+
+### 3. On target
+
+```bash
+tar xzf legends-chat-deploy.tgz
+cp .env.prod.example .env.prod   # fill in all secrets
+./build.sh                        # build image (native arch)
+./start.sh                        # start
+./stop.sh                         # stop
+./cleanup.sh                      # stop + remove image + volumes (destructive)
+```
+
+Requires an external Postgres and Redis — set `DATABASE_URL` and `REDIS_URL` in `.env.prod`.  
+The app joins Docker network `legendsnet` (created automatically by `start.sh`).
+
+### 4. First deploy
+
+```bash
+./seed.sh you@example.com yourpassword   # create admin account
+./invite.sh                               # generate a single-use invite code (printed to stdout)
+```
+
+`invite.sh` also enables email registration + invite-only mode if not already set.
 
 ## Layout
 
 ```
 apps/
-  web/   Next.js PWA, auth callback, topic UI, admin endpoints
-  ws/    Socket.IO server (cookie-auth via JWT, redis pubsub for ban/mute)
-  bot/   grammY bot: /start, registration, login link issuance
+  web/        Next.js PWA — auth, topics, admin, E2EE
+  ws/         Socket.IO server — JWT auth, Redis pubsub
+  bot/        grammY Telegram bot — /start, registration, login links
 packages/
-  db/      Drizzle schema, migrations, seed
-  shared/  zod, permission keys, event names, JWT payload schemas
-  crypto/  encryption-at-rest helpers
+  db/         Drizzle schema, migrations, seed helpers
+  shared/     zod schemas, permission keys, event names
+  crypto/     at-rest encryption helpers
+deploy/
+  nginx.conf, supervisord.conf, entrypoint.sh
+  prod-*.sh   source scripts (packed into deploy tgz as *.sh)
 ```
 
-## Slice 1 status — complete
+## justfile recipes
 
-- Telegram bot login flow (invite-only by default, public toggle in `registration_config`)
-- JWT auth (access + refresh cookies, jti revocation set in Redis)
-- Topic list (sticky-first, unread badges, last-message preview)
-- Topic view over Socket.IO with at-rest XChaCha20-Poly1305 encryption
-- Reactions: quick picker, persisted, live-broadcast add/remove chips
-- Message reporting → moderation queue with dismiss / delete / mute / ban
-- Ban + mute with session revocation and pubsub-driven socket disconnect
-- Auto-delete worker: age mode (60s tick) and count mode (per-insert trim)
-- Web Push: VAPID subscribe, service worker, server-side delivery on new messages
-- Bot Telegram-side ban check with time-remaining message
-- Admin endpoints for topics, invites, bans, mutes, and moderation actions
-- PWA manifest + service worker registration (icons still need to be dropped in `public/`)
-
-## Out of scope for slice 1
-
-- Internal bot API (slice 2)
-- E2EE per topic (deferred; data model and at-rest layer already shaped for it)
-- Reply threading UI, message edit, attachment uploads
-
+| Recipe | What it does |
+|---|---|
+| `just dev` | Start Next.js dev server |
+| `just prebuild` | Production build (no server) |
+| `just dev-warm` | Build then dev |
+| `just migrate` | Run DB migrations |
+| `just docker-pack` | Build JS artifacts + pack deploy tgz |

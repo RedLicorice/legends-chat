@@ -24,7 +24,8 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
   ]);
   if (!topic) notFound();
 
-  if (topic.visibilityPermission && !user.permissions.has(topic.visibilityPermission)) notFound();
+  const viewRoles = (topic.viewRoles as string[] | null) ?? [];
+  if (viewRoles.length > 0 && user.role !== "admin" && !viewRoles.includes(user.role)) notFound();
   const readRoles = (topic.readRoles as string[] | null) ?? [];
   if (readRoles.length > 0 && user.role !== "admin" && !readRoles.includes(user.role)) notFound();
 

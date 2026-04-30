@@ -31,7 +31,7 @@ export async function PATCH(req: Request) {
 
   const body = await req.json() as {
     invitesEnabled?: boolean;
-    quotas?: { user?: number; moderator?: number; admin?: number };
+    quotas?: { user?: number | null; moderator?: number | null; admin?: number | null };
     codePrefix?: string;
   };
 
@@ -43,13 +43,14 @@ export async function PATCH(req: Request) {
   }
 
   if (body.quotas) {
-    for (const [role, limit] of Object.entries(body.quotas) as [string, number][]) {
+    for (const [role, limit] of Object.entries(body.quotas) as [string, number | null][]) {
       if (!["user", "moderator", "admin"].includes(role)) continue;
-      if (typeof limit !== "number" || limit < 0) continue;
+      if (limit !== null && (typeof limit !== "number" || limit < 0)) continue;
+      const dailyLimit = limit === null ? null : Math.floor(limit);
       await db
         .insert(inviteQuotaConfig)
-        .values({ role, dailyLimit: Math.floor(limit) })
-        .onConflictDoUpdate({ target: inviteQuotaConfig.role, set: { dailyLimit: Math.floor(limit) } });
+        .values({ role, dailyLimit })
+        .onConflictDoUpdate({ target: inviteQuotaConfig.role, set: { dailyLimit } });
     }
   }
 

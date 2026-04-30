@@ -1,0 +1,45 @@
+###############################################################################
+# Legends Chat — Runtime-only image
+#
+# Pre-built Next.js artifacts come from ./artifacts/ (produced by `just docker-pack`).
+# pnpm install runs here so native binaries (esbuild etc.) match the target arch.
+#
+# Usage on target:
+#   tar xzf legends-chat-deploy.tgz
+#   docker build -f Dockerfile.runtime -t legends-chat:latest .
+###############################################################################
+FROM node:20-alpine
+
+RUN apk add --no-cache nginx supervisor \
+ && mkdir -p /var/log/supervisor /run/nginx \
+ && corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+WORKDIR /app
+
+# Next.js standalone — self-contained JS, platform-independent
+COPY artifacts/standalone              /app/web/
+COPY artifacts/static                  /app/web/apps/web/.next/static
+COPY artifacts/public                  /app/web/apps/web/public
+
+# Install ws + bot deps natively on this platform (tsx/esbuild must match arch).
+# NODE_ENV must NOT be production here — pnpm skips devDeps otherwise and tsx is lost.
+COPY artifacts/package.json            ./package.json
+COPY artifacts/pnpm-workspace.yaml     ./pnpm-workspace.yaml
+COPY artifacts/pnpm-lock.yaml          ./pnpm-lock.yaml
+COPY artifacts/tsconfig.base.json      ./tsconfig.base.json
+COPY artifacts/packages                ./packages
+COPY artifacts/ws                      ./apps/ws
+COPY artifacts/bot                     ./apps/bot
+# Stub so pnpm workspace finds all members; actual web server uses the standalone
+COPY artifacts/web/package.json        ./apps/web/package.json
+RUN pnpm install --frozen-lockfile
+
+ENV NODE_ENV=production
+
+COPY deploy/nginx.conf       /etc/nginx/nginx.conf
+COPY deploy/supervisord.conf /etc/supervisord.conf
+COPY deploy/entrypoint.sh    /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 80
+ENTRYPOINT ["/entrypoint.sh"]

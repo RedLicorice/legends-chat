@@ -21,16 +21,20 @@ function ngrokPublicUrl(): string | null {
  * Used by Route Handlers (Node.js Runtime). Do NOT import from middleware.
  *
  * Priority:
- *  1. logs/ngrok.env  (ngrok public URL, refreshed on each tunnel start)
- *  2. x-forwarded-proto + x-forwarded-host  (generic proxy headers)
- *  3. req.nextUrl.origin  (direct access, no proxy)
+ *  1. APP_PUBLIC_URL env var  (set in production docker-compose)
+ *  2. logs/ngrok.env  (ngrok public URL, refreshed on each tunnel start)
+ *  3. x-forwarded-proto + x-forwarded-host  (generic proxy headers)
+ *  4. req.nextUrl.origin  (direct access, no proxy)
  */
 export function publicOriginServer(req: NextRequest): string {
+  const appPublicUrl = process.env.APP_PUBLIC_URL;
+  if (appPublicUrl) return new URL(appPublicUrl).origin;
+
   const ngrok = ngrokPublicUrl();
   if (ngrok) return new URL(ngrok).origin;
 
   const proto = req.headers.get("x-forwarded-proto");
-  const host = req.headers.get("x-forwarded-host");
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   if (proto && host) return `${proto}://${host}`;
 
   return req.nextUrl.origin;

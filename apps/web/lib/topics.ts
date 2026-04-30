@@ -39,7 +39,8 @@ export async function listTopicsForUser(userId: string, userRole: string, userPe
 
   const out: TopicListItem[] = [];
   for (const t of tRows) {
-    if (t.visibilityPermission && !userPermissions.has(t.visibilityPermission)) continue;
+    const viewRoles = (t.viewRoles as string[] | null) ?? [];
+    if (viewRoles.length > 0 && userRole !== "admin" && !viewRoles.includes(userRole)) continue;
     const readRoles = (t.readRoles as string[] | null) ?? [];
     if (readRoles.length > 0 && userRole !== "admin" && !readRoles.includes(userRole)) continue;
     const [member] = await db

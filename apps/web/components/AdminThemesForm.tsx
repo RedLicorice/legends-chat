@@ -63,6 +63,42 @@ function hexToChannels(hex: string): string {
   ].join(" ");
 }
 
+// ── Hex text input that buffers until valid ─────────────────────────────────
+
+function HexInput({ value, onChange, disabled }: { value: string; onChange: (hex: string) => void; disabled?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  const [committed, setCommitted] = useState(value);
+
+  // Sync draft when the color picker (native input) changes the committed value
+  if (value !== committed) {
+    setCommitted(value);
+    setDraft(value);
+  }
+
+  function commit(v: string) {
+    if (/^#[0-9a-f]{6}$/i.test(v)) { onChange(v); setCommitted(v); }
+    else setDraft(committed);
+  }
+
+  return (
+    <input
+      type="text"
+      value={draft}
+      onChange={(e) => {
+        const v = e.target.value;
+        setDraft(v);
+        if (/^#[0-9a-f]{6}$/i.test(v)) { onChange(v); setCommitted(v); }
+      }}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Enter") commit((e.target as HTMLInputElement).value); }}
+      disabled={disabled}
+      maxLength={7}
+      spellCheck={false}
+      className="w-20 rounded-lg border border-border bg-panel2 px-2 py-1.5 text-xs font-mono outline-none focus:border-accent"
+    />
+  );
+}
+
 // ── Color swatch preview ────────────────────────────────────────────────────
 
 function ThemePreview({ colors, isGlass }: { colors: Record<string, string>; isGlass: boolean }) {
@@ -376,13 +412,10 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
                               disabled={dis}
                               className="h-8 w-10 cursor-pointer rounded border border-border bg-panel2 p-0.5"
                             />
-                            <input
-                              type="text"
+                            <HexInput
                               value={hex}
-                              onChange={(e) => setColor(theme.id, key, e.target.value)}
+                              onChange={(v) => setColor(theme.id, key, v)}
                               disabled={dis}
-                              maxLength={7}
-                              className="w-20 rounded-lg border border-border bg-panel2 px-2 py-1.5 text-xs font-mono outline-none focus:border-accent"
                             />
                           </div>
                           <div className="mt-0.5 text-[10px] font-mono text-muted/60">{ch}</div>

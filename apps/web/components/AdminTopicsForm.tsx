@@ -20,12 +20,12 @@ interface TopicRow {
   isP2p: boolean;
   p2pFallbackE2ee: boolean;
   p2pMaxParticipants: number | null;
+  viewRoles: string[];
   postRoles: string[];
   readRoles: string[];
   autoDeleteMode: "none" | "age" | "count";
   autoDeleteAgeSeconds: number | null;
   autoDeleteMaxMessages: number | null;
-  visibilityPermission: string | null;
 }
 
 function secondsToDisplay(s: number | null): { value: string; unit: "hours" | "days" } {
@@ -83,7 +83,6 @@ const EMPTY_CREATE = { slug: "", title: "", description: "" };
 export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   const [topics, setTopics] = useState(initial);
   const [allRoles, setAllRoles] = useState<string[]>(["user", "moderator", "admin"]);
-  const [allPermissions, setAllPermissions] = useState<string[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
   const [purging, setPurging] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -105,12 +104,9 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   useEffect(() => {
     apiFetch("/api/admin/roles")
       .then((r) => r.ok ? r.json() : null)
-      .then((data: { name: string; permissions: string[] }[] | null) => {
+      .then((data: { name: string }[] | null) => {
         if (!data) return;
         setAllRoles(data.map((r) => r.name));
-        const perms = new Set<string>();
-        for (const r of data) r.permissions.forEach((p) => perms.add(p));
-        setAllPermissions(Array.from(perms).sort());
       })
       .catch(() => {});
   }, []);
@@ -238,12 +234,12 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           isP2p: t.isP2p ?? false,
           p2pFallbackE2ee: t.p2pFallbackE2ee ?? false,
           p2pMaxParticipants: t.p2pMaxParticipants ?? null,
+          viewRoles: (t.viewRoles as string[] | null) ?? [],
           postRoles: (t.postRoles as string[] | null) ?? [],
           readRoles: (t.readRoles as string[] | null) ?? [],
           autoDeleteMode: t.autoDeleteMode,
           autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
           autoDeleteMaxMessages: t.autoDeleteMaxMessages,
-          visibilityPermission: t.visibilityPermission ?? null,
         },
       ]);
       setRetentionDraft((d) => ({ ...d, [t.id]: { ageValue: "24", ageUnit: "hours", maxMessages: "1000" } }));
@@ -326,9 +322,26 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           <div key={t.id} className="rounded-xl border border-border bg-panel p-5 space-y-4">
             {/* Header + toggles */}
             <div>
-              <div className="mb-2">
-                <div className="font-medium">{t.title}</div>
-                <div className="text-xs text-muted">#{t.slug}</div>
+              <div className="mb-3 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Title</label>
+                  <InlineTextInput
+                    value={t.title}
+                    placeholder="General"
+                    onSave={(v) => save(t.id, { title: v.trim() || t.title })}
+                    disabled={dis}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Slug</label>
+                  <InlineTextInput
+                    value={t.slug}
+                    placeholder="general"
+                    onSave={(v) => save(t.id, { slug: v.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-") || t.slug })}
+                    disabled={dis}
+                    mono
+                  />
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                 {(["isFeed", "isHomeTopic", "isSticky"] as const).map((key) => (
@@ -379,6 +392,9 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
             <div className="border-t border-border pt-3">
               <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Icon</label>
               <div className="flex gap-2 items-start">
+                {t.iconUrl && (
+                  <img src={t.iconUrl} alt="" className="h-9 w-9 shrink-0 rounded object-cover bg-panel2 border border-border" />
+                )}
                 <InlineTextInput
                   value={t.iconUrl ?? ""}
                   placeholder="https://example.com/icon.png"
@@ -388,29 +404,23 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                 <ImageUploadButton
                   bucket="avatars"
                   onUploaded={(url) => save(t.id, { iconUrl: url })}
-                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2"
+                  onError={(err) => setErrors((e) => ({ ...e, [t.id]: err }))}
+                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2 disabled:opacity-50"
                 />
               </div>
-              <p className="mt-1 text-xs text-muted">Square image shown as topic icon in the sidebar. Leave blank to use initials.</p>
+              <p className="mt-1 text-xs text-muted">Square image shown as topic icon in the sidebar. Leave blank to use initials. JPEG, PNG, GIF, WebP · max 10 MB.</p>
             </div>
 
             {/* Permissions */}
             <div className="space-y-3 border-t border-border pt-3">
+              <p className="text-xs text-muted">
+                These roles are also synced as <code className="bg-panel2 px-1 rounded">topic.{t.slug}.*</code> permissions — assignable from the roles page.
+              </p>
               <div>
-                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Visibility permission</div>
-                <select
-                  value={t.visibilityPermission ?? ""}
-                  onChange={(e) => save(t.id, { visibilityPermission: e.target.value || null })}
-                  disabled={dis}
-                  className="rounded-lg border border-border bg-panel2 px-3 py-1.5 text-sm outline-none focus:border-accent"
-                >
-                  <option value="">— visible to all —</option>
-                  {allPermissions.map((p) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
+                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Who can view</div>
+                <RolesCheckboxes roles={t.viewRoles} allRoles={allRoles} onSave={(r) => save(t.id, { viewRoles: r })} disabled={dis} />
                 <p className="mt-1 text-xs text-muted">
-                  Users without this permission cannot see this topic (treated as 404). Leave blank to show to everyone.
+                  {t.viewRoles.length === 0 ? "Everyone can see this topic." : `Only ${t.viewRoles.join(", ")} can see this topic.`}
                 </p>
               </div>
               <div>
@@ -559,7 +569,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   );
 }
 
-function InlineTextInput({ value, placeholder, onSave, disabled }: { value: string; placeholder?: string; onSave: (v: string) => void; disabled?: boolean }) {
+function InlineTextInput({ value, placeholder, onSave, disabled, mono }: { value: string; placeholder?: string; onSave: (v: string) => void; disabled?: boolean; mono?: boolean }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => { setDraft(value); }, [value]);
   return (
@@ -570,7 +580,7 @@ function InlineTextInput({ value, placeholder, onSave, disabled }: { value: stri
       onBlur={() => { if (draft !== value) onSave(draft); }}
       onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
       disabled={disabled}
-      className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
+      className={`w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50${mono ? " font-mono" : ""}`}
     />
   );
 }

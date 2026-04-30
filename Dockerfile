@@ -16,7 +16,14 @@ RUN pnpm install --frozen-lockfile
 # ── Build Next.js standalone ────────────────────────────────────────────────
 FROM deps AS builder
 COPY . .
-RUN pnpm --filter @legends/web build
+# Inline dummy env vars satisfy "not set" guard checks during next build's
+# static page-collection phase. Values are never baked into the runner image.
+RUN DATABASE_URL=postgres://build:x@localhost/build \
+    REDIS_URL=redis://localhost:6379 \
+    JWT_ACCESS_SECRET=build-placeholder-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+    JWT_REFRESH_SECRET=build-placeholder-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy \
+    ENCRYPTION_MASTER_KEY=YnVpbGQtcGxhY2Vob2xkZXItMzItYnl0ZXMteno= \
+    pnpm --filter @legends/web build
 
 # ── Monolith runtime ────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -34,6 +41,12 @@ COPY --from=builder /app/apps/web/public                     /app/web/apps/web/p
 # WS + Bot: share the single root node_modules from the install stage
 # Docker COPY dereferences pnpm symlinks, so workspace packages are inlined
 COPY --from=builder /app/node_modules    ./node_modules
+
+# Ensure next is resolvable from the standalone server.
+# .dockerignore strips **/node_modules so the standalone's bundled node_modules
+# is not present. Symlink next from the root pnpm virtual store instead.
+RUN NEXT_DIR=$(ls /app/node_modules/.pnpm | grep '^next@' | head -1) && \
+    ln -sf "/app/node_modules/.pnpm/${NEXT_DIR}/node_modules/next" /app/node_modules/next
 COPY --from=builder /app/packages        ./packages
 COPY --from=builder /app/apps/ws         ./apps/ws
 COPY --from=builder /app/apps/bot        ./apps/bot

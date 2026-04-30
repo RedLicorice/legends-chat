@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2, Copy } from "lucide-react";
 import { PERMISSIONS } from "@legends/shared";
 
@@ -13,7 +13,7 @@ interface RoleData {
   permissions: string[];
 }
 
-const ALL_PERMISSIONS = Object.values(PERMISSIONS).sort();
+const STATIC_PERMISSIONS = Object.values(PERMISSIONS).sort();
 
 const PERMISSION_LABELS: Record<string, string> = {
   "admin.config": "Admin — configuration",
@@ -33,6 +33,12 @@ const PERMISSION_LABELS: Record<string, string> = {
   "users.mute.direct": "Users — mute",
   "users.mute.lift": "Users — lift mute",
 };
+
+interface TopicPerm {
+  slug: string;
+  title: string;
+  actions: ("view" | "read" | "post")[];
+}
 
 interface Props {
   roles: RoleData[];
@@ -56,6 +62,24 @@ export function AdminRolesForm({ roles: initial }: Props) {
   const [cloneFrom, setCloneFrom] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [topicPerms, setTopicPerms] = useState<TopicPerm[]>([]);
+
+  useEffect(() => {
+    // Load topics to build dynamic topic permission list
+    apiFetch("/api/admin/topics")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { topics: { slug: string; title: string }[] } | null) => {
+        if (!data?.topics) return;
+        setTopicPerms(
+          data.topics.map((t) => ({
+            slug: t.slug,
+            title: t.title,
+            actions: ["view", "read", "post"],
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   async function saveRole(name: string) {
     setSaving(name);
@@ -232,11 +256,11 @@ export function AdminRolesForm({ roles: initial }: Props) {
               )}
             </div>
 
-            {/* Permissions */}
+            {/* Static permissions */}
             <div className="border-t border-border pt-3">
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Permissions</div>
               <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-                {ALL_PERMISSIONS.map((perm) => (
+                {STATIC_PERMISSIONS.map((perm) => (
                   <label key={perm} className="flex cursor-pointer items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -252,6 +276,42 @@ export function AdminRolesForm({ roles: initial }: Props) {
                 ))}
               </div>
             </div>
+
+            {/* Topic permissions */}
+            {topicPerms.length > 0 && (
+              <div className="border-t border-border pt-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Topic access</div>
+                <div className="space-y-2">
+                  {topicPerms.map((tp) => (
+                    <div key={tp.slug} className="rounded-lg border border-border bg-panel2 p-3">
+                      <div className="mb-1.5 text-xs font-medium">
+                        {tp.title} <span className="text-muted font-mono">#{tp.slug}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-4">
+                        {tp.actions.map((action) => {
+                          const perm = `topic.${tp.slug}.${action}`;
+                          return (
+                            <label key={action} className="flex cursor-pointer items-center gap-1.5 text-sm capitalize">
+                              <input
+                                type="checkbox"
+                                className="accent-accent"
+                                checked={perms.includes(perm)}
+                                disabled={dis}
+                                onChange={() => togglePerm(role.name, perm)}
+                              />
+                              {action}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-muted">
+                  Unchecked = unrestricted (everyone). Check to restrict that action to this role.
+                </p>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center gap-3 border-t border-border pt-3">

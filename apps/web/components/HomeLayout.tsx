@@ -86,7 +86,7 @@ export function HomeLayout({ user, topics: initialTopics, communityName = "Topic
   );
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="fixed inset-0 flex overflow-hidden">
       <AppSidebar
         user={user}
         variant="chat"
@@ -103,7 +103,7 @@ export function HomeLayout({ user, topics: initialTopics, communityName = "Topic
           ))}
         </div>
       </AppSidebar>
-      <main className="relative flex flex-1 flex-col overflow-y-auto">
+      <main className="relative flex flex-1 min-w-0 flex-col overflow-y-auto overflow-x-hidden">
         {bannerConfig ? (
           <>
             {/* Banner — absolute, behind content */}

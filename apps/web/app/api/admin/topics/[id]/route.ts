@@ -1,9 +1,27 @@
 import { NextResponse } from "next/server";
-import { and, eq, isNull } from "drizzle-orm";
-import { messages, topics } from "@legends/db/schema";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { messages, rolesPermissions, topics } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+
+async function syncTopicPermissions(slug: string, viewRoles: string[], readRoles: string[], postRoles: string[]) {
+  await db.delete(rolesPermissions).where(
+    inArray(rolesPermissions.permission, [
+      `topic.${slug}.view`,
+      `topic.${slug}.read`,
+      `topic.${slug}.post`,
+    ]),
+  );
+  const entries: { role: string; permission: string }[] = [
+    ...viewRoles.map((r) => ({ role: r, permission: `topic.${slug}.view` })),
+    ...readRoles.map((r) => ({ role: r, permission: `topic.${slug}.read` })),
+    ...postRoles.map((r) => ({ role: r, permission: `topic.${slug}.post` })),
+  ];
+  if (entries.length > 0) {
+    await db.insert(rolesPermissions).values(entries).onConflictDoNothing();
+  }
+}
 
 export async function PATCH(
   req: Request,
@@ -22,9 +40,11 @@ export async function PATCH(
     isP2p?: boolean;
     p2pFallbackE2ee?: boolean;
     p2pMaxParticipants?: number | null;
+    viewRoles?: string[];
     postRoles?: string[];
     readRoles?: string[];
     title?: string;
+    slug?: string;
     description?: string | null;
     iconUrl?: string | null;
     isSticky?: boolean;
@@ -32,8 +52,10 @@ export async function PATCH(
     autoDeleteMode?: "none" | "age" | "count";
     autoDeleteAgeSeconds?: number | null;
     autoDeleteMaxMessages?: number | null;
-    visibilityPermission?: string | null;
   };
+
+  const [existing] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
+  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const patch: Record<string, unknown> = {};
   if (typeof body.isFeed === "boolean") patch.isFeed = body.isFeed;
@@ -52,9 +74,42 @@ export async function PATCH(
   if (typeof body.isP2p === "boolean") patch.isP2p = body.isP2p;
   if (typeof body.p2pFallbackE2ee === "boolean") patch.p2pFallbackE2ee = body.p2pFallbackE2ee;
   if ("p2pMaxParticipants" in body) patch.p2pMaxParticipants = typeof body.p2pMaxParticipants === "number" ? body.p2pMaxParticipants : null;
+  if (Array.isArray(body.viewRoles)) patch.viewRoles = body.viewRoles;
   if (Array.isArray(body.postRoles)) patch.postRoles = body.postRoles;
   if (Array.isArray(body.readRoles)) patch.readRoles = body.readRoles;
-  if (typeof body.title === "string") patch.title = body.title;
+  if (typeof body.title === "string" && body.title.trim()) patch.title = body.title.trim();
+  if (typeof body.slug === "string" && body.slug.trim()) {
+    const newSlug = body.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (newSlug !== existing.slug) {
+      // Rename rolesPermissions entries for old slug
+      const oldPerms = await db
+        .select()
+        .from(rolesPermissions)
+        .where(
+          inArray(rolesPermissions.permission, [
+            `topic.${existing.slug}.view`,
+            `topic.${existing.slug}.read`,
+            `topic.${existing.slug}.post`,
+          ]),
+        );
+      if (oldPerms.length > 0) {
+        await db.delete(rolesPermissions).where(
+          inArray(rolesPermissions.permission, [
+            `topic.${existing.slug}.view`,
+            `topic.${existing.slug}.read`,
+            `topic.${existing.slug}.post`,
+          ]),
+        );
+        await db.insert(rolesPermissions).values(
+          oldPerms.map((p) => ({
+            role: p.role,
+            permission: p.permission.replace(`topic.${existing.slug}.`, `topic.${newSlug}.`),
+          })),
+        ).onConflictDoNothing();
+      }
+      patch.slug = newSlug;
+    }
+  }
   if ("description" in body) patch.description = body.description ?? null;
   if ("iconUrl" in body) patch.iconUrl = body.iconUrl ?? null;
   if (typeof body.isSticky === "boolean") patch.isSticky = body.isSticky;
@@ -64,7 +119,6 @@ export async function PATCH(
   }
   if ("autoDeleteAgeSeconds" in body) patch.autoDeleteAgeSeconds = body.autoDeleteAgeSeconds ?? null;
   if ("autoDeleteMaxMessages" in body) patch.autoDeleteMaxMessages = body.autoDeleteMaxMessages ?? null;
-  if ("visibilityPermission" in body) patch.visibilityPermission = body.visibilityPermission ?? null;
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
@@ -72,6 +126,19 @@ export async function PATCH(
 
   const [updated] = await db.update(topics).set(patch).where(eq(topics.id, id)).returning();
   if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Sync rolesPermissions whenever roles change (or slug changes which we already handled)
+  const rolesChanged = "viewRoles" in patch || "postRoles" in patch || "readRoles" in patch;
+  if (rolesChanged) {
+    const effectiveSlug = (patch.slug as string | undefined) ?? existing.slug;
+    await syncTopicPermissions(
+      effectiveSlug,
+      (updated.viewRoles as string[] | null) ?? [],
+      (updated.readRoles as string[] | null) ?? [],
+      (updated.postRoles as string[] | null) ?? [],
+    );
+  }
+
   return NextResponse.json({ topic: updated });
 }
 
@@ -84,6 +151,17 @@ export async function DELETE(
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const { id } = await params;
+  const [existing] = await db.select({ slug: topics.slug }).from(topics).where(eq(topics.id, id)).limit(1);
+  if (existing) {
+    // Clean up topic permissions
+    await db.delete(rolesPermissions).where(
+      inArray(rolesPermissions.permission, [
+        `topic.${existing.slug}.view`,
+        `topic.${existing.slug}.read`,
+        `topic.${existing.slug}.post`,
+      ]),
+    );
+  }
   await db.delete(topics).where(eq(topics.id, id));
   return NextResponse.json({ ok: true });
 }

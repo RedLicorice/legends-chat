@@ -1,17 +1,19 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
-  // Prevent Next.js from 308-redirecting /socket.io/ → /socket.io (trailing
-  // slash removal). Socket.IO's engine.io only handles requests at /socket.io/
-  // (with the slash), so the redirect would break WebSocket upgrades and
-  // polling. Custom handling is done in the rewrites below instead.
   skipTrailingSlashRedirect: true,
   transpilePackages: ["@legends/db", "@legends/shared", "@legends/crypto"],
   serverExternalPackages: ["postgres", "ioredis"],
-  // Proxy /socket.io/* to the WS server so the browser connects same-origin.
-  // This ensures the auth cookie (sameSite: lax) is always sent regardless of
-  // whether the WS server is on a different port or ngrok subdomain.
+  // Tell Next.js standalone tracing to root at the monorepo root so it can
+  // follow pnpm symlinks into the virtual store (.pnpm/) and correctly bundle
+  // node_modules into the standalone output.
+  outputFileTracingRoot: path.join(__dirname, "../../"),
   async rewrites() {
     const wsOrigin = process.env.WS_URL ?? "http://localhost:3001";
     const botOrigin = `http://localhost:${process.env.BOT_WEBHOOK_PORT ?? 3002}`;
