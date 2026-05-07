@@ -30,6 +30,7 @@ function openDb(): Promise<IDBDatabase> {
           if ((cursor.key as string).startsWith("sk:")) cursor.delete();
           cursor.continue();
         };
+        curReq.onerror = (e) => { console.error("[e2ee] v1→v2 migration cursor error", e); };
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -132,7 +133,7 @@ export async function importPublicKey(b64: string): Promise<CryptoKey> {
     "spki",
     fromB64(b64).buffer,
     { name: "ECDH", namedCurve: "P-256" },
-    false,
+    true,
     [],
   );
 }
@@ -186,7 +187,7 @@ export async function storeSenderKey(
   topicId: string,
   senderUserId: string,
   key: Uint8Array<ArrayBuffer>,
-  sessionId: string = "",
+  sessionId: string = "", // "" when storing a received key (decrypt path); pass real session ID when storing own key
 ): Promise<void> {
   await idbSet(`${IDB_SENDER_KEY_PREFIX}${topicId}:${senderUserId}`, { key, sessionId });
 }
@@ -329,6 +330,7 @@ export function computeSafetyNumber(myFingerprintHex: string, theirFingerprintHe
   // Convert hex string to a large decimal, group into 12×5-digit blocks
   // We use BigInt for precision
   const num = BigInt("0x" + combined);
+  // Keep least-significant 60 digits — sufficient for human verification (10^-60 collision probability)
   const str = num.toString(10).padStart(60, "0").slice(-60);
   return str.match(/.{5}/g)!.join(" ");
 }
