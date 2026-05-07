@@ -2,13 +2,36 @@
 // Never import this in server-side code.
 
 const DB_NAME = "legends-e2ee";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "keys";
+const PIN_STORE = "pinned-keys";
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onupgradeneeded = (event) => {
+      const db = req.result;
+      // Create keys store if upgrading from scratch
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE);
+      }
+      // Create pinned-keys store (new in v2)
+      if (!db.objectStoreNames.contains(PIN_STORE)) {
+        db.createObjectStore(PIN_STORE);
+      }
+      // v1 → v2: clear all sender key records (format change: Uint8Array → {key, sessionId})
+      if (event.oldVersion < 2 && event.oldVersion > 0) {
+        const tx = req.transaction!;
+        const store = tx.objectStore(STORE);
+        const curReq = store.openCursor();
+        curReq.onsuccess = () => {
+          const cursor = curReq.result;
+          if (!cursor) return;
+          if ((cursor.key as string).startsWith("sk:")) cursor.delete();
+          cursor.continue();
+        };
+      }
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -39,6 +62,26 @@ async function idbDel(key: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     const req = tx.objectStore(STORE).delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbPinGet(userId: string): Promise<{ fingerprint: string; pinnedAt: number } | undefined> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PIN_STORE, "readonly");
+    const req = tx.objectStore(PIN_STORE).get(userId);
+    req.onsuccess = () => resolve(req.result as { fingerprint: string; pinnedAt: number } | undefined);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbPinSet(userId: string, fingerprint: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PIN_STORE, "readwrite");
+    const req = tx.objectStore(PIN_STORE).put({ fingerprint, pinnedAt: Date.now() }, userId);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -139,12 +182,37 @@ export async function decryptSenderKey(
 
 const IDB_SENDER_KEY_PREFIX = "sk:";
 
-export async function storeSenderKey(topicId: string, senderUserId: string, key: Uint8Array<ArrayBuffer>): Promise<void> {
-  await idbSet(`${IDB_SENDER_KEY_PREFIX}${topicId}:${senderUserId}`, key);
+export async function storeSenderKey(
+  topicId: string,
+  senderUserId: string,
+  key: Uint8Array<ArrayBuffer>,
+  sessionId: string = "",
+): Promise<void> {
+  await idbSet(`${IDB_SENDER_KEY_PREFIX}${topicId}:${senderUserId}`, { key, sessionId });
 }
 
-export async function getSenderKey(topicId: string, senderUserId: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
-  return idbGet<Uint8Array<ArrayBuffer>>(`${IDB_SENDER_KEY_PREFIX}${topicId}:${senderUserId}`);
+export async function getSenderKey(
+  topicId: string,
+  senderUserId: string,
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  const record = await idbGet<{ key: Uint8Array<ArrayBuffer>; sessionId: string } | Uint8Array<ArrayBuffer>>(
+    `${IDB_SENDER_KEY_PREFIX}${topicId}:${senderUserId}`,
+  );
+  if (!record) return undefined;
+  // Handle legacy format (raw Uint8Array stored before v2 migration)
+  if (record instanceof Uint8Array) return record;
+  return record.key;
+}
+
+export async function getSenderKeySessionId(
+  topicId: string,
+  senderUserId: string,
+): Promise<string | undefined> {
+  const record = await idbGet<{ key: Uint8Array<ArrayBuffer>; sessionId: string } | Uint8Array<ArrayBuffer>>(
+    `${IDB_SENDER_KEY_PREFIX}${topicId}:${senderUserId}`,
+  );
+  if (!record || record instanceof Uint8Array) return undefined;
+  return record.sessionId;
 }
 
 export async function clearSenderKeysForTopic(topicId: string, userIds: string[]): Promise<void> {
@@ -208,6 +276,61 @@ export async function decryptE2EEMessage(text: string, senderKey: Uint8Array<Arr
   const keyObj = await crypto.subtle.importKey("raw", senderKey, { name: "AES-GCM" }, false, ["decrypt"]);
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(iv) }, keyObj, fromB64(ct));
   return new TextDecoder().decode(plain);
+}
+
+// ── TOFU Key Pinning ──────────────────────────────────────────────────────────
+
+export async function computeFingerprint(key: CryptoKey): Promise<string> {
+  const spki = await crypto.subtle.exportKey("spki", key);
+  const hash = await crypto.subtle.digest("SHA-256", spki);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function checkAndUpdatePin(
+  userId: string,
+  key: CryptoKey,
+): Promise<{ changed: boolean; oldFingerprint?: string; newFingerprint: string }> {
+  const newFingerprint = await computeFingerprint(key);
+  try {
+    const existing = await idbPinGet(userId);
+    if (!existing) {
+      await idbPinSet(userId, newFingerprint);
+      return { changed: false, newFingerprint };
+    }
+    if (existing.fingerprint === newFingerprint) {
+      return { changed: false, newFingerprint };
+    }
+    // Mismatch — do NOT auto-update; caller must call confirmPinUpdate after user trusts
+    return { changed: true, oldFingerprint: existing.fingerprint, newFingerprint };
+  } catch {
+    // IndexedDB unavailable — degrade silently
+    return { changed: false, newFingerprint };
+  }
+}
+
+export async function confirmPinUpdate(userId: string, fingerprint: string): Promise<void> {
+  try {
+    await idbPinSet(userId, fingerprint);
+  } catch {
+    // degrade silently
+  }
+}
+
+export function formatFingerprintShort(fingerprint: string): string {
+  return fingerprint.slice(0, 16).toUpperCase();
+}
+
+export function computeSafetyNumber(myFingerprintHex: string, theirFingerprintHex: string): string {
+  // Concatenate in lexicographic order so both sides get the same number
+  const sorted = [myFingerprintHex, theirFingerprintHex].sort();
+  const combined = sorted[0]! + sorted[1]!;
+  // Convert hex string to a large decimal, group into 12×5-digit blocks
+  // We use BigInt for precision
+  const num = BigInt("0x" + combined);
+  const str = num.toString(10).padStart(60, "0").slice(-60);
+  return str.match(/.{5}/g)!.join(" ");
 }
 
 // ── PRF-based backup (WebAuthn PRF extension, Chrome 116+/Safari 17+) ──────────
