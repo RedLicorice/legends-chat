@@ -52,7 +52,16 @@ Messages in regular channels are encrypted at rest using AES-256 (XChaCha20-Poly
 
 E2EE channels use a Signal-protocol-style sender key scheme. When you join an E2EE channel, your device generates a key bundle — an identity key and a set of prekeys — which is published to the server. When someone sends a message, their client encrypts the message content and distributes the sender key to each recipient, encrypted individually for that recipient. The server stores only ciphertext and does not have the keys needed to decrypt it. The server operator cannot read message content in E2EE channels.
 
-**Important limitation:** The key exchange process goes through the server. This means you are trusting that the server operator is distributing genuine key bundles and not substituting their own. Additionally, forward secrecy is not implemented — there is no ratchet mechanism, so if a long-term key is ever compromised, historical messages could theoretically be decrypted.
+### What is protected
+
+- **Session-level forward secrecy:** Your sender key rotates on every login. If your current session's key is ever compromised after you log out, past sessions' messages remain protected — the server no longer holds the old encrypted key copies.
+- **TOFU identity key pinning:** The first time your client sees another user's identity key, it pins the fingerprint locally. On every subsequent contact, the fingerprint is compared against the pin. If the server ever substitutes a different key, you will see a warning banner before that user's messages are encrypted to the new key.
+
+### Known limitations
+
+- **First contact:** TOFU cannot protect the very first message exchange. If the server substitutes a key before you have ever contacted that user, the pin will record the fake key. To fully verify, compare **safety numbers** out-of-band (voice call, in-person, another channel). Safety numbers are available in the member list under "Verify identity."
+- **No per-message forward secrecy:** A full Double Ratchet (like Signal) would protect individual messages within a session. This implementation rotates at the session level only — if your device is seized while a session is active, the attacker could decrypt messages from that session. Per-message ratcheting is planned for a future phase.
+- **Device compromise:** End-to-end encryption protects data in transit and at rest on the server. It does not protect against an attacker with physical access to your unlocked device or browser.
 
 ### P2P Channels
 
@@ -103,9 +112,6 @@ Honesty about limitations is part of how Legends Chat is designed. You should un
 
 **Regular channels:** The server operator can read your messages. If you need content privacy from the operator, use E2EE or P2P channels.
 
-**E2EE key exchange:** The security of E2EE channels depends on the server operator honestly distributing user key bundles. A malicious operator could in theory substitute a key bundle during the exchange phase. Once keys are exchanged and you are communicating, the server cannot read content, but you are trusting the operator for the setup step.
-
-**No forward secrecy in E2EE:** E2EE channels do not implement a double-ratchet or similar forward secrecy mechanism. A future key compromise could affect past messages.
 
 **P2P metadata:** Even in P2P channels where message content never touches the server, the server knows who connected to whom and at what times.
 
