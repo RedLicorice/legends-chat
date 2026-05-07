@@ -40,7 +40,14 @@ export function E2EEKeyWarning({ warnings, onTrust }: Props) {
           >
             Trust
           </button>
-          <X className="mt-0.5 h-3 w-3 shrink-0 opacity-50 cursor-pointer hover:opacity-100" onClick={() => onTrust(w.userId, w.newFingerprint)} />
+          <button
+            type="button"
+            aria-label="Dismiss and trust key"
+            onClick={() => onTrust(w.userId, w.newFingerprint)}
+            className="shrink-0 rounded p-0.5 opacity-50 hover:opacity-100 transition"
+          >
+            <X className="h-3 w-3" />
+          </button>
         </div>
       ))}
     </div>
