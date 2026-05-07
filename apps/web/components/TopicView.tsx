@@ -19,6 +19,7 @@ import { SearchModal } from "@/components/SearchModal";
 import { ThreadPanel } from "@/components/ThreadPanel";
 import { E2EESetup } from "@/components/E2EESetup";
 import { ImageLightbox } from "@/components/ImageLightbox";
+import { TopicInfoModal } from "@/components/TopicInfoModal";
 import type {
   E2EEPayload,
 } from "@/lib/e2ee";
@@ -100,7 +101,7 @@ interface SidebarTopicUpdate {
 }
 
 interface TopicViewProps {
-  topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[] };
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl?: string | null; bannerUrl?: string | null; description?: string | null };
   currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   giphyEnabled?: boolean;
@@ -176,6 +177,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   const [showSearch, setShowSearch] = useState(false);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [showTopicInfo, setShowTopicInfo] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
   const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -197,7 +199,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
     const saved = localStorage.getItem("legends-enter-sends");
     return saved !== null ? saved === "true" : !topic.isFeed;
   });
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; msg: Message; msgRect: DOMRect | null } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ msg: Message; kbOffset: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressMoved = useRef(false);
@@ -215,13 +217,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   const canEditAny = currentUser.permissions.includes(PERMISSIONS.MESSAGES_EDIT_ANY);
 
   // Context menu helpers
-  function openContextMenu(msg: Message, clientX: number, clientY: number) {
-    const menuW = 220, menuH = 320;
-    const x = Math.min(clientX, window.innerWidth - menuW - 8);
-    const y = clientY + menuH > window.innerHeight ? clientY - menuH : clientY;
-    const msgEl = document.querySelector<HTMLElement>(`[data-msg-id="${msg.id}"]`);
-    const msgRect = msgEl?.getBoundingClientRect() ?? null;
-    setContextMenu({ x, y: Math.max(8, y), msg, msgRect });
+  function openContextMenu(msg: Message, _clientX: number, _clientY: number) {
+    const kbOffset = Math.max(0, window.innerHeight - (window.visualViewport?.height ?? window.innerHeight));
+    setContextMenu({ msg, kbOffset });
   }
 
   function handleMsgContextMenu(e: React.MouseEvent, msg: Message) {
@@ -418,6 +416,22 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       socket.disconnect();
     };
   }, [topic.id, wsUrl]);
+
+  // Scroll to bottom when keyboard opens/closes so latest messages stay visible
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    function onVVResize() {
+      const el = scrollerRef.current;
+      if (!el) return;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distFromBottom < 150) {
+        requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+      }
+    }
+    vv.addEventListener('resize', onVVResize);
+    return () => vv.removeEventListener('resize', onVVResize);
+  }, []);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -794,6 +808,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       )}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      {showTopicInfo && (
+        <TopicInfoModal
+          topic={{ title: topic.title, iconUrl: topic.iconUrl ?? null, bannerUrl: topic.bannerUrl ?? null, description: topic.description ?? null }}
+          onClose={() => setShowTopicInfo(false)}
+        />
+      )}
 
       <header className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-4 pt-[calc(1rem+var(--sat))] md:px-6">
         <button
@@ -813,8 +833,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
             <PanelLeftOpen className="h-5 w-5" />
           </button>
         )}
-        <div className="flex-1">
-          <h1 className="text-lg font-semibold">{topic.title}</h1>
+        <button
+          type="button"
+          onClick={() => setShowTopicInfo(true)}
+          className="flex-1 text-left min-w-0"
+        >
+          <h1 className="text-lg font-semibold truncate hover:underline decoration-muted underline-offset-2">{topic.title}</h1>
           <p className="flex items-center gap-1.5 text-xs text-muted">
             {topic.isE2ee
               ? <Lock className="h-3 w-3 text-accent2" />
@@ -822,7 +846,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
             }
             {connected ? "connected" : "connecting…"}
           </p>
-        </div>
+        </button>
         <button
           type="button"
           onClick={() => setShowSearch(true)}
@@ -887,7 +911,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         )}
       </AnimatePresence>
 
-      <div className="flex flex-1 min-w-0 overflow-hidden">
+      <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
       <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", topic.isFeed ? "space-y-4" : "space-y-1")}>
         <AnimatePresence initial={false}>
           {messages.map((m, i) => {
@@ -1119,7 +1143,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
                       </div>
                     </div>
                   ) : (
-                  <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm", mine ? "bg-accent text-white" : "bg-panel2 text-text",
+                  <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
                     !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
                     m.text.trim() === "" && m.attachments.length > 0 && "p-1")}>
                     {/* Quick reaction button on bubble */}
@@ -1285,7 +1309,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
           Only {topic.postRoles.join(", ")} can post in this channel.
         </div>
       ) : (
-        <div className="border-t border-border bg-panel px-3 pt-3 pb-[calc(0.75rem+var(--sab))]">
+        <div className="border-t border-border bg-panel px-3 pt-2 pb-[calc(0.375rem+var(--sab))]">
           {replyingTo && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
               <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent2" />
@@ -1426,74 +1450,82 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         />
       )}
 
-      {/* Context menu portal */}
+      {/* Context menu portal — Telegram-style bottom sheet */}
       {contextMenu && typeof document !== "undefined" && createPortal(
         <>
-          {/* Backdrop with evenodd clip-path cutout around the focused message */}
+          {/* Backdrop */}
           <div
-            className="fixed inset-0 z-[9989] bg-black/65 pointer-events-none"
-            style={contextMenu.msgRect ? {
-              clipPath: `polygon(evenodd, 0px 0px, 100% 0px, 100% 100%, 0px 100%, 0px 0px, ${contextMenu.msgRect.left - 6}px ${contextMenu.msgRect.top - 6}px, ${contextMenu.msgRect.left - 6}px ${contextMenu.msgRect.bottom + 6}px, ${contextMenu.msgRect.right + 6}px ${contextMenu.msgRect.bottom + 6}px, ${contextMenu.msgRect.right + 6}px ${contextMenu.msgRect.top - 6}px, ${contextMenu.msgRect.left - 6}px ${contextMenu.msgRect.top - 6}px)`,
-            } : undefined}
+            className="fixed inset-0 z-[9989] bg-black/60"
+            onClick={() => setContextMenu(null)}
           />
-        <div
-          className="fixed z-[9998] min-w-[210px] rounded-2xl border border-border bg-panel shadow-2xl overflow-hidden"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Quick reactions row */}
-          <div className="flex items-center gap-1 px-3 py-2 border-b border-border">
-            {QUICK_REACTIONS.map((emoji) => (
+          {/* Sheet — translated up by keyboard height so it sits at visual viewport bottom */}
+          <div
+            className="fixed bottom-0 left-0 right-0 z-[9998] rounded-t-2xl border-t border-border bg-panel shadow-2xl overflow-hidden"
+            style={{ transform: `translateY(-${contextMenu.kbOffset}px)` }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Message preview */}
+            <div className="px-4 pt-3 pb-2.5 border-b border-border">
+              {contextMenu.msg.senderDisplayName && (
+                <p className="text-xs font-semibold text-accent2 mb-0.5 truncate">{contextMenu.msg.senderDisplayName}</p>
+              )}
+              <p className="text-sm text-muted line-clamp-2 break-words">
+                {getDisplayText(contextMenu.msg).trim() || (contextMenu.msg.attachments.length > 0 ? "📎 Attachment" : "")}
+              </p>
+            </div>
+            {/* Quick reactions */}
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-xl hover:bg-panel2 active:scale-90 transition"
+                  onClick={() => { toggleReaction(contextMenu.msg.id, emoji); setContextMenu(null); }}
+                >
+                  {emoji}
+                </button>
+              ))}
               <button
-                key={emoji}
+                ref={(el) => { if (el) reactionBtnRefs.current.set(`ctx-${contextMenu.msg.id}`, el); else reactionBtnRefs.current.delete(`ctx-${contextMenu.msg.id}`); }}
                 type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-lg hover:bg-panel2 transition hover:scale-125"
-                onClick={() => { toggleReaction(contextMenu.msg.id, emoji); setContextMenu(null); }}
+                className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-panel2 transition text-muted hover:text-text"
+                onClick={() => { setPickerFor(contextMenu.msg.id); setContextMenu(null); }}
               >
-                {emoji}
+                <SmilePlus className="h-5 w-5" />
               </button>
-            ))}
-            <button
-              ref={(el) => { if (el) reactionBtnRefs.current.set(`ctx-${contextMenu.msg.id}`, el); else reactionBtnRefs.current.delete(`ctx-${contextMenu.msg.id}`); }}
-              type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-panel2 transition text-muted hover:text-text"
-              onClick={() => { setPickerFor(contextMenu.msg.id); setContextMenu(null); }}
-            >
-              <SmilePlus className="h-4 w-4" />
-            </button>
+            </div>
+            {/* Action items */}
+            <div className="py-1 pb-[max(0.25rem,var(--sab))]">
+              {[
+                { icon: CornerDownLeft, label: "Reply", action: () => { setReplyingTo(contextMenu.msg); setContextMenu(null); } },
+                { icon: Copy, label: "Copy", action: () => { void copyMessage(getDisplayText(contextMenu.msg)); setContextMenu(null); } },
+                ...(!isSelecting ? [{ icon: CheckSquare, label: "Select", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } }] : [
+                  { icon: CheckSquare, label: selectedIds.has(contextMenu.msg.id) ? "Deselect" : "Add to selection", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } },
+                ]),
+                ...((((contextMenu.msg.senderUserId === currentUser.id && canEditOwn) || canEditAny) && !contextMenu.msg.poll)
+                  ? [{ icon: Pencil, label: "Edit", action: () => { startEdit(contextMenu.msg, getDisplayText(contextMenu.msg)); setContextMenu(null); } }]
+                  : []),
+                ...(((contextMenu.msg.senderUserId === currentUser.id && canDeleteOwn) || canDeleteAny)
+                  ? [{ icon: Trash2, label: "Delete", danger: true, action: () => { deleteMessage(contextMenu.msg.id); setContextMenu(null); } }]
+                  : []),
+                { icon: Flag, label: "Report", danger: true, action: () => { void reportMessage(contextMenu.msg.id); setContextMenu(null); } },
+              ].map(({ icon: Icon, label, action, danger }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={action}
+                  className={cn(
+                    "flex w-full items-center gap-3 px-5 py-3 text-sm transition hover:bg-panel2 active:bg-panel2",
+                    danger ? "text-danger" : "text-text",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-          {/* Action items */}
-          <div className="py-1">
-            {[
-              { icon: CornerDownLeft, label: "Reply", action: () => { setReplyingTo(contextMenu.msg); setContextMenu(null); } },
-              { icon: Copy, label: "Copy", action: () => { void copyMessage(getDisplayText(contextMenu.msg)); setContextMenu(null); } },
-              ...(!isSelecting ? [{ icon: CheckSquare, label: "Select", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } }] : [
-                { icon: CheckSquare, label: selectedIds.has(contextMenu.msg.id) ? "Deselect" : "Add to selection", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } },
-              ]),
-              ...((((contextMenu.msg.senderUserId === currentUser.id && canEditOwn) || canEditAny) && !contextMenu.msg.poll)
-                ? [{ icon: Pencil, label: "Edit", action: () => { startEdit(contextMenu.msg, getDisplayText(contextMenu.msg)); setContextMenu(null); } }]
-                : []),
-              ...(((contextMenu.msg.senderUserId === currentUser.id && canDeleteOwn) || canDeleteAny)
-                ? [{ icon: Trash2, label: "Delete", danger: true, action: () => { deleteMessage(contextMenu.msg.id); setContextMenu(null); } }]
-                : []),
-              { icon: Flag, label: "Report", danger: true, action: () => { void reportMessage(contextMenu.msg.id); setContextMenu(null); } },
-            ].map(({ icon: Icon, label, action, danger }) => (
-              <button
-                key={label}
-                type="button"
-                onClick={action}
-                className={cn(
-                  "flex w-full items-center gap-3 px-4 py-2 text-sm transition hover:bg-panel2",
-                  danger ? "text-danger" : "text-text",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
         </>,
         document.body,
       )}

@@ -30,7 +30,7 @@ export default async function SettingsPage() {
   const currentCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
 
   return (
-    <main className="selectable h-full overflow-y-auto flex items-start justify-center p-8">
+    <main className="selectable fixed inset-0 overflow-y-auto flex items-start justify-center px-8 pb-8 pt-[calc(2rem+var(--sat))]">
       <div className="w-full max-w-lg space-y-8">
         <div>
           <Link

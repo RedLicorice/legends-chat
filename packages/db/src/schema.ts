@@ -69,6 +69,7 @@ export const themes = pgTable("themes", {
   colors: jsonb("colors").$type<Record<string, string>>().notNull().default({}),
   isGlass: boolean("is_glass").notNull().default(false),
   bgGradient: text("bg_gradient"),
+  customCss: text("custom_css"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -182,6 +183,7 @@ export const topics = pgTable(
     autoDeleteAgeSeconds: integer("auto_delete_age_seconds"),
     autoDeleteMaxMessages: integer("auto_delete_max_messages"),
     iconUrl: text("icon_url"),
+    bannerUrl: text("banner_url"),
     viewRoles: jsonb("view_roles").$type<string[]>().default([]),
     isFeed: boolean("is_feed").notNull().default(false),
     isHomeTopic: boolean("is_home_topic").notNull().default(false),

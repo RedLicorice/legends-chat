@@ -33,6 +33,7 @@ export default async function AdminThemesPage() {
           colors: (t.colors as Record<string, string>) ?? {},
           isGlass: t.isGlass,
           bgGradient: t.bgGradient ?? "",
+          customCss: t.customCss ?? null,
         }))}
         defaultTheme={defaultTheme ?? "dark"}
       />

@@ -41,11 +41,12 @@ export async function generateViewport(): Promise<Viewport> {
     maximumScale: 1,
     userScalable: false,
     viewportFit: "cover",
+    interactiveWidget: "resizes-content",
   };
 }
 
 function buildThemeCss(
-  themeRows: { id: string; colors: Record<string, string>; isGlass: boolean; bgGradient: string | null }[],
+  themeRows: { id: string; colors: Record<string, string>; isGlass: boolean; bgGradient: string | null; customCss?: string | null }[],
 ): string {
   return themeRows.map((t) => {
     const colors = t.colors ?? {};
@@ -60,6 +61,11 @@ function buildThemeCss(
         t.bgGradient ??
         "radial-gradient(ellipse 90% 90% at 15% 10%, #1c1448 0%, #0b0e22 55%, #070c14 100%)";
       css += `[data-theme="${t.id}"] body{background:${grad};background-attachment:fixed}`;
+    }
+
+    if (t.customCss) {
+      // Strip </style> tags to prevent injection, then append
+      css += t.customCss.replace(/<\/style>/gi, "");
     }
 
     return css;
@@ -90,6 +96,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       colors: (t.colors as Record<string, string>) ?? {},
       isGlass: t.isGlass,
       bgGradient: t.bgGradient,
+      customCss: t.customCss,
     })),
   );
 

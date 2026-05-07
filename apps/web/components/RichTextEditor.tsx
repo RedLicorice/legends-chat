@@ -5,6 +5,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Mention from "@tiptap/extension-mention";
+import Link from "@tiptap/extension-link";
 import { Markdown } from "tiptap-markdown";
 import { Bold, Italic, Code, List, ListOrdered, Quote } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -118,11 +119,14 @@ function buildMentionSuggestion(membersRef: React.RefObject<MentionMember[]>) {
         if (!el || !clientRect) return;
         const rect = clientRect();
         if (!rect) return;
+        const vvh = window.visualViewport?.height ?? window.innerHeight;
+        const vvy = window.visualViewport?.offsetTop ?? 0;
         const estimatedH = Math.min(currentItems.length * 44 + 8, 320);
-        const spaceBelow = window.innerHeight - rect.bottom;
+        const viewportBottom = vvy + vvh;
+        const spaceBelow = viewportBottom - rect.bottom;
         const top = spaceBelow >= estimatedH
           ? rect.bottom + 4
-          : rect.top - estimatedH - 4;
+          : Math.max(vvy + 4, rect.top - estimatedH - 4);
         el.style.top = `${top}px`;
         el.style.left = `${rect.left}px`;
         el.style.maxWidth = `${window.innerWidth - rect.left - 8}px`;
@@ -192,6 +196,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
       StarterKit.configure({ codeBlock: { languageClassPrefix: "language-" } }),
       Placeholder.configure({ placeholder: placeholder ?? "Write a message…" }),
       Markdown.configure({ html: false, tightLists: true }),
+      Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" } }),
       Mention.configure({
         HTMLAttributes: { class: "mention-tag" },
         suggestion: buildMentionSuggestion(membersRef),
@@ -201,6 +206,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
     editorProps: {
       attributes: {
         class: "outline-none min-h-[1.5rem] text-sm text-text",
+        autocomplete: "off",
+        autocorrect: "off",
+        autocapitalize: "off",
+        spellcheck: "false",
       },
       handleKeyDown(_, event) {
         if (!editor) return false;

@@ -96,9 +96,9 @@ export function P2PView({ topic, currentUser, onMenuOpen, showExpandSidebar, onE
   const canSend = mode === "p2p" && input.trim().length > 0;
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 min-w-0 flex-col overflow-x-hidden">
       {/* Header */}
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+      <div className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-panel px-4">
         {onMenuOpen && (
           <button type="button" onClick={onMenuOpen} className="rounded-md p-1.5 hover:bg-panel2 transition md:hidden">
             <Menu className="h-5 w-5" />
@@ -171,6 +171,10 @@ export function P2PView({ topic, currentUser, onMenuOpen, showExpandSidebar, onE
               placeholder={mode === "connecting" ? "Connecting to peers…" : "Message (not stored)"}
               disabled={mode === "connecting"}
               rows={1}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               className="flex-1 resize-none rounded-xl border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent placeholder:text-muted disabled:opacity-50 max-h-32 overflow-y-auto"
               style={{ height: "auto" }}
               onInput={(e) => {

@@ -12,6 +12,19 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+}
+
+/* In regular browser mode the browser clips content above its chrome;
+   home indicator is never exposed, so --sab padding creates empty whitespace.
+   Only standalone PWA mode needs manual bottom safe-area handling. */
+@media not (display-mode: standalone) {
+  :root { --sab: 0px; }
+}
+
+:root {
+  /* Visual viewport vars — updated by JS to follow soft keyboard */
+  --vvh: 100dvh;
+  --vvy: 0px;
 
   --ch-bg:      11  13  18;
   --ch-panel:   20  24  33;
@@ -143,6 +156,19 @@ main.selectable {
   color: rgb(var(--ch-accent2));
   font-weight: 600;
 }
+
+/* Hashtag highlights in rendered messages */
+.prose .hashtag-tag {
+  color: rgb(var(--ch-accent));
+  font-weight: 600;
+}
+
+/* Prose content fixes */
+.prose { overflow-wrap: break-word; word-break: break-word; }
+.prose pre { overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+.prose code { word-break: break-all; }
+.prose a { color: rgb(var(--ch-accent2)); text-decoration: underline; word-break: break-all; }
+.prose blockquote { border-left: 3px solid rgb(var(--ch-border)); padding-left: 0.75rem; margin: 0.5rem 0; color: rgb(var(--ch-muted)); font-style: italic; }
 
 /* ──────────────────────────────────────────────────────
    Cyberpunk theme — effects & animations
@@ -332,4 +358,186 @@ main.selectable {
 [data-theme="cyberpunk"] .tiptap blockquote {
   border-left-color: rgb(var(--ch-accent2) / 0.7);
   box-shadow: 0 0 8px rgb(var(--ch-accent2) / 0.1);
+}
+
+/* ──────────────────────────────────────────────────────
+   Legends theme — 50s old-school psychedelic tattoo flash
+────────────────────────────────────────────────────── */
+
+@keyframes lg-warm-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 8px  rgb(var(--ch-accent) / 0.5),
+      0 0 24px rgb(var(--ch-accent) / 0.22),
+      0 0 48px rgb(var(--ch-accent) / 0.08);
+  }
+  50% {
+    box-shadow:
+      0 0 14px rgb(var(--ch-accent) / 0.75),
+      0 0 36px rgb(var(--ch-accent) / 0.38),
+      0 0 72px rgb(var(--ch-accent) / 0.15);
+  }
+}
+
+@keyframes lg-psychedelic-drift {
+  0%, 100% { filter: hue-rotate(0deg) saturate(1); }
+  33%       { filter: hue-rotate(18deg) saturate(1.25); }
+  66%       { filter: hue-rotate(-12deg) saturate(1.1); }
+}
+
+@keyframes lg-flicker {
+  0%,88%,100% { opacity: 1; }
+  89%          { opacity: 0.65; }
+  91%          { opacity: 0.97; }
+  93%          { opacity: 0.72; }
+}
+
+/* Background: warm grain + deep vignette */
+[data-theme="legends"] body {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse 90% 70% at 50% 100%, rgb(70 18 5 / 0.45) 0%, transparent 65%),
+    radial-gradient(ellipse 75% 55% at 12% 12%, rgb(90 20 70 / 0.28) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 88% 20%, rgb(30 15 80 / 0.22) 0%, transparent 55%);
+  background-size: 200px 200px, auto, auto, auto;
+  background-attachment: fixed;
+  background-color: rgb(var(--ch-bg));
+}
+
+/* Aged paper horizontal line texture */
+[data-theme="legends"] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 3px,
+    rgb(215 150 40 / 0.012) 3px,
+    rgb(215 150 40 / 0.012) 4px
+  );
+  pointer-events: none;
+  z-index: 9990;
+}
+
+/* Border glow — warm amber */
+[data-theme="legends"] .border-border {
+  box-shadow: 0 0 5px rgb(var(--ch-accent) / 0.06);
+}
+
+/* Panels — vintage depth + subtle inner warmth */
+[data-theme="legends"] .bg-panel {
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--ch-accent) / 0.05),
+    0 2px 16px rgb(0 0 0 / 0.55);
+}
+
+/* Accent buttons — warm orange tattoo flash pulse */
+[data-theme="legends"] .bg-accent {
+  animation: lg-warm-pulse 3.5s ease-in-out infinite;
+}
+
+[data-theme="legends"] .bg-accent:hover {
+  animation: lg-warm-pulse 1.5s ease-in-out infinite;
+}
+
+/* Notification badge — warm pulse + vintage flicker */
+[data-theme="legends"] .bg-accent.rounded-full {
+  animation: lg-warm-pulse 3.5s ease-in-out infinite, lg-flicker 11s step-end infinite;
+}
+
+/* Accent text — warm neon glow */
+[data-theme="legends"] .text-accent {
+  text-shadow:
+    0 0 8px  rgb(var(--ch-accent) / 0.7),
+    0 0 20px rgb(var(--ch-accent) / 0.3);
+}
+
+/* Accent2 text — psychedelic purple drift */
+[data-theme="legends"] .text-accent2 {
+  text-shadow:
+    0 0 8px  rgb(var(--ch-accent2) / 0.8),
+    0 0 22px rgb(var(--ch-accent2) / 0.35);
+  animation: lg-psychedelic-drift 14s ease-in-out infinite;
+}
+
+[data-theme="legends"] .text-danger {
+  text-shadow:
+    0 0 8px  rgb(var(--ch-danger) / 0.65),
+    0 0 16px rgb(var(--ch-danger) / 0.25);
+}
+
+/* Panel hover — warm flash glow */
+[data-theme="legends"] .rounded-xl,
+[data-theme="legends"] .rounded-2xl {
+  transition: box-shadow 0.3s ease;
+}
+[data-theme="legends"] .rounded-xl:hover,
+[data-theme="legends"] .rounded-2xl:hover {
+  box-shadow:
+    0 0 0 1px rgb(var(--ch-accent) / 0.16),
+    0 0 20px rgb(var(--ch-accent) / 0.07),
+    0 0 40px rgb(var(--ch-accent) / 0.03);
+}
+
+[data-theme="legends"] .rounded-lg {
+  transition: box-shadow 0.2s ease;
+}
+[data-theme="legends"] .rounded-lg:hover {
+  box-shadow: 0 0 0 1px rgb(var(--ch-accent) / 0.1), 0 0 10px rgb(var(--ch-accent) / 0.05);
+}
+
+/* Input focus — warm amber ring */
+[data-theme="legends"] input:focus,
+[data-theme="legends"] textarea:focus,
+[data-theme="legends"] select:focus {
+  outline: none !important;
+  box-shadow:
+    0 0 0 1px rgb(var(--ch-accent) / 0.65),
+    0 0 12px rgb(var(--ch-accent) / 0.28),
+    inset 0 0 6px rgb(var(--ch-accent) / 0.05) !important;
+}
+
+/* Tiptap editor focus */
+[data-theme="legends"] .tiptap:focus-within {
+  box-shadow:
+    0 0 0 1px rgb(var(--ch-accent) / 0.5),
+    0 0 12px rgb(var(--ch-accent) / 0.2);
+}
+
+/* Scrollbar — warm amber to purple */
+[data-theme="legends"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg,
+    rgb(var(--ch-accent) / 0.55) 0%,
+    rgb(var(--ch-accent2) / 0.42) 100%
+  );
+  box-shadow: 0 0 6px rgb(var(--ch-accent) / 0.28);
+}
+[data-theme="legends"] ::-webkit-scrollbar-track {
+  background: rgb(var(--ch-panel));
+}
+
+/* Avatar hover — warm ring */
+[data-theme="legends"] .rounded-full:hover {
+  box-shadow: 0 0 0 2px rgb(var(--ch-accent) / 0.6), 0 0 10px rgb(var(--ch-accent) / 0.28);
+  transition: box-shadow 0.2s ease;
+}
+
+/* Sidebar active item — warm amber left bar */
+[data-theme="legends"] .bg-panel2.rounded-lg {
+  border-left: 2px solid rgb(var(--ch-accent) / 0.65);
+  box-shadow: inset 4px 0 12px rgb(var(--ch-accent) / 0.07);
+}
+
+/* Code blocks — warm tattoo-flash border */
+[data-theme="legends"] .tiptap pre,
+[data-theme="legends"] .tiptap code {
+  border: 1px solid rgb(var(--ch-accent) / 0.22);
+  box-shadow: 0 0 6px rgb(var(--ch-accent) / 0.09);
+}
+
+/* Blockquote — warm amber bar */
+[data-theme="legends"] .tiptap blockquote {
+  border-left-color: rgb(var(--ch-accent) / 0.7);
+  box-shadow: 0 0 6px rgb(var(--ch-accent) / 0.08);
 }

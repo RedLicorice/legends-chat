@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useState } from "react";
-import { Plus, Trash2, Copy, Star, StarOff, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Copy, Star, StarOff, ChevronDown, ChevronUp, Code, BookOpen } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 const COLOR_KEYS = [
@@ -31,6 +31,82 @@ const DEFAULT_COLORS: Record<ColorKey, string> = {
   danger: "255 92 124",
 };
 
+const CSS_REFERENCE = `/* ── Target your theme ─────────────────────────────────
+   Replace "your-id" with your theme's slug.           */
+[data-theme="your-id"] { ... }
+[data-theme="your-id"] body { ... }
+
+/* ── CSS custom properties (R G B channel format) ────
+   Use with: rgb(var(--ch-X) / <alpha>)               */
+--ch-bg       /* page background                       */
+--ch-panel    /* sidebar, cards, dialogs               */
+--ch-panel2   /* inputs, nested panels                 */
+--ch-border   /* dividers, card outlines               */
+--ch-text     /* primary body text                     */
+--ch-muted    /* timestamps, subtitles, placeholders   */
+--ch-accent   /* buttons, active state, send button    */
+--ch-accent2  /* @mentions, secondary highlights       */
+--ch-danger   /* errors, warnings, delete              */
+
+/* ── Tailwind classes → theme token ──────────────────*/
+.bg-bg            /* page background                   */
+.bg-panel         /* sidebar + main panels             */
+.bg-panel2        /* input areas, nested elements      */
+.bg-accent        /* primary action buttons, badges    */
+.bg-accent2       /* secondary accent fills            */
+.bg-danger        /* destructive action buttons        */
+.text-text        /* body text                         */
+.text-muted       /* secondary / dimmed text           */
+.text-accent      /* accent-colored labels, icons      */
+.text-accent2     /* @mention text                     */
+.text-danger      /* error text                        */
+.border-border    /* all borders / dividers            */
+
+/* ── Key element selectors ───────────────────────────*/
+body
+.bg-panel              /* sidebar + chat panels         */
+.bg-panel2             /* message input, nested areas   */
+.bg-accent             /* Send button, active badges    */
+.rounded-xl            /* large cards / dialogs         */
+.rounded-2xl           /* extra-large cards             */
+.rounded-lg            /* buttons, list items, nav      */
+.rounded-full          /* avatars, notification dots    */
+.tiptap                /* rich-text message editor      */
+.prose                 /* rendered message content      */
+.mention-tag           /* @username chips in messages   */
+input, textarea, select
+
+/* ── Glass mode ──────────────────────────────────────
+   Active when theme has "glass mode" enabled.         */
+[data-glass="1"] .bg-panel    /* blurred semi-transparent */
+[data-glass="1"] .bg-panel2
+
+/* ── Example: neon glow on accent buttons ───────────*/
+[data-theme="your-id"] .bg-accent {
+  box-shadow:
+    0 0 12px rgb(var(--ch-accent) / 0.6),
+    0 0 30px rgb(var(--ch-accent) / 0.25);
+}
+
+/* ── Example: textured background ───────────────────*/
+[data-theme="your-id"] body {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 20% 20%,
+      rgb(30 0 60 / 0.4) 0%, transparent 60%);
+  background-color: rgb(var(--ch-bg));
+  background-attachment: fixed;
+}
+
+/* ── Example: custom scrollbar ──────────────────────*/
+[data-theme="your-id"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg,
+    rgb(var(--ch-accent) / 0.6) 0%,
+    rgb(var(--ch-accent2) / 0.4) 100%);
+}
+[data-theme="your-id"] ::-webkit-scrollbar-track {
+  background: rgb(var(--ch-panel));
+}`;
+
 interface ThemeRow {
   id: string;
   name: string;
@@ -38,6 +114,7 @@ interface ThemeRow {
   colors: Record<string, string>;
   isGlass: boolean;
   bgGradient: string;
+  customCss: string | null;
 }
 
 interface Props {
@@ -69,7 +146,6 @@ function HexInput({ value, onChange, disabled }: { value: string; onChange: (hex
   const [draft, setDraft] = useState(value);
   const [committed, setCommitted] = useState(value);
 
-  // Sync draft when the color picker (native input) changes the committed value
   if (value !== committed) {
     setCommitted(value);
     setDraft(value);
@@ -127,6 +203,29 @@ function ThemePreview({ colors, isGlass }: { colors: Record<string, string>; isG
   );
 }
 
+// ── CSS Reference panel ─────────────────────────────────────────────────────
+
+function CssReference() {
+  return (
+    <div className="rounded-lg border border-border bg-panel2 p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <BookOpen className="h-3.5 w-3.5 text-accent" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-accent">CSS Reference</span>
+      </div>
+      <p className="mb-3 text-xs text-muted">
+        All selectors and variables available for custom CSS. Theme CSS is injected into{" "}
+        <code className="rounded bg-panel px-1 font-mono text-accent2">&lt;head&gt;</code>{" "}
+        after the base styles — use{" "}
+        <code className="rounded bg-panel px-1 font-mono text-accent2">[data-theme=&quot;your-id&quot;]</code>{" "}
+        to scope rules to your theme.
+      </p>
+      <pre className="overflow-x-auto rounded-lg bg-panel p-4 text-[11px] leading-5 font-mono text-muted whitespace-pre">
+        <code>{CSS_REFERENCE}</code>
+      </pre>
+    </div>
+  );
+}
+
 // ── Main form ───────────────────────────────────────────────────────────────
 
 export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault }: Props) {
@@ -145,6 +244,10 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
   const [editGradient, setEditGradient] = useState<Record<string, string>>(() =>
     Object.fromEntries(initial.map((t) => [t.id, t.bgGradient])),
   );
+  const [editCss, setEditCss] = useState<Record<string, string>>(() =>
+    Object.fromEntries(initial.map((t) => [t.id, t.customCss ?? ""])),
+  );
+  const [showCssRef, setShowCssRef] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -177,10 +280,18 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
           colors: editColors[id],
           isGlass: editGlass[id],
           bgGradient: editGradient[id] || null,
+          customCss: editCss[id] || null,
         }),
       });
       if (!res.ok) throw new Error("save failed");
-      setThemes((prev) => prev.map((t) => t.id === id ? { ...t, name: editNames[id] ?? t.name, colors: editColors[id] ?? t.colors, isGlass: editGlass[id] ?? t.isGlass, bgGradient: editGradient[id] ?? t.bgGradient } : t));
+      setThemes((prev) => prev.map((t) => t.id === id ? {
+        ...t,
+        name: editNames[id] ?? t.name,
+        colors: editColors[id] ?? t.colors,
+        isGlass: editGlass[id] ?? t.isGlass,
+        bgGradient: editGradient[id] ?? t.bgGradient,
+        customCss: editCss[id] || null,
+      } : t));
       setSaved((s) => ({ ...s, [id]: true }));
       router.refresh();
     } catch {
@@ -230,12 +341,21 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
       });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error ?? "Create failed"); return; }
-      const newTheme: ThemeRow = { id: data.id, name: data.name, isBuiltin: false, colors: data.colors, isGlass: data.isGlass, bgGradient: data.bgGradient ?? "" };
+      const newTheme: ThemeRow = {
+        id: data.id,
+        name: data.name,
+        isBuiltin: false,
+        colors: data.colors,
+        isGlass: data.isGlass,
+        bgGradient: data.bgGradient ?? "",
+        customCss: data.customCss ?? null,
+      };
       setThemes((prev) => [...prev, newTheme]);
       setEditColors((p) => ({ ...p, [newTheme.id]: Object.fromEntries(COLOR_KEYS.map(({ key }) => [key, newTheme.colors[key] ?? DEFAULT_COLORS[key]])) as Record<ColorKey, string> }));
       setEditNames((p) => ({ ...p, [newTheme.id]: newTheme.name }));
       setEditGlass((p) => ({ ...p, [newTheme.id]: newTheme.isGlass }));
       setEditGradient((p) => ({ ...p, [newTheme.id]: newTheme.bgGradient }));
+      setEditCss((p) => ({ ...p, [newTheme.id]: newTheme.customCss ?? "" }));
       setCreateName("");
       setCreateId("");
       setCloneFrom("");
@@ -310,6 +430,7 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
         const colors = editColors[theme.id] ?? ({} as Record<ColorKey, string>);
         const isDefault = defaultTheme === theme.id;
         const dis = saving === theme.id || deleting === theme.id;
+        const cssRefOpen = showCssRef[theme.id] ?? false;
 
         return (
           <div key={theme.id} className="rounded-xl border border-border bg-panel overflow-hidden">
@@ -329,6 +450,9 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
                   )}
                   {editGlass[theme.id] && (
                     <span className="rounded-full bg-panel2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">glass</span>
+                  )}
+                  {(editCss[theme.id] ?? "").trim() && (
+                    <span className="rounded-full bg-accent2/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent2">custom css</span>
                   )}
                 </div>
                 <div className="mt-1 flex flex-wrap gap-1">
@@ -382,7 +506,7 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
 
             {/* Expanded editor */}
             {isExpanded && (
-              <div className="border-t border-border p-4 space-y-4">
+              <div className="border-t border-border p-4 space-y-5">
                 {/* Name */}
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Display name</label>
@@ -457,6 +581,48 @@ export function AdminThemesForm({ themes: initial, defaultTheme: initialDefault 
                     <p className="mt-1 text-xs text-muted">Any valid CSS gradient. Leave blank to use the default indigo gradient.</p>
                   </div>
                 )}
+
+                {/* Custom CSS editor */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Code className="h-3.5 w-3.5 text-muted" />
+                      <span className="text-xs font-medium uppercase tracking-wide text-muted">Custom CSS</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowCssRef((p) => ({ ...p, [theme.id]: !cssRefOpen }))}
+                      className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted hover:text-text hover:bg-panel2 transition-colors"
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      {cssRefOpen ? "Hide reference" : "Show reference"}
+                    </button>
+                  </div>
+
+                  {cssRefOpen && (
+                    <div className="mb-3">
+                      <CssReference />
+                    </div>
+                  )}
+
+                  <textarea
+                    value={editCss[theme.id] ?? ""}
+                    onChange={(e) => setEditCss((p) => ({ ...p, [theme.id]: e.target.value }))}
+                    disabled={dis}
+                    rows={14}
+                    spellCheck={false}
+                    placeholder={`/* Scoped to your theme — use [data-theme="${theme.id}"] to target it */\n[data-theme="${theme.id}"] body {\n  /* custom background, textures, etc. */\n}\n\n[data-theme="${theme.id}"] .bg-accent {\n  /* custom button effects */\n}`}
+                    className="w-full rounded-lg border border-border bg-panel2 px-3 py-2.5 text-xs font-mono leading-5 outline-none focus:border-accent resize-y"
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    CSS is injected into{" "}
+                    <code className="font-mono text-accent2">&lt;head&gt;</code>{" "}
+                    after the base stylesheet. Scope all rules with{" "}
+                    <code className="font-mono text-accent2">[data-theme=&quot;{theme.id}&quot;]</code>.
+                    Built-in theme effects (cyberpunk, legends) are in{" "}
+                    <code className="font-mono text-accent2">globals.css</code>.
+                  </p>
+                </div>
 
                 {/* Actions */}
                 <div className="flex items-center gap-3 pt-1">

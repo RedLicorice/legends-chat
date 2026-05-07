@@ -19,6 +19,38 @@ function preprocessMentions(content: string): string {
   });
 }
 
+// Walk text nodes and wrap #hashtags in styled spans (skip code/pre).
+function applyHashtags(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      const tag = parent.tagName.toLowerCase();
+      if (tag === "code" || tag === "pre" || tag === "a") return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes: Text[] = [];
+  let n: Node | null;
+  while ((n = walker.nextNode())) nodes.push(n as Text);
+  for (const textNode of nodes) {
+    if (!/#[a-zA-Z]\w*/.test(textNode.nodeValue ?? "")) continue;
+    const frag = document.createDocumentFragment();
+    const parts = (textNode.nodeValue ?? "").split(/(#[a-zA-Z]\w*)/g);
+    for (const part of parts) {
+      if (/^#[a-zA-Z]\w*$/.test(part)) {
+        const span = document.createElement("span");
+        span.className = "hashtag-tag";
+        span.textContent = part;
+        frag.appendChild(span);
+      } else {
+        frag.appendChild(document.createTextNode(part));
+      }
+    }
+    textNode.parentNode?.replaceChild(frag, textNode);
+  }
+}
+
 interface Props {
   content: string;
   className?: string;
@@ -36,7 +68,13 @@ export function MarkdownContent({ content, className }: Props) {
     doc.querySelectorAll("[onclick],[onerror],[onload],[onmouseover]").forEach((el) => {
       ["onclick", "onerror", "onload", "onmouseover"].forEach((attr) => el.removeAttribute(attr));
     });
+    // Force safe link attributes
+    doc.querySelectorAll("a[href]").forEach((el) => {
+      el.setAttribute("target", "_blank");
+      el.setAttribute("rel", "noopener noreferrer");
+    });
     ref.current.innerHTML = doc.body.innerHTML;
+    applyHashtags(ref.current);
   }, [content]);
 
   return (

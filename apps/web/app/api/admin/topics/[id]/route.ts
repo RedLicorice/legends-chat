@@ -47,6 +47,7 @@ export async function PATCH(
     slug?: string;
     description?: string | null;
     iconUrl?: string | null;
+    bannerUrl?: string | null;
     isSticky?: boolean;
     sortOrder?: number;
     autoDeleteMode?: "none" | "age" | "count";
@@ -112,6 +113,7 @@ export async function PATCH(
   }
   if ("description" in body) patch.description = body.description ?? null;
   if ("iconUrl" in body) patch.iconUrl = body.iconUrl ?? null;
+  if ("bannerUrl" in body) patch.bannerUrl = body.bannerUrl ?? null;
   if (typeof body.isSticky === "boolean") patch.isSticky = body.isSticky;
   if (typeof body.sortOrder === "number") patch.sortOrder = body.sortOrder;
   if (body.autoDeleteMode === "none" || body.autoDeleteMode === "age" || body.autoDeleteMode === "count") {

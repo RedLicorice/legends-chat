@@ -12,6 +12,7 @@ interface TopicRow {
   title: string;
   description: string | null;
   iconUrl: string | null;
+  bannerUrl: string | null;
   isSticky: boolean;
   sortOrder: number;
   isFeed: boolean;
@@ -226,6 +227,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           title: t.title,
           description: t.description,
           iconUrl: t.iconUrl ?? null,
+          bannerUrl: t.bannerUrl ?? null,
           isSticky: t.isSticky,
           sortOrder: t.sortOrder,
           isFeed: t.isFeed,
@@ -409,6 +411,29 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                 />
               </div>
               <p className="mt-1 text-xs text-muted">Square image shown as topic icon in the sidebar. Leave blank to use initials. JPEG, PNG, GIF, WebP · max 10 MB.</p>
+            </div>
+
+            {/* Banner URL */}
+            <div className="border-t border-border pt-3">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Banner</label>
+              <div className="flex gap-2 items-start">
+                <InlineTextInput
+                  value={t.bannerUrl ?? ""}
+                  placeholder="https://example.com/banner.jpg"
+                  onSave={(v) => save(t.id, { bannerUrl: v.trim() || null })}
+                  disabled={dis}
+                />
+                <ImageUploadButton
+                  bucket="avatars"
+                  onUploaded={(url) => save(t.id, { bannerUrl: url })}
+                  onError={(err) => setErrors((e) => ({ ...e, [t.id]: err }))}
+                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2 disabled:opacity-50"
+                />
+              </div>
+              {t.bannerUrl && (
+                <img src={t.bannerUrl} alt="" className="mt-2 h-20 w-full rounded-lg object-cover border border-border" />
+              )}
+              <p className="mt-1 text-xs text-muted">Wide banner shown in the topic info modal. JPEG, PNG, GIF, WebP · max 10 MB.</p>
             </div>
 
             {/* Permissions */}

@@ -153,10 +153,10 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
         ref={btnRef}
         type="button"
         onClick={openPanel}
-        className={cn("relative rounded-lg p-2 transition hover:bg-panel2 text-muted hover:text-text", open && "bg-panel2 text-accent")}
+        className={cn("relative rounded-lg p-1.5 transition hover:bg-panel2 text-muted hover:text-text", open && "bg-panel2 text-accent")}
         title="Notifications"
       >
-        <Bell className="h-5 w-5" />
+        <Bell className="h-4 w-4" />
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white leading-none">
             {unread > 99 ? "99+" : unread}

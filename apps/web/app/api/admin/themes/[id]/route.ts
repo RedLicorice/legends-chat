@@ -21,6 +21,7 @@ export async function PATCH(
     colors?: Record<string, string>;
     isGlass?: boolean;
     bgGradient?: string | null;
+    customCss?: string | null;
     setDefault?: boolean;
   };
 
@@ -32,6 +33,7 @@ export async function PATCH(
   if (body.colors) patch.colors = body.colors;
   if (typeof body.isGlass === "boolean") patch.isGlass = body.isGlass;
   if ("bgGradient" in body) patch.bgGradient = body.bgGradient ?? null;
+  if ("customCss" in body) patch.customCss = body.customCss ?? null;
 
   if (Object.keys(patch).length > 0) {
     await db.update(themes).set(patch).where(eq(themes.id, id));

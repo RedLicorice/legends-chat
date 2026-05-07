@@ -143,7 +143,7 @@ export function AppSidebar({
         <button
           type="button"
           onClick={() => setInternalOpen(true)}
-          className="fixed left-4 top-4 z-40 rounded-md p-2 hover:bg-panel2 transition md:hidden"
+          className="fixed left-4 top-[calc(1rem+var(--sat))] z-40 rounded-md p-2 hover:bg-panel2 transition md:hidden"
           aria-label="Open menu"
         >
           <Menu className="h-5 w-5" />
@@ -155,7 +155,7 @@ export function AppSidebar({
       )}
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200",
+        "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200 overflow-x-hidden",
         "md:relative md:z-auto",
         // Mobile: controlled by isOpen (always full width)
         isOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full md:translate-x-0",
@@ -206,9 +206,9 @@ export function AppSidebar({
         )}
 
         {/* Full sidebar — always on mobile, hidden on desktop when collapsed */}
-        <div className={cn("flex h-full min-h-0 flex-col", (showStrip || showMinimalHidden) && "md:hidden")}>
+        <div className={cn("flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden", (showStrip || showMinimalHidden) && "md:hidden")}>
           {/* Header */}
-          <div className="flex items-center gap-1 border-b border-border px-3 py-3">
+          <div className="flex items-center gap-1 border-b border-border px-3 pb-3 pt-[calc(0.75rem+var(--sat))]">
             <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-accent">
               {profile.avatarUrl ? (
                 <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />

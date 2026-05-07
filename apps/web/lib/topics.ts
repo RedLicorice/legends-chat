@@ -20,6 +20,7 @@ export interface TopicListItem {
   title: string;
   description: string | null;
   iconUrl: string | null;
+  bannerUrl: string | null;
   isSticky: boolean;
   isE2ee: boolean;
   isP2p: boolean;
@@ -115,6 +116,7 @@ export async function listTopicsForUser(userId: string, userRole: string, userPe
       title: t.title,
       description: t.description,
       iconUrl: t.iconUrl ?? null,
+      bannerUrl: t.bannerUrl ?? null,
       isSticky: t.isSticky,
       isE2ee: t.isE2ee,
       isP2p: t.isP2p,

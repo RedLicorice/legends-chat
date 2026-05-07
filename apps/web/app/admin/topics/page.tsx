@@ -25,6 +25,7 @@ export default async function AdminTopicsPage() {
           title: t.title,
           description: t.description,
           iconUrl: t.iconUrl ?? null,
+          bannerUrl: t.bannerUrl ?? null,
           isSticky: t.isSticky,
           sortOrder: t.sortOrder,
           isFeed: t.isFeed,

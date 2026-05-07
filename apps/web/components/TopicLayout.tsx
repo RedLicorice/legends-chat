@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopicListItem } from "@/components/TopicListItem";
@@ -21,7 +21,7 @@ interface Props {
   };
   topics: TopicItem[];
   currentSlug: string;
-  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[] };
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl: string | null; bannerUrl: string | null; description: string | null };
   mute: { reason: string; expiresAt: string | null } | null;
   hasPasskey: boolean;
   giphyEnabled?: boolean;
@@ -51,6 +51,34 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
 
   const { collapsed: desktopCollapsed, toggle, expand } = useSidebarCollapse();
 
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    // Track the tallest height seen — significant drop means keyboard is open.
+    // Use removeProperty when no keyboard so CSS fallback (100dvh) applies,
+    // avoiding the iOS gap where visualViewport.height < 100dvh at rest.
+    let maxH = vv.height;
+    function update() {
+      maxH = Math.max(maxH, vv!.height);
+      if (maxH - vv!.height > 80) {
+        root.style.setProperty('--vvh', `${vv!.height}px`);
+        root.style.setProperty('--vvy', `${vv!.offsetTop}px`);
+      } else {
+        root.style.removeProperty('--vvh');
+        root.style.removeProperty('--vvy');
+      }
+    }
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      root.style.removeProperty('--vvh');
+      root.style.removeProperty('--vvy');
+    };
+  }, []);
+
   const [compactMode] = useState<"minimal" | "strip">(() =>
     typeof document !== "undefined"
       ? ((document.documentElement.dataset.sidebarCompact as "minimal" | "strip") || "minimal")
@@ -77,7 +105,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
   );
 
   return (
-    <div className="fixed inset-0 flex overflow-hidden">
+    <div className="fixed left-0 right-0 flex overflow-hidden" style={{ top: 'var(--vvy)', height: 'var(--vvh)' }}>
       <AppSidebar
         user={user}
         variant="chat"
@@ -100,7 +128,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
           ))}
         </div>
       </AppSidebar>
-      <main className="relative flex flex-1 flex-col overflow-hidden">
+      <main className="relative flex flex-1 min-w-0 flex-col overflow-x-hidden">
         {!hasPasskey && <PasskeyBanner />}
         {topic.isP2p ? (
           <P2PView

@@ -26,7 +26,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       >
         <AdminNav permissions={permissions} />
       </AppSidebar>
-      <div className="selectable flex flex-1 flex-col overflow-y-auto pt-14 md:pt-0">
+      <div className="selectable flex flex-1 flex-col overflow-y-auto pt-[calc(3.5rem+var(--sat))] md:pt-0">
         {children}
       </div>
     </div>
