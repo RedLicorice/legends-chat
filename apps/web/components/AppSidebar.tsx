@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
+  BookOpen, ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -302,6 +303,7 @@ export function AppSidebar({
                     <Shield className="h-4 w-4" /> Admin
                   </Link>
                 )}
+                <SupportSubmenu isStaff={isStaff} />
               </>
             )}
             {installState.type === "native" && (
@@ -458,6 +460,38 @@ export function AdminNav({ permissions }: { permissions: string[] }) {
         </>
       )}
     </nav>
+  );
+}
+
+function SupportSubmenu({ isStaff }: { isStaff: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2 transition"
+      >
+        <BookOpen className="h-4 w-4" />
+        <span className="flex-1 text-left">Support</span>
+        <ChevronDown className={cn("h-3.5 w-3.5 text-muted transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="ml-7 mt-0.5 space-y-0.5 border-l border-border pl-3">
+          <Link href="/docs/manual" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-text transition">
+            User Manual
+          </Link>
+          <Link href="/docs/whitepaper" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-text transition">
+            Whitepaper
+          </Link>
+          {isStaff && (
+            <Link href="/docs/admin-manual" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-text transition">
+              Admin Manual
+            </Link>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

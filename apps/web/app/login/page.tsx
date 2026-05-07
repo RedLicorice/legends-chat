@@ -102,6 +102,11 @@ export default function LoginPage() {
           No account?{" "}
           <Link href="/register" className="text-accent hover:underline">Create one</Link>
         </p>
+        <p className="mt-6 text-center text-xs text-muted/60">
+          <Link href="/docs/whitepaper" className="hover:text-muted underline underline-offset-2">
+            Privacy &amp; Security Whitepaper
+          </Link>
+        </p>
       </div>
     </main>
   );
