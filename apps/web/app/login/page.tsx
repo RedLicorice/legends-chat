@@ -1,5 +1,6 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
+import { clearSessionId } from "@/lib/e2ee-session";
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -29,6 +30,7 @@ export default function LoginPage() {
         setError(data.error ?? "Login failed.");
         return;
       }
+      clearSessionId();
       router.push("/");
     } catch {
       setError("Network error. Try again.");
@@ -58,7 +60,7 @@ export default function LoginPage() {
           </div>
         ) : tab === "passkey" ? (
           <div className="space-y-3">
-            <PasskeyAuthButton onSuccess={() => router.push("/")} />
+            <PasskeyAuthButton onSuccess={() => { clearSessionId(); router.push("/"); }} />
             <p className="text-center text-xs text-muted">
               Use a registered passkey to sign in instantly.
             </p>
