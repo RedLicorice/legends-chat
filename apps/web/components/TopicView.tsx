@@ -760,16 +760,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
               // TOFU check — warn if key changed since last contact
               const pinResult = await checkAndUpdatePin(m.userId, recipPubKey);
               if (pinResult.changed && pinResult.oldFingerprint) {
-                const alreadyWarned = keyChangedWarnings.some((w) => w.userId === m.userId);
-                if (!alreadyWarned) {
-                  const senderInfo = messages.find((msg) => msg.senderUserId === m.userId);
-                  newWarnings.push({
-                    userId: m.userId,
-                    displayName: senderInfo?.senderDisplayName ?? m.userId.slice(0, 8),
-                    oldFingerprint: pinResult.oldFingerprint,
-                    newFingerprint: pinResult.newFingerprint,
-                  });
-                }
+                const senderInfo = messages.find((msg) => msg.senderUserId === m.userId);
+                newWarnings.push({
+                  userId: m.userId,
+                  displayName: senderInfo?.senderDisplayName ?? m.userId.slice(0, 8),
+                  oldFingerprint: pinResult.oldFingerprint,
+                  newFingerprint: pinResult.newFingerprint,
+                });
               }
 
               const encryptedKey = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, recipPubKey);
@@ -778,7 +775,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
           }
 
           if (newWarnings.length > 0) {
-            setKeyChangedWarnings((prev) => [...prev, ...newWarnings]);
+            setKeyChangedWarnings((prev) => {
+              const merged = [...prev];
+              for (const w of newWarnings) {
+                if (!merged.some((x) => x.userId === w.userId)) merged.push(w);
+              }
+              return merged;
+            });
           }
 
           // Encrypt for self if not already a member with a registered key
@@ -845,12 +848,6 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
             setE2eeReady(true);
           }}
           onSkip={() => { setE2eeSetupNeeded(false); }}
-        />
-      )}
-      {keyChangedWarnings.length > 0 && (
-        <E2EEKeyWarning
-          warnings={keyChangedWarnings}
-          onTrust={handleTrustKey}
         />
       )}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
@@ -960,6 +957,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
 
       <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
       <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", topic.isFeed ? "space-y-4" : "space-y-1")}>
+        {keyChangedWarnings.length > 0 && (
+          <E2EEKeyWarning
+            warnings={keyChangedWarnings}
+            onTrust={handleTrustKey}
+          />
+        )}
         <AnimatePresence initial={false}>
           {messages.map((m, i) => {
             const mine = m.senderUserId === currentUser.id;
