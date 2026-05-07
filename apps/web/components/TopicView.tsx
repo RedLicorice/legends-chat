@@ -473,6 +473,10 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
     setKeyChangedWarnings((prev) => prev.filter((w) => w.userId !== userId));
   }, []);
 
+  const handleDismissWarning = useCallback((userId: string) => {
+    setKeyChangedWarnings((prev) => prev.filter((w) => w.userId !== userId));
+  }, []);
+
   const toggleReaction = useCallback((messageId: string, emojiKey: string) => {
     socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
     setPickerFor(null);
@@ -961,6 +965,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
           <E2EEKeyWarning
             warnings={keyChangedWarnings}
             onTrust={handleTrustKey}
+            onDismiss={handleDismissWarning}
           />
         )}
         <AnimatePresence initial={false}>

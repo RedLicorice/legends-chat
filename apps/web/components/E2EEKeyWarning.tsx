@@ -12,9 +12,10 @@ export interface KeyChangedWarning {
 interface Props {
   warnings: KeyChangedWarning[];
   onTrust: (userId: string, newFingerprint: string) => void;
+  onDismiss: (userId: string) => void;
 }
 
-export function E2EEKeyWarning({ warnings, onTrust }: Props) {
+export function E2EEKeyWarning({ warnings, onTrust, onDismiss }: Props) {
   if (warnings.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 px-3 pt-2">
@@ -42,8 +43,8 @@ export function E2EEKeyWarning({ warnings, onTrust }: Props) {
           </button>
           <button
             type="button"
-            aria-label="Dismiss and trust key"
-            onClick={() => onTrust(w.userId, w.newFingerprint)}
+            aria-label="Dismiss warning"
+            onClick={() => onDismiss(w.userId)}
             className="shrink-0 rounded p-0.5 opacity-50 hover:opacity-100 transition"
           >
             <X className="h-3 w-3" />

@@ -1,5 +1,6 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
+import { clearSessionId } from "@/lib/e2ee-session";
 
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -95,6 +96,7 @@ export default function RegisterPage() {
         setFormError(data.error ?? "Registration failed.");
         return;
       }
+      clearSessionId();
       router.push("/");
     } catch {
       setFormError("Network error. Try again.");

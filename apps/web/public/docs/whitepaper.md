@@ -54,7 +54,7 @@ E2EE channels use a Signal-protocol-style sender key scheme. When you join an E2
 
 ### What is protected
 
-- **Session-level forward secrecy:** Your sender key rotates on every login. If your current session's key is ever compromised after you log out, past sessions' messages remain protected — the server no longer holds the old encrypted key copies.
+- **Session-level forward secrecy:** Your sender key rotates on every password or passkey login. If your current session's key is ever compromised after you log out, past sessions' messages remain protected — the server no longer holds the old encrypted key copies.
 - **TOFU identity key pinning:** The first time your client sees another user's identity key, it pins the fingerprint locally. On every subsequent contact, the fingerprint is compared against the pin. If the server ever substitutes a different key, you will see a warning banner before that user's messages are encrypted to the new key.
 
 ### Known limitations
