@@ -9,6 +9,13 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+// tiptap-markdown escapes markdown special chars with backslash in paragraph
+// nodes (e.g. "# heading" → "\# heading"). Unescape before passing to marked
+// so headings, blockquotes, inline code, links etc. render correctly.
+function unescapeTiptapMarkdown(s: string): string {
+  return s.replace(/\\([*_~`#|>\[\]()\\])/g, "$1");
+}
+
 // Pre-process tiptap mention nodes ([@id="..." label="..."]) into styled spans
 // before markdown parsing so marked doesn't escape the attributes.
 function preprocessMentions(content: string): string {
@@ -61,7 +68,7 @@ export function MarkdownContent({ content, className }: Props) {
 
   useEffect(() => {
     if (!ref.current) return;
-    const preprocessed = preprocessMentions(content);
+    const preprocessed = preprocessMentions(unescapeTiptapMarkdown(content));
     const html = marked.parse(preprocessed) as string;
     const doc = new DOMParser().parseFromString(html, "text/html");
     doc.querySelectorAll("script,style,iframe,object,embed,form").forEach((el) => el.remove());
