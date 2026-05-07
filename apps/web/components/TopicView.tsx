@@ -20,6 +20,8 @@ import { ThreadPanel } from "@/components/ThreadPanel";
 import { E2EESetup } from "@/components/E2EESetup";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { TopicInfoModal } from "@/components/TopicInfoModal";
+import type { KeyChangedWarning } from "@/components/E2EEKeyWarning";
+import { E2EEKeyWarning } from "@/components/E2EEKeyWarning";
 import type {
   E2EEPayload,
 } from "@/lib/e2ee";
@@ -180,6 +182,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   const [showTopicInfo, setShowTopicInfo] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
   const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
+  const [keyChangedWarnings, setKeyChangedWarnings] = useState<KeyChangedWarning[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const senderKeyCache = useRef<Map<string, Uint8Array<ArrayBuffer>>>(new Map());
   const e2eeKeyPairRef = useRef<CryptoKeyPair | null>(null);
@@ -462,6 +465,14 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       .finally(() => setMembersLoading(false));
   }, [topic.id]);
 
+  const handleTrustKey = useCallback((userId: string, newFingerprint: string) => {
+    void (async () => {
+      const { confirmPinUpdate } = await import("@/lib/e2ee");
+      await confirmPinUpdate(userId, newFingerprint);
+    })();
+    setKeyChangedWarnings((prev) => prev.filter((w) => w.userId !== userId));
+  }, []);
+
   const toggleReaction = useCallback((messageId: string, emojiKey: string) => {
     socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
     setPickerFor(null);
@@ -706,11 +717,14 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         const {
           generateSenderKey,
           getSenderKey,
+          getSenderKeySessionId,
           storeSenderKey,
           encryptE2EEMessage,
           importPublicKey,
           encryptSenderKeyForRecipient,
+          checkAndUpdatePin,
         } = await import("@/lib/e2ee");
+        const { getOrCreateSessionId } = await import("@/lib/e2ee-session");
 
         // Fetch current members + already-distributed list
         const distRes = await apiFetch(`/api/topics/${topic.id}/e2ee/distribute`);
@@ -720,26 +734,53 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
 
         const memberIds = new Set(distData.members.map((m) => m.userId));
         const distributed = new Set(distData.alreadyDistributed);
-        // Need new distribution if any member (who has a key) hasn't received ours yet
-        const needsRotation = distData.members.some((m) => !distributed.has(m.userId));
+
+        const currentSessionId = getOrCreateSessionId();
+        const storedSessionId = await getSenderKeySessionId(topic.id, currentUser.id);
+        const sessionRotationNeeded = !storedSessionId || storedSessionId !== currentSessionId;
+        const memberRotationNeeded = distData.members.some((m) => !distributed.has(m.userId));
+        const needsRotation = sessionRotationNeeded || memberRotationNeeded;
 
         const existingSenderKey = await getSenderKey(topic.id, currentUser.id);
         let mySenderKey: Uint8Array<ArrayBuffer>;
 
         if (!existingSenderKey || needsRotation) {
-          // Generate fresh sender key (covers both first-send and rotation)
+          // Generate fresh sender key (covers first-send, new-member rotation, and session rotation)
           mySenderKey = generateSenderKey();
-          await storeSenderKey(topic.id, currentUser.id, mySenderKey);
+          await storeSenderKey(topic.id, currentUser.id, mySenderKey, currentSessionId);
           senderKeyCache.current.set(currentUser.id, mySenderKey);
 
           const distributions: { recipientUserId: string; encryptedKey: string }[] = [];
+          const newWarnings: KeyChangedWarning[] = [];
+
           for (const m of distData.members) {
             try {
               const recipPubKey = await importPublicKey(m.identityPublicKey);
+
+              // TOFU check — warn if key changed since last contact
+              const pinResult = await checkAndUpdatePin(m.userId, recipPubKey);
+              if (pinResult.changed && pinResult.oldFingerprint) {
+                const alreadyWarned = keyChangedWarnings.some((w) => w.userId === m.userId);
+                if (!alreadyWarned) {
+                  const senderInfo = messages.find((msg) => msg.senderUserId === m.userId);
+                  newWarnings.push({
+                    userId: m.userId,
+                    displayName: senderInfo?.senderDisplayName ?? m.userId.slice(0, 8),
+                    oldFingerprint: pinResult.oldFingerprint,
+                    newFingerprint: pinResult.newFingerprint,
+                  });
+                }
+              }
+
               const encryptedKey = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, recipPubKey);
               distributions.push({ recipientUserId: m.userId, encryptedKey });
             } catch { /* skip member if key import fails */ }
           }
+
+          if (newWarnings.length > 0) {
+            setKeyChangedWarnings((prev) => [...prev, ...newWarnings]);
+          }
+
           // Encrypt for self if not already a member with a registered key
           if (!memberIds.has(currentUser.id)) {
             const encSelf = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, e2eeKeyPairRef.current.publicKey);
@@ -804,6 +845,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
             setE2eeReady(true);
           }}
           onSkip={() => { setE2eeSetupNeeded(false); }}
+        />
+      )}
+      {keyChangedWarnings.length > 0 && (
+        <E2EEKeyWarning
+          warnings={keyChangedWarnings}
+          onTrust={handleTrustKey}
         />
       )}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
