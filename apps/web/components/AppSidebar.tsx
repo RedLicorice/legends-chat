@@ -107,6 +107,9 @@ export function AppSidebar({
   const [pendingFlags, setPendingFlags] = useState<number | null>(null);
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [showAndroidInstall, setShowAndroidInstall] = useState(false);
+  const [installDismissed, setInstallDismissed] = useState(() =>
+    typeof localStorage !== "undefined" && localStorage.getItem("install-dismissed") === "true"
+  );
 
   const installState = useInstallPrompt();
 
@@ -306,32 +309,31 @@ export function AppSidebar({
                 <SupportSubmenu isStaff={isStaff} />
               </>
             )}
-            {installState.type === "native" && (
-              <button
-                type="button"
-                onClick={installState.install}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-              >
-                <Download className="h-4 w-4" /> Install app
-              </button>
-            )}
-            {installState.type === "ios" && (
-              <button
-                type="button"
-                onClick={() => setShowIosInstall(true)}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-              >
-                <Download className="h-4 w-4" /> Install app
-              </button>
-            )}
-            {installState.type === "android" && (
-              <button
-                type="button"
-                onClick={() => setShowAndroidInstall(true)}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-              >
-                <Download className="h-4 w-4" /> Install app
-              </button>
+            {!installDismissed && installState.type !== "unavailable" && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (installState.type === "native") installState.install();
+                    else if (installState.type === "ios") setShowIosInstall(true);
+                    else if (installState.type === "android") setShowAndroidInstall(true);
+                  }}
+                  className="flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+                >
+                  <Download className="h-4 w-4" /> Install app
+                </button>
+                <button
+                  type="button"
+                  title="Dismiss"
+                  onClick={() => {
+                    localStorage.setItem("install-dismissed", "true");
+                    setInstallDismissed(true);
+                  }}
+                  className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition shrink-0"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             )}
           </div>
         </div>

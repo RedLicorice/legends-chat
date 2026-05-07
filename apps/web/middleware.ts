@@ -17,6 +17,7 @@ const PUBLIC_PATHS = [
   "/api/user/email-link/verify",
   "/manifest.webmanifest",
   "/sw.js",
+  "/docs/whitepaper",
 ];
 
 export function middleware(req: NextRequest) {
