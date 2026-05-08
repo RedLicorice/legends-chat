@@ -292,6 +292,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
 
   useEffect(() => { localStorage.setItem(draftKey, draft); }, [draft, draftKey]);
   useEffect(() => { localStorage.setItem("legends-enter-sends", String(enterSends)); }, [enterSends]);
+  useEffect(() => { localStorage.setItem("lc-last-topic", topic.slug); }, [topic.slug]);
 
   // E2EE initialization
   useEffect(() => {

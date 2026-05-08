@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
+import { unstable_cache } from "next/cache";
 import "./globals.css";
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
@@ -9,12 +10,44 @@ import { PushSetup } from "@/components/PushSetup";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const [name, iconUrl] = await Promise.all([
-    getSetting(db, "community_name").catch(() => null),
-    getSetting(db, "pwa_icon_url").catch(() => null),
-  ]);
+const getCachedBranding = unstable_cache(
+  async () => {
+    const [name, iconUrl] = await Promise.all([
+      getSetting(db, "community_name").catch(() => null),
+      getSetting(db, "pwa_icon_url").catch(() => null),
+    ]);
+    return { name, iconUrl };
+  },
+  ["layout-branding"],
+  { revalidate: 300 },
+);
 
+const getCachedThemeColor = unstable_cache(
+  async () => getSetting(db, "theme_accent_color").catch(() => null),
+  ["layout-theme-color"],
+  { revalidate: 300 },
+);
+
+const getCachedThemes = unstable_cache(
+  async () => db.select().from(themes).orderBy(asc(themes.createdAt)).catch(() => []),
+  ["layout-themes"],
+  { revalidate: 300 },
+);
+
+const getCachedLayoutSettings = unstable_cache(
+  async () => {
+    const [defaultTheme, sidebarCompactDefault] = await Promise.all([
+      getSetting(db, "default_theme").catch(() => null),
+      getSetting(db, "sidebar_compact_default").catch(() => null),
+    ]);
+    return { defaultTheme, sidebarCompactDefault };
+  },
+  ["layout-settings"],
+  { revalidate: 300 },
+);
+
+export async function generateMetadata(): Promise<Metadata> {
+  const { name, iconUrl } = await getCachedBranding();
   const icon = iconUrl ?? "/icon-192.png";
 
   return {
@@ -33,7 +66,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export async function generateViewport(): Promise<Viewport> {
-  const accentColor = await getSetting(db, "theme_accent_color").catch(() => null);
+  const accentColor = await getCachedThemeColor();
   return {
     themeColor: accentColor ?? "#0b0d12",
     width: "device-width",
@@ -77,10 +110,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const userTheme = jar.get("lc_theme")?.value;
   const userSidebarCompact = jar.get("lc_sidebar_compact")?.value;
 
-  const [allThemes, defaultTheme, sidebarCompactDefault] = await Promise.all([
-    db.select().from(themes).orderBy(asc(themes.createdAt)).catch(() => []),
-    getSetting(db, "default_theme").catch(() => null),
-    getSetting(db, "sidebar_compact_default").catch(() => null),
+  const [allThemes, { defaultTheme, sidebarCompactDefault }] = await Promise.all([
+    getCachedThemes(),
+    getCachedLayoutSettings(),
   ]);
 
   const resolvedSidebarCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";

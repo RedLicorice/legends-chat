@@ -1,13 +1,13 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listTopicsForUser } from "@/lib/topics";
 import { HomeLayout } from "@/components/HomeLayout";
 import { db } from "@/lib/db";
 import { getAllSettings } from "@legends/db/system-settings";
+import { PWASplash } from "@/components/PWASplash";
 
-export const dynamic = "force-dynamic";
-
-export default async function HomePage() {
+async function HomeContent() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   const topics = await listTopicsForUser(user.id, user.role, user.permissions);
@@ -43,5 +43,13 @@ export default async function HomePage() {
       }}
       topics={topics}
     />
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<PWASplash />}>
+      <HomeContent />
+    </Suspense>
   );
 }

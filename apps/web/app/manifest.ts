@@ -1,20 +1,30 @@
 import type { MetadataRoute } from "next";
+import { unstable_cache } from "next/cache";
 import { asc } from "drizzle-orm";
 import { getSetting } from "@legends/db/system-settings";
 import { topics } from "@legends/db/schema";
 import { db } from "@/lib/db";
 
+const getCachedManifestData = unstable_cache(
+  async () => {
+    const [name, iconUrl, accentColor, topicList] = await Promise.all([
+      getSetting(db, "community_name").catch(() => null),
+      getSetting(db, "pwa_icon_url").catch(() => null),
+      getSetting(db, "theme_accent_color").catch(() => null),
+      db.select({ title: topics.title, slug: topics.slug, iconUrl: topics.iconUrl })
+        .from(topics)
+        .orderBy(asc(topics.sortOrder))
+        .limit(4)
+        .catch(() => []),
+    ]);
+    return { name, iconUrl, accentColor, topicList };
+  },
+  ["manifest-data"],
+  { revalidate: 300 },
+);
+
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
-  const [name, iconUrl, accentColor, topicList] = await Promise.all([
-    getSetting(db, "community_name").catch(() => null),
-    getSetting(db, "pwa_icon_url").catch(() => null),
-    getSetting(db, "theme_accent_color").catch(() => null),
-    db.select({ title: topics.title, slug: topics.slug, iconUrl: topics.iconUrl })
-      .from(topics)
-      .orderBy(asc(topics.sortOrder))
-      .limit(4)
-      .catch(() => []),
-  ]);
+  const { name, iconUrl, accentColor, topicList } = await getCachedManifestData();
 
   const themeColor = accentColor ?? "#7c5cff";
 
@@ -49,7 +59,7 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     short_name: name ? name.split(" ")[0] : "Legends",
     description: "Community chat",
     start_url: "/",
-    display: "fullscreen",
+    display: "standalone",
     orientation: "portrait",
     background_color: "#0b0d12",
     theme_color: themeColor,
