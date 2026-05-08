@@ -30,6 +30,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
   const [banReason, setBanReason] = useState("");
   const [banDuration, setBanDuration] = useState("");
   const [banning, setBanning] = useState(false);
+  const [banError, setBanError] = useState<string | null>(null);
 
   const search = useCallback((q: string) => {
     setLoading(true);
@@ -103,27 +104,28 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
     setBanning(true);
     try {
       const endpoint = banTarget.type === "mute" ? "/api/admin/mute" : "/api/admin/ban";
-      const body: Record<string, unknown> = {
-        userId: banTarget.id,
-        reason: banReason.trim() || null,
-      };
+      let durationSeconds: number | null = null;
       if (banDuration.trim()) {
         const hours = parseFloat(banDuration);
-        if (!isNaN(hours) && hours > 0) {
-          body.expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
-        }
+        if (!isNaN(hours) && hours > 0) durationSeconds = Math.round(hours * 3600);
       }
+      const body: Record<string, unknown> = {
+        userId: banTarget.id,
+        reason: banReason.trim() || "No reason provided",
+        durationSeconds,
+      };
       const res = await apiFetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("failed");
+      if (!res.ok) throw new Error(await res.text());
       setBanTarget(null);
       setBanReason("");
       setBanDuration("");
-    } catch {
-      // silent — user can retry
+      setBanError(null);
+    } catch (e) {
+      setBanError(e instanceof Error ? e.message : "Failed");
     } finally {
       setBanning(false);
     }
@@ -173,6 +175,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
               />
             </div>
           </div>
+          {banError && <p className="text-sm text-danger">{banError}</p>}
           <div className="flex gap-2">
             <button
               onClick={applyBan}
@@ -182,7 +185,7 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
               {banning ? "Applying…" : `Apply ${banTarget.type}`}
             </button>
             <button
-              onClick={() => { setBanTarget(null); setBanReason(""); setBanDuration(""); }}
+              onClick={() => { setBanTarget(null); setBanReason(""); setBanDuration(""); setBanError(null); }}
               className="rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-panel2"
             >
               Cancel
