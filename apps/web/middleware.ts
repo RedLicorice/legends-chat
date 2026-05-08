@@ -39,17 +39,18 @@ export function middleware(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const origin = publicOrigin(req);
-
-  // No access cookie. If we still have a refresh cookie, try to silently
-  // renew before falling back to the login page.
+  // No access cookie. If we still have a refresh cookie, return an HTML shell
+  // that refreshes the token client-side. This avoids the 302→/auth/refresh→302
+  // redirect chain that causes a white blank screen on PWA cold open.
   if (req.cookies.get(REFRESH_COOKIE)?.value) {
-    return NextResponse.redirect(
-      new URL(`/auth/refresh?to=${encodeURIComponent(pathname + search)}`, origin),
+    const to = encodeURIComponent(pathname + search);
+    return new NextResponse(
+      `<!DOCTYPE html><html style="background:#0b0d12"><head><meta charset="utf-8"></head><body style="background:#0b0d12;margin:0"><script>(function(){fetch('/api/auth/refresh',{method:'POST',credentials:'include'}).then(function(r){location.replace(r.ok?decodeURIComponent('${to}'):'/login');}).catch(function(){location.replace('/login');});})();</script></body></html>`,
+      { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
     );
   }
 
-  return NextResponse.redirect(new URL("/login", origin));
+  return NextResponse.redirect(new URL("/login", publicOrigin(req)));
 }
 
 export const config = {
