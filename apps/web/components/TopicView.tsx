@@ -118,6 +118,8 @@ interface TopicViewProps {
   showExpandSidebar?: boolean;
   onExpandSidebar?: () => void;
   onSidebarUpdate?: (update: SidebarTopicUpdate) => void;
+  canPost: boolean;
+  canReply: boolean;
 }
 
 function friendlyTime(date: Date | string): string {
@@ -159,7 +161,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate, canPost, canReply }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -222,7 +224,6 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const { symbols, refetch: refetchSymbols } = useSymbols();
 
   const canCreatePoll = currentUser.role !== "user";
-  const canPost = topic.postRoles.length === 0 || topic.postRoles.includes(currentUser.role);
   const canAttach = currentUser.permissions.includes(PERMISSIONS.CONTENT_ATTACHMENT);
   const canUploadGif = currentUser.permissions.includes(PERMISSIONS.CONTENT_GIF_UPLOAD);
   const canDeleteOwn = currentUser.permissions.includes(PERMISSIONS.MESSAGES_DELETE_OWN);

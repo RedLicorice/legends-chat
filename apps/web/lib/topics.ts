@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
-import { encryptionKeys, messages, topicMembers, topics } from "@legends/db/schema";
+import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { encryptionKeys, messages, topicMembers, topicPrincipalGrants, topics } from "@legends/db/schema";
 import { decryptMessage, unwrapKey } from "@legends/crypto";
+import { canPrincipal, stripMarkdownPreview, type GrantEffect, type TopicGrant } from "@legends/shared";
 import { db } from "./db";
 
 const keyDataCache = new Map<string, Uint8Array>();
@@ -33,17 +34,38 @@ export interface TopicListItem {
 }
 
 export async function listTopicsForUser(userId: string, userRole: string, userPermissions: Set<string>): Promise<TopicListItem[]> {
-  const tRows = await db
-    .select()
-    .from(topics)
-    .orderBy(desc(topics.isSticky), asc(topics.sortOrder), asc(topics.title));
+  const now = new Date();
+  const [tRows, grantRows] = await Promise.all([
+    db
+      .select()
+      .from(topics)
+      .orderBy(desc(topics.isSticky), asc(topics.sortOrder), asc(topics.title)),
+    db
+      .select({ topicId: topicPrincipalGrants.topicId, action: topicPrincipalGrants.action, effect: topicPrincipalGrants.effect })
+      .from(topicPrincipalGrants)
+      .where(
+        and(
+          eq(topicPrincipalGrants.principalType, "user"),
+          eq(topicPrincipalGrants.principalId, userId),
+          or(isNull(topicPrincipalGrants.expiresAt), gt(topicPrincipalGrants.expiresAt, now)),
+        ),
+      ),
+  ]);
+
+  const grantsByTopic = new Map<string, TopicGrant[]>();
+  for (const g of grantRows) {
+    const arr = grantsByTopic.get(g.topicId) ?? [];
+    arr.push({ action: g.action, effect: g.effect as GrantEffect });
+    grantsByTopic.set(g.topicId, arr);
+  }
 
   const out: TopicListItem[] = [];
   for (const t of tRows) {
+    const grants = grantsByTopic.get(t.id) ?? [];
     const viewRoles = (t.viewRoles as string[] | null) ?? [];
-    if (viewRoles.length > 0 && userRole !== "admin" && !viewRoles.includes(userRole)) continue;
     const readRoles = (t.readRoles as string[] | null) ?? [];
-    if (readRoles.length > 0 && userRole !== "admin" && !readRoles.includes(userRole)) continue;
+    if (!canPrincipal(grants, viewRoles, userRole, "view")) continue;
+    if (!canPrincipal(grants, readRoles, userRole, "read")) continue;
     const [member] = await db
       .select()
       .from(topicMembers)
@@ -85,16 +107,16 @@ export async function listTopicsForUser(userId: string, userRole: string, userPe
             const parsed = JSON.parse(raw) as { v?: number; t?: string; a?: { type: string }[] };
             if (parsed.v === 1) {
               if (parsed.t?.trim()) {
-                preview = parsed.t.slice(0, 120);
+                preview = stripMarkdownPreview(parsed.t, t.isFeed);
               } else if (parsed.a?.length) {
                 const type = parsed.a[0]?.type ?? "attachment";
                 preview = type === "image" ? "📷 Image" : "📎 Attachment";
               }
             } else {
-              preview = raw.slice(0, 120);
+              preview = stripMarkdownPreview(raw, t.isFeed);
             }
           } catch {
-            preview = raw.slice(0, 120);
+            preview = stripMarkdownPreview(raw, t.isFeed);
           }
         } catch {
           preview = "(unavailable)";

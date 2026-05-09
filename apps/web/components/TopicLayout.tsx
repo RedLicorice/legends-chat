@@ -22,16 +22,18 @@ interface Props {
   };
   topics: TopicItem[];
   currentSlug: string;
-  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl: string | null; bannerUrl: string | null; description: string | null; hasPassword: boolean; passwordVersion: number; passwordReentryDays: number };
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[]; replyRoles: string[]; iconUrl: string | null; bannerUrl: string | null; description: string | null; hasPassword: boolean; passwordVersion: number; passwordReentryDays: number };
   mute: { reason: string; expiresAt: string | null } | null;
   hasPasskey: boolean;
   giphyEnabled?: boolean;
   communityName?: string | null;
   communityIconUrl?: string | null;
   highlightMessageId?: string;
+  canPost: boolean;
+  canReply: boolean;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId }: Props) {
+export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId, canPost, canReply }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
@@ -126,6 +128,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
                 topic={t}
                 compact
                 connectionStatus={currentSlug === t.slug ? (connected ? "connected" : "connecting") : undefined}
+                canAdmin={user.permissions.includes("admin.config")}
               />
             </div>
           ))}
@@ -171,6 +174,8 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
               showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
               onExpandSidebar={expand}
               onSidebarUpdate={handleSidebarUpdate}
+              canPost={canPost}
+              canReply={canReply}
             />
           )}
         </TopicPasswordGate>
