@@ -37,3 +37,8 @@
 
 - Implement threaded comments on feed posts with per-post expand/collapse
 - Use MarkdownContent for thread reply rendering
+
+### Bug Fixes
+
+- Fix autodelete FK violation: delete polls before messages to avoid constraint error
+- Fix React error #310: middleware now redirects RSC requests instead of returning HTML shell for expired tokens
