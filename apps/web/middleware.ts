@@ -42,7 +42,17 @@ export function middleware(req: NextRequest) {
   // No access cookie. If we still have a refresh cookie, return an HTML shell
   // that refreshes the token client-side. This avoids the 302→/auth/refresh→302
   // redirect chain that causes a white blank screen on PWA cold open.
+  // RSC requests (Next.js client router navigations) must NOT receive HTML —
+  // the RSC parser will choke and throw React error #310. Redirect those to
+  // /login so the full-page navigation restores a coherent HTML context.
   if (req.cookies.get(REFRESH_COOKIE)?.value) {
+    const isRsc =
+      req.headers.get("RSC") === "1" ||
+      req.headers.has("Next-Router-State-Tree") ||
+      req.headers.has("Next-Router-Prefetch");
+    if (isRsc) {
+      return NextResponse.redirect(new URL("/login", publicOrigin(req)));
+    }
     const to = encodeURIComponent(pathname + search);
     return new NextResponse(
       `<!DOCTYPE html><html style="background:#0b0d12"><head><meta charset="utf-8"></head><body style="background:#0b0d12;margin:0"><script>(function(){fetch('/api/auth/refresh',{method:'POST',credentials:'include'}).then(function(r){location.replace(r.ok?decodeURIComponent('${to}'):'/login');}).catch(function(){location.replace('/login');});})();</script></body></html>`,
