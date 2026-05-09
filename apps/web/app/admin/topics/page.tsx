@@ -8,7 +8,9 @@ import { topics } from "@legends/db/schema";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminTopicsPage() {
+export default async function AdminTopicsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const sp = await (searchParams ?? Promise.resolve({} as Record<string, string | string[] | undefined>));
+  const selectId = typeof sp["select"] === "string" ? sp["select"] : undefined;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (!user.permissions.has(PERMISSIONS.ADMIN_CONFIG)) redirect("/");
@@ -19,7 +21,7 @@ export default async function AdminTopicsPage() {
     <main className="flex-1 p-4 sm:p-8">
         <h1 className="mb-2 text-2xl font-semibold">Topics</h1>
         <p className="mb-6 text-sm text-muted">Configure feed mode, home topic, and post permissions.</p>
-        <AdminTopicsForm topics={topicList.map((t) => ({
+        <AdminTopicsForm initialSelected={selectId} topics={topicList.map((t) => ({
           id: t.id,
           slug: t.slug,
           title: t.title,
@@ -37,6 +39,7 @@ export default async function AdminTopicsPage() {
           viewRoles: (t.viewRoles as string[] | null) ?? [],
           postRoles: (t.postRoles as string[] | null) ?? [],
           readRoles: (t.readRoles as string[] | null) ?? [],
+          replyRoles: (t.replyRoles as string[] | null) ?? [],
           autoDeleteMode: t.autoDeleteMode,
           autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
           autoDeleteMaxMessages: t.autoDeleteMaxMessages,

@@ -6,18 +6,20 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 
-async function syncTopicPermissions(slug: string, viewRoles: string[], readRoles: string[], postRoles: string[]) {
+async function syncTopicPermissions(slug: string, viewRoles: string[], readRoles: string[], postRoles: string[], replyRoles: string[]) {
   await db.delete(rolesPermissions).where(
     inArray(rolesPermissions.permission, [
       `topic.${slug}.view`,
       `topic.${slug}.read`,
       `topic.${slug}.post`,
+      `topic.${slug}.reply`,
     ]),
   );
   const entries: { role: string; permission: string }[] = [
     ...viewRoles.map((r) => ({ role: r, permission: `topic.${slug}.view` })),
     ...readRoles.map((r) => ({ role: r, permission: `topic.${slug}.read` })),
     ...postRoles.map((r) => ({ role: r, permission: `topic.${slug}.post` })),
+    ...replyRoles.map((r) => ({ role: r, permission: `topic.${slug}.reply` })),
   ];
   if (entries.length > 0) {
     await db.insert(rolesPermissions).values(entries).onConflictDoNothing();
@@ -44,6 +46,7 @@ export async function PATCH(
     viewRoles?: string[];
     postRoles?: string[];
     readRoles?: string[];
+    replyRoles?: string[];
     title?: string;
     slug?: string;
     description?: string | null;
@@ -82,6 +85,7 @@ export async function PATCH(
   if (Array.isArray(body.viewRoles)) patch.viewRoles = body.viewRoles;
   if (Array.isArray(body.postRoles)) patch.postRoles = body.postRoles;
   if (Array.isArray(body.readRoles)) patch.readRoles = body.readRoles;
+  if (Array.isArray(body.replyRoles)) patch.replyRoles = body.replyRoles;
   if (typeof body.title === "string" && body.title.trim()) patch.title = body.title.trim();
   if (typeof body.slug === "string" && body.slug.trim()) {
     const newSlug = body.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
@@ -95,6 +99,7 @@ export async function PATCH(
             `topic.${existing.slug}.view`,
             `topic.${existing.slug}.read`,
             `topic.${existing.slug}.post`,
+            `topic.${existing.slug}.reply`,
           ]),
         );
       if (oldPerms.length > 0) {
@@ -103,6 +108,7 @@ export async function PATCH(
             `topic.${existing.slug}.view`,
             `topic.${existing.slug}.read`,
             `topic.${existing.slug}.post`,
+            `topic.${existing.slug}.reply`,
           ]),
         );
         await db.insert(rolesPermissions).values(
@@ -152,7 +158,7 @@ export async function PATCH(
   if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Sync rolesPermissions whenever roles change (or slug changes which we already handled)
-  const rolesChanged = "viewRoles" in patch || "postRoles" in patch || "readRoles" in patch;
+  const rolesChanged = "viewRoles" in patch || "postRoles" in patch || "readRoles" in patch || "replyRoles" in patch;
   if (rolesChanged) {
     const effectiveSlug = (patch.slug as string | undefined) ?? existing.slug;
     await syncTopicPermissions(
@@ -160,6 +166,7 @@ export async function PATCH(
       (updated.viewRoles as string[] | null) ?? [],
       (updated.readRoles as string[] | null) ?? [],
       (updated.postRoles as string[] | null) ?? [],
+      (updated.replyRoles as string[] | null) ?? [],
     );
   }
 
@@ -184,6 +191,7 @@ export async function DELETE(
         `topic.${existing.slug}.view`,
         `topic.${existing.slug}.read`,
         `topic.${existing.slug}.post`,
+        `topic.${existing.slug}.reply`,
       ]),
     );
   }
