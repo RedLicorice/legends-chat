@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { encryptionKeys, messages, topics, users } from "@legends/db/schema";
 import { decryptMessage, unwrapKey } from "@legends/crypto";
@@ -28,6 +28,87 @@ export async function GET(
   const { id: topicId } = await params;
   const { searchParams } = new URL(req.url);
   const replyTo = searchParams.get("replyTo");
+  const hashtagFilter = searchParams.get("hashtag");
+
+  // --- Hashtag filter branch ---
+  if (hashtagFilter !== null) {
+    if (!/^[#$][a-zA-Z]\w*$/.test(hashtagFilter)) {
+      return NextResponse.json({ error: "invalid hashtag" }, { status: 400 });
+    }
+
+    const [htTopic] = await db
+      .select({ isE2ee: topics.isE2ee })
+      .from(topics)
+      .where(eq(topics.id, topicId))
+      .limit(1);
+    if (!htTopic) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    // E2EE topics: return empty — we cannot surface plaintext
+    if (htTopic.isE2ee) return NextResponse.json([]);
+
+    const htRows = await db
+      .select({
+        id: messages.id,
+        topicId: messages.topicId,
+        senderUserId: messages.senderUserId,
+        botId: messages.botId,
+        replyToMessageId: messages.replyToMessageId,
+        contentCiphertext: messages.contentCiphertext,
+        contentNonce: messages.contentNonce,
+        keyId: messages.keyId,
+        createdAt: messages.createdAt,
+        editedAt: messages.editedAt,
+        senderDisplayName: users.displayName,
+        senderAvatarUrl: users.avatarUrl,
+        senderIsAnon: users.isAnon,
+      })
+      .from(messages)
+      .leftJoin(users, eq(messages.senderUserId, users.id))
+      .where(
+        and(
+          eq(messages.topicId, topicId),
+          isNull(messages.deletedAt),
+          sql`${messages.hashtags} @> ARRAY[${hashtagFilter}]::text[]`,
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(50);
+
+    const aad = new TextEncoder().encode(topicId);
+    const htOut = [];
+    for (const r of htRows) {
+      let text = "";
+      try {
+        const key = await getKey(r.keyId);
+        const raw = decryptMessage(key, r.contentCiphertext, r.contentNonce, aad);
+        try {
+          const parsed = JSON.parse(raw) as { v?: number; t?: string };
+          text = parsed.v === 1 && typeof parsed.t === "string" ? parsed.t : raw;
+        } catch {
+          text = raw;
+        }
+      } catch {
+        text = "(unavailable)";
+      }
+      htOut.push({
+        id: r.id.toString(),
+        topicId: r.topicId,
+        senderUserId: r.senderUserId,
+        senderDisplayName: r.senderDisplayName ?? null,
+        senderAvatarUrl: r.senderAvatarUrl ?? null,
+        senderIsAnon: r.senderIsAnon ?? false,
+        botId: r.botId,
+        replyToMessageId: r.replyToMessageId?.toString() ?? null,
+        text,
+        attachments: [],
+        createdAt: r.createdAt,
+        editedAt: r.editedAt,
+      });
+    }
+    return NextResponse.json(htOut);
+  }
+  // --- End hashtag filter branch ---
+
   if (!replyTo) return NextResponse.json({ error: "replyTo required" }, { status: 400 });
 
   const [topic] = await db.select({ isE2ee: topics.isE2ee }).from(topics).where(eq(topics.id, topicId)).limit(1);
