@@ -1,6 +1,6 @@
-import { and, eq, isNull, lt, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
 import type { Server } from "socket.io";
-import { messages, topics } from "@legends/db/schema";
+import { messages, polls, topics } from "@legends/db/schema";
 import { WS_EVENTS } from "@legends/shared";
 import { db } from "./db";
 
@@ -14,9 +14,16 @@ async function purgeAgeMode(io: Server): Promise<void> {
   for (const t of rows) {
     if (!t.autoDeleteAgeSeconds || t.autoDeleteAgeSeconds <= 0) continue;
     const cutoff = new Date(Date.now() - t.autoDeleteAgeSeconds * 1000);
+    const toDelete = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.topicId, t.id), lt(messages.createdAt, cutoff)));
+    if (toDelete.length === 0) continue;
+    const deleteIds = toDelete.map((r) => r.id);
+    await db.delete(polls).where(inArray(polls.messageId, deleteIds));
     const deleted = await db
       .delete(messages)
-      .where(and(eq(messages.topicId, t.id), lt(messages.createdAt, cutoff)))
+      .where(inArray(messages.id, deleteIds))
       .returning({ id: messages.id });
     if (deleted.length > 0) {
       console.log(`[autodelete] age: removed ${deleted.length} messages from topic ${t.slug}`);
@@ -38,9 +45,16 @@ export async function purgeCountModeForTopic(io: Server, topicId: string, max: n
     .limit(max);
   if (keepRows.length < max) return;
   const keepIds = keepRows.map((r) => r.id);
+  const toDelete = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.topicId, topicId), notInArray(messages.id, keepIds)));
+  if (toDelete.length === 0) return;
+  const deleteIds = toDelete.map((r) => r.id);
+  await db.delete(polls).where(inArray(polls.messageId, deleteIds));
   const deleted = await db
     .delete(messages)
-    .where(and(eq(messages.topicId, topicId), notInArray(messages.id, keepIds)))
+    .where(inArray(messages.id, deleteIds))
     .returning({ id: messages.id });
   for (const d of deleted) {
     io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_DELETE, { id: d.id.toString(), topicId });
