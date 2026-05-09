@@ -10,12 +10,4 @@ CREATE TABLE IF NOT EXISTS "symbols" (
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 
-UPDATE "messages"
-SET "hashtags" = ARRAY(
-  SELECT DISTINCT lower(m[1])
-  FROM regexp_matches("search_text", '(#[a-zA-Z]\w*)', 'g') AS m
-)
-WHERE "search_text" IS NOT NULL
-  AND "search_text" <> ''
-  AND "deleted_at" IS NULL
-  AND "search_text" ~ '#[a-zA-Z]';
+-- No backfill: messages store encrypted content; search_text is not a raw-text column.
