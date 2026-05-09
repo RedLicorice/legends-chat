@@ -7,6 +7,7 @@ import { TopicListItem } from "@/components/TopicListItem";
 import { TopicView } from "@/components/TopicView";
 import { P2PView } from "@/components/P2PView";
 import { PasskeyBanner } from "@/components/PasskeyBanner";
+import { TopicPasswordGate } from "@/components/TopicPasswordGate";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
 import type { TopicListItem as TopicItem } from "@/lib/topics";
 
@@ -21,7 +22,7 @@ interface Props {
   };
   topics: TopicItem[];
   currentSlug: string;
-  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl: string | null; bannerUrl: string | null; description: string | null };
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl: string | null; bannerUrl: string | null; description: string | null; hasPassword: boolean; passwordVersion: number; passwordReentryDays: number };
   mute: { reason: string; expiresAt: string | null } | null;
   hasPasskey: boolean;
   giphyEnabled?: boolean;
@@ -130,35 +131,45 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
       </AppSidebar>
       <main className="relative flex flex-1 min-w-0 flex-col overflow-x-hidden">
         {!hasPasskey && <PasskeyBanner />}
-        {topic.isP2p ? (
-          <P2PView
-            topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, p2pFallbackE2ee: topic.p2pFallbackE2ee }}
-            currentUser={{ id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, role: user.role }}
-            onMenuOpen={() => setSidebarOpen(true)}
-            showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
-            onExpandSidebar={expand}
-          />
-        ) : (
-          <TopicView
-            topic={topic}
-            currentUser={{
-              id: user.id,
-              displayName: user.displayName,
-              avatarUrl: user.avatarUrl,
-              role: user.role,
-              presenceOptOut: user.presenceOptOut ?? false,
-              permissions: user.permissions,
-            }}
-            mute={mute}
-            giphyEnabled={giphyEnabled}
-            highlightMessageId={highlightMessageId}
-            onMenuOpen={() => setSidebarOpen(true)}
-            onConnectionChange={setConnected}
-            showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
-            onExpandSidebar={expand}
-            onSidebarUpdate={handleSidebarUpdate}
-          />
-        )}
+        <TopicPasswordGate
+          topicId={topic.id}
+          topicTitle={topic.title}
+          topicIconUrl={topic.iconUrl}
+          hasPassword={topic.hasPassword}
+          passwordVersion={topic.passwordVersion}
+          passwordReentryDays={topic.passwordReentryDays}
+          isAdmin={user.role === "admin"}
+        >
+          {topic.isP2p ? (
+            <P2PView
+              topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, p2pFallbackE2ee: topic.p2pFallbackE2ee }}
+              currentUser={{ id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, role: user.role }}
+              onMenuOpen={() => setSidebarOpen(true)}
+              showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
+              onExpandSidebar={expand}
+            />
+          ) : (
+            <TopicView
+              topic={topic}
+              currentUser={{
+                id: user.id,
+                displayName: user.displayName,
+                avatarUrl: user.avatarUrl,
+                role: user.role,
+                presenceOptOut: user.presenceOptOut ?? false,
+                permissions: user.permissions,
+              }}
+              mute={mute}
+              giphyEnabled={giphyEnabled}
+              highlightMessageId={highlightMessageId}
+              onMenuOpen={() => setSidebarOpen(true)}
+              onConnectionChange={setConnected}
+              showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
+              onExpandSidebar={expand}
+              onSidebarUpdate={handleSidebarUpdate}
+            />
+          )}
+        </TopicPasswordGate>
       </main>
     </div>
   );
