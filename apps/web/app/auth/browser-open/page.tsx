@@ -24,7 +24,12 @@ export default function BrowserOpenPage() {
       const intent = `intent://${host}${path}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${fallback};end`;
       window.location.href = intent;
     } else if (isIos) {
-      setPlatform("ios");
+      // Already in a real browser (Safari has "Safari/" in UA; Telegram WebView does not).
+      if (/Safari\//i.test(ua)) {
+        window.location.replace(verifyUrl);
+      } else {
+        setPlatform("ios");
+      }
     } else {
       // Desktop or unknown — just redirect inline.
       window.location.replace(verifyUrl);
