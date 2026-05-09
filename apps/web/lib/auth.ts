@@ -8,10 +8,11 @@ import {
   accessTokenPayloadSchema,
   refreshTokenPayloadSchema,
   REDIS_KEYS,
+  resolvePermissions,
   type AccessTokenPayload,
   type Role,
 } from "@legends/shared";
-import { sessions, userBans, userMutes, users, rolesPermissions } from "@legends/db/schema";
+import { sessions, userBans, userMutes, users, rolesPermissions, principalPermissionOverrides } from "@legends/db/schema";
 import { db } from "./db";
 import { redis } from "./redis";
 
@@ -114,7 +115,7 @@ export async function refreshAccessCookie(): Promise<boolean> {
   if (await isUserBanned(payload.sub)) return false;
 
   const [u] = await db
-    .select({ id: users.id, role: users.role, isAnon: users.isAnon, anonExpiresAt: users.anonExpiresAt })
+    .select({ id: users.id, role: users.role, isAnon: users.isAnon, anonExpiresAt: users.anonExpiresAt, roleExpiresAt: users.roleExpiresAt, roleFallback: users.roleFallback })
     .from(users)
     .where(eq(users.id, payload.sub))
     .limit(1);
@@ -126,8 +127,10 @@ export async function refreshAccessCookie(): Promise<boolean> {
     await db.update(users).set({ anonExpiresAt: newExpiry }).where(eq(users.id, u.id));
   }
 
+  const effectiveRole = await checkAndRevertExpiredRole(u);
+
   const newJti = randomUUID();
-  const accessJwt = await new SignJWT({ sub: u.id, role: u.role, jti: newJti })
+  const accessJwt = await new SignJWT({ sub: u.id, role: effectiveRole, jti: newJti })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${ACCESS_TTL}s`)
@@ -142,6 +145,13 @@ export async function refreshAccessCookie(): Promise<boolean> {
     maxAge: ACCESS_TTL,
   });
   return true;
+}
+
+async function checkAndRevertExpiredRole(u: { id: string; role: string; roleExpiresAt: Date | null; roleFallback: string | null }): Promise<string> {
+  if (!u.roleExpiresAt || u.roleExpiresAt > new Date()) return u.role;
+  const fallback = u.roleFallback ?? "user";
+  await db.update(users).set({ role: fallback, roleExpiresAt: null, roleFallback: null }).where(eq(users.id, u.id));
+  return fallback;
 }
 
 export interface CurrentUser {
@@ -174,15 +184,28 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const [u] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
   if (!u) return null;
 
-  const perms = await db
-    .select({ permission: rolesPermissions.permission })
-    .from(rolesPermissions)
-    .where(eq(rolesPermissions.role, u.role));
+  const effectiveRole = await checkAndRevertExpiredRole(u);
+
+  const now = new Date();
+  const [perms, overrideRows] = await Promise.all([
+    db.select({ permission: rolesPermissions.permission })
+      .from(rolesPermissions)
+      .where(eq(rolesPermissions.role, effectiveRole)),
+    db.select({ permission: principalPermissionOverrides.permission, effect: principalPermissionOverrides.effect })
+      .from(principalPermissionOverrides)
+      .where(
+        and(
+          eq(principalPermissionOverrides.principalType, "user"),
+          eq(principalPermissionOverrides.principalId, u.id),
+          or(isNull(principalPermissionOverrides.expiresAt), gt(principalPermissionOverrides.expiresAt, now)),
+        ),
+      ),
+  ]);
 
   return {
     id: u.id,
-    role: u.role,
-    permissions: new Set(perms.map((p) => p.permission)),
+    role: effectiveRole as Role,
+    permissions: resolvePermissions(perms.map((p) => p.permission), overrideRows as { permission: string; effect: "allow" | "deny" }[]),
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
     bannerUrl: u.bannerUrl ?? null,
