@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
-  BookOpen, ChevronDown,
+  BookOpen, ChevronDown, Hash,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -457,6 +457,7 @@ export function AdminNav({ permissions }: { permissions: string[] }) {
           <p className="mt-3 mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted">
             Config
           </p>
+          <NavLink href="/admin/symbols" icon={<Hash className="h-4 w-4" />} label="Symbols" />
           <NavLink href="/admin/settings" icon={<Settings className="h-4 w-4" />} label="Settings" />
           <NavLink href="/admin/themes" icon={<Palette className="h-4 w-4" />} label="Themes" />
         </>
