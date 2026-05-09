@@ -40,6 +40,9 @@ export default async function AdminTopicsPage() {
           autoDeleteMode: t.autoDeleteMode,
           autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
           autoDeleteMaxMessages: t.autoDeleteMaxMessages,
+          passwordProtected: t.passwordHash != null,
+          passwordVersion: t.passwordVersion,
+          passwordReentryDays: t.passwordReentryDays,
         }))} />
     </main>
   );
