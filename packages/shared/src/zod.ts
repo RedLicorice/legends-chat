@@ -35,6 +35,10 @@ export type MessageContent = z.infer<typeof messageContentSchema>;
 export const sendMessageSchema = z.object({
   topicId: z.string().uuid(),
   content: messageContentSchema,
+  hashtags: z
+    .array(z.string().regex(/^[#$][a-zA-Z]\w*$/))
+    .max(20)
+    .optional(),
 });
 
 export const reactionToggleSchema = z.object({

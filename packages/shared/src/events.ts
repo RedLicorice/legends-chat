@@ -14,6 +14,8 @@ export const WS_EVENTS = {
   POLL_UPDATED: "poll:updated",
   NOTIFICATION_NEW: "notification:new",
   SIDEBAR_UPDATE: "sidebar:update",
+  HASHTAG_CLOUD_UPDATE: "hashtag:cloud:update",
+  SYMBOLS_UPDATE: "symbols:update",
 
   // client -> server
   MESSAGE_SEND: "message:send",
@@ -59,6 +61,7 @@ export const REDIS_CHANNELS = {
   BOT_MESSAGE_DELETE: "legends:bot:message:delete",
   BOT_NEW_MEMBER: "legends:bot:new_member",
   NOTIFICATION_BROADCAST: "legends:notification:broadcast",
+  SYMBOLS_UPDATE: "legends:symbols:update",
 } as const;
 
 export const REDIS_KEYS = {
