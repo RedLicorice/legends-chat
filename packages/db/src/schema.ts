@@ -54,6 +54,8 @@ export const users = pgTable(
     presenceOptOut: boolean("presence_opt_out").notNull().default(false),
     walletAddress: text("wallet_address"),
     bannerUrl: text("banner_url"),
+    roleExpiresAt: timestamp("role_expires_at", { withTimezone: true }),
+    roleFallback: text("role_fallback"),
   },
   (t) => ({
     telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId).where(sql`${t.telegramUserId} IS NOT NULL`),
@@ -200,6 +202,7 @@ export const topics = pgTable(
     passwordHash: text("password_hash"),
     passwordVersion: integer("password_version").notNull().default(0),
     passwordReentryDays: integer("password_reentry_days").notNull().default(7),
+    replyRoles: jsonb("reply_roles").$type<string[]>().default([]),
   },
   (t) => ({
     slugIdx: uniqueIndex("topics_slug_idx").on(t.slug),
@@ -299,6 +302,9 @@ export const bots = pgTable("bots", {
   webhookUrl: text("webhook_url"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  role: text("role").notNull().default("bot"),
+  roleExpiresAt: timestamp("role_expires_at", { withTimezone: true }),
+  roleFallback: text("role_fallback"),
 });
 
 export const topicBots = pgTable(
@@ -315,6 +321,45 @@ export const topicBots = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.botId, t.topicId] }),
     topicIdx: index("topic_bots_topic_idx").on(t.topicId),
+  }),
+);
+
+export const topicPrincipalGrants = pgTable(
+  "topic_principal_grants",
+  {
+    topicId: uuid("topic_id")
+      .notNull()
+      .references(() => topics.id, { onDelete: "cascade" }),
+    principalType: text("principal_type").notNull(),
+    principalId: uuid("principal_id").notNull(),
+    action: text("action").notNull(),
+    effect: text("effect").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.topicId, t.principalType, t.principalId, t.action] }),
+    topicIdx: index("topic_principal_grants_topic_idx").on(t.topicId),
+    principalIdx: index("topic_principal_grants_principal_idx").on(t.principalType, t.principalId),
+  }),
+);
+
+export const principalPermissionOverrides = pgTable(
+  "principal_permission_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    principalType: text("principal_type").notNull(),
+    principalId: uuid("principal_id").notNull(),
+    permission: text("permission").notNull(),
+    effect: text("effect").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniq: uniqueIndex("principal_permission_overrides_uniq").on(t.principalType, t.principalId, t.permission),
+    principalIdx: index("principal_permission_overrides_principal_idx").on(t.principalType, t.principalId),
   }),
 );
 
