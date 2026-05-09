@@ -25,6 +25,9 @@ import { E2EEKeyWarning } from "@/components/E2EEKeyWarning";
 import type {
   E2EEPayload,
 } from "@/lib/e2ee";
+import { HashtagClickContext } from "@/contexts/HashtagClickContext";
+import { useSymbols } from "@/contexts/SymbolsContext";
+import { useTopicHashtags } from "@/hooks/useTopicHashtags";
 
 interface Attachment {
   type: "image" | "gif" | "file";
@@ -180,6 +183,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [showTopicInfo, setShowTopicInfo] = useState(false);
+  const [hashtagFilter, setHashtagFilter] = useState<string | null>(null);
+  const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
+  const [filteredLoading, setFilteredLoading] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
   const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
   const [keyChangedWarnings, setKeyChangedWarnings] = useState<KeyChangedWarning[]>([]);
@@ -209,6 +215,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   const isSelecting = selectedIds.size > 0;
 
   const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
+
+  const { tags: topicTags } = useTopicHashtags(topic.id, socketRef.current);
+  const { symbols, refetch: refetchSymbols } = useSymbols();
 
   const canCreatePoll = currentUser.role !== "user";
   const canPost = topic.postRoles.length === 0 || topic.postRoles.includes(currentUser.role);
@@ -412,11 +421,15 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       if (!active) return;
       onSidebarUpdate?.(update);
     });
+    socket.on(WS_EVENTS.SYMBOLS_UPDATE, () => {
+      refetchSymbols();
+    });
 
     return () => {
       active = false;
       setSocket(null);
       socket.emit(WS_EVENTS.TOPIC_LEAVE, topic.id);
+      socket.off(WS_EVENTS.SYMBOLS_UPDATE);
       socket.disconnect();
     };
   }, [topic.id, wsUrl]);
@@ -465,6 +478,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       .catch(() => {})
       .finally(() => setMembersLoading(false));
   }, [topic.id]);
+
+  useEffect(() => {
+    if (!hashtagFilter) {
+      setFilteredMessages([]);
+      return;
+    }
+    setFilteredLoading(true);
+    fetch(`/api/topics/${topic.id}/messages?hashtag=${encodeURIComponent(hashtagFilter)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: Message[]) => setFilteredMessages(data))
+      .catch(() => setFilteredMessages([]))
+      .finally(() => setFilteredLoading(false));
+  }, [hashtagFilter, topic.id]);
 
   const handleTrustKey = useCallback((userId: string, newFingerprint: string) => {
     void (async () => {
@@ -812,6 +838,22 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       }
     }
 
+    const hashtags: string[] = [];
+    const hashRegex = /#([a-zA-Z]\w*)/g;
+    const symRegex = /\$([a-zA-Z]\w*)/g;
+    let m: RegExpExecArray | null;
+    while ((m = hashRegex.exec(text)) !== null) {
+      const tag = `#${m[1]!.toLowerCase()}`;
+      if (!hashtags.includes(tag)) hashtags.push(tag);
+    }
+    while ((m = symRegex.exec(text)) !== null) {
+      const sym = m[1]!.toLowerCase();
+      if (symbols.some((s) => s.symbol === sym)) {
+        const tag = `$${sym}`;
+        if (!hashtags.includes(tag)) hashtags.push(tag);
+      }
+    }
+
     socketRef.current?.emit(
       WS_EVENTS.MESSAGE_SEND,
       {
@@ -820,6 +862,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
           text: finalText,
           attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
           replyToMessageId: replyingTo?.id,
+          hashtags: hashtags.length > 0 ? hashtags.slice(0, 20) : undefined,
         },
       },
       (res: { ok: boolean; error?: string }) => {
@@ -841,6 +884,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
   }, [members, membersSearch]);
 
   return (
+    <HashtagClickContext.Provider value={{ onHashtagClick: setHashtagFilter }}>
     <>
       {e2eeSetupNeeded && (
         <E2EESetup
@@ -859,8 +903,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       {showTopicInfo && (
         <TopicInfoModal
-          topic={{ title: topic.title, iconUrl: topic.iconUrl ?? null, bannerUrl: topic.bannerUrl ?? null, description: topic.description ?? null }}
+          topic={{
+            id: topic.id,
+            title: topic.title,
+            iconUrl: topic.iconUrl ?? null,
+            bannerUrl: topic.bannerUrl ?? null,
+            description: topic.description ?? null,
+          }}
+          socket={socketRef.current}
           onClose={() => setShowTopicInfo(false)}
+          onHashtagFilter={(tag) => {
+            setShowTopicInfo(false);
+            setHashtagFilter(tag);
+          }}
         />
       )}
 
@@ -914,6 +969,22 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         </button>
       </header>
 
+      {hashtagFilter && (
+        <div className="flex items-center gap-2 border-b border-border bg-panel2 px-4 py-2 text-sm">
+          <span className="text-muted">Filtered:</span>
+          <span className={hashtagFilter.startsWith("$") ? "font-mono text-amber-400 font-semibold" : "font-mono text-accent"}>
+            {hashtagFilter}
+          </span>
+          <button
+            type="button"
+            className="ml-auto rounded p-1 hover:bg-border transition"
+            onClick={() => setHashtagFilter(null)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       <AnimatePresence>
         {showUsers && (
           <motion.div
@@ -961,6 +1032,115 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       </AnimatePresence>
 
       <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+      {hashtagFilter ? (
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
+          {hashtagFilter.startsWith("$") && (() => {
+            const sym = symbols.find((s) => s.symbol === hashtagFilter.slice(1));
+            if (!sym) return null;
+            return (
+              <div className="mx-4 mt-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  {sym.linkedUserAvatarUrl ? (
+                    <img src={sym.linkedUserAvatarUrl} alt="" className="h-10 w-10 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <div className="h-10 w-10 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                      <span className="text-amber-400 font-bold text-sm">{sym.symbol.slice(0, 1).toUpperCase()}</span>
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-amber-400 font-semibold">${sym.symbol}</span>
+                      <span className="font-medium text-text">{sym.name}</span>
+                    </div>
+                    {sym.description && <p className="text-xs text-muted mt-0.5">{sym.description}</p>}
+                    {sym.linkedUserDisplayName && (
+                      <p className="text-xs text-muted mt-0.5">@{sym.linkedUserDisplayName}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
+            {filteredLoading && <p className="text-sm text-muted text-center py-8">Loading…</p>}
+            {!filteredLoading && filteredMessages.length === 0 && (
+              <p className="text-sm text-muted text-center py-8">No messages with {hashtagFilter} yet.</p>
+            )}
+            {filteredMessages.map((msg) => {
+              const mine = msg.senderUserId === currentUser.id;
+              const perEmoji = reactionsByMessage.get(msg.id);
+              return (
+                <div key={msg.id} className={cn("group flex gap-2 rounded-lg", mine ? "flex-row-reverse" : "flex-row")}>
+                  {!mine ? (
+                    <div className="mt-1 w-8 shrink-0 flex items-start justify-center">
+                      <button type="button" onClick={() => msg.senderUserId && setViewingUserId(msg.senderUserId)} className="rounded-full focus:outline-none">
+                        <Avatar name={msg.senderDisplayName} url={msg.senderAvatarUrl} size={8} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-1 w-8 shrink-0 flex items-start justify-center">
+                      <Avatar name={currentUser.displayName} url={msg.senderAvatarUrl ?? currentUser.avatarUrl} size={8} />
+                    </div>
+                  )}
+                  <div className={cn("min-w-0 max-w-[72%]", mine ? "items-end" : "items-start", "flex flex-col")}>
+                    {!mine && msg.senderDisplayName && (
+                      <div className="mb-1 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => msg.senderUserId && setViewingUserId(msg.senderUserId)}
+                          className="text-left text-xs font-medium hover:underline text-accent2"
+                        >
+                          {msg.senderDisplayName}
+                        </button>
+                      </div>
+                    )}
+                    <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
+                      msg.text.trim() === "" && msg.attachments.length > 0 && "p-1")}>
+                      {msg.attachments.length > 0 && (
+                        <div className={cn("flex flex-col gap-1", msg.text.trim() && "mb-2")}>
+                          {msg.attachments.map((att, ai) =>
+                            att.type === "file" ? (
+                              <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
+                                className={cn("flex items-center gap-2 rounded-xl border px-3 py-2 text-xs hover:opacity-90", mine ? "border-white/20 bg-white/10" : "border-border bg-panel")}>
+                                <FileText className="h-4 w-4 shrink-0" />
+                                <span className="truncate">{att.filename ?? "Download file"}</span>
+                                {att.size && <span className="ml-auto shrink-0 opacity-70">{(att.size / 1024).toFixed(0)} KB</span>}
+                              </a>
+                            ) : (
+                              <img key={ai} src={att.url} alt="" className="max-h-64 max-w-full rounded-xl object-contain cursor-pointer" loading="lazy" onClick={() => setLightboxSrc(att.url)} />
+                            )
+                          )}
+                        </div>
+                      )}
+                      {msg.text.trim() && (
+                        <MarkdownContent content={msg.text} className={cn("text-sm break-words", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
+                      )}
+                      <div suppressHydrationWarning className={cn("mt-1 flex items-center gap-1 text-[10px]", mine ? "text-white/70 justify-end" : "text-muted")}>
+                        {msg.editedAt && <span className="italic opacity-70">edited</span>}
+                        {friendlyTime(msg.createdAt)}
+                      </div>
+                    </div>
+                    {perEmoji && perEmoji.size > 0 && (
+                      <div className={cn("mt-1 flex flex-wrap gap-1", mine ? "justify-end" : "justify-start")}>
+                        {Array.from(perEmoji.entries()).map(([key, users]) => {
+                          const reacted = users.includes(currentUser.id);
+                          return (
+                            <button key={key} type="button" onClick={() => toggleReaction(msg.id, key)}
+                              className={cn("flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs", reacted ? "border-accent bg-accent/20" : "border-border bg-panel")}>
+                              <span>{EMOJI_GLYPH[key] ?? key}</span>
+                              <span className="text-muted">{users.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (<>
       <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", topic.isFeed ? "space-y-4" : "space-y-1")}>
         {keyChangedWarnings.length > 0 && (
           <E2EEKeyWarning
@@ -1329,6 +1509,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
           }}
         />
       )}
+      </>)}
       </div>
 
       {/* Multi-select action bar */}
@@ -1355,7 +1536,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         </div>
       )}
 
-      {mute ? (
+      {!hashtagFilter && (mute ? (
         <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-danger">
           You are muted: {mute.reason}
           {mute.expiresAt ? ` (until ${new Date(mute.expiresAt).toLocaleString()})` : " (permanent)"}
@@ -1420,6 +1601,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
                 enterSends={topic.isFeed ? false : enterSends}
                 disabled={uploading}
                 members={members}
+                topicTags={topicTags}
+                symbols={symbols.map((s) => ({
+                  symbol: s.symbol,
+                  name: s.name,
+                  avatarUrl: s.linkedUserAvatarUrl,
+                }))}
               />
               <div className="flex items-center gap-2">
                 {canAttach && (
@@ -1489,7 +1676,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
               }} />
           </div>
         </div>
-      )}
+      ))}
 
       {showPollCreator && (
         <PollCreator
@@ -1586,5 +1773,6 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
         document.body,
       )}
     </>
+    </HashtagClickContext.Provider>
   );
 }
