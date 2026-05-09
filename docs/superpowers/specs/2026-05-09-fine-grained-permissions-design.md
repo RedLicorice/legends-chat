@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Extend the existing role-based permission system with per-principal (user/bot) topic grants, global permission overrides, temporary role assignments, and first-class bot roles.
+**Goal:** Extend the existing role-based permission system with per-principal (user/bot) topic grants, global permission overrides, temporary role assignments, and first-class bot roles. Also adds feed topic threading (replies rendered as comment threads below posts) and a distinct `reply` action separate from `post`.
 
-**Architecture:** A new `topic_principal_grants` table handles topic-scoped allow/deny per principal with optional expiry. A `principal_permission_overrides` table handles global per-permission allow/deny on top of role permissions. Temporary roles are stored as `role_expires_at` + `role_fallback` columns on `users` and `bots`. All resolution is server-side; clients receive derived booleans only.
+**Architecture:** A new `topic_principal_grants` table handles topic-scoped allow/deny per principal with optional expiry. A `principal_permission_overrides` table handles global per-permission allow/deny on top of role permissions. Temporary roles are stored as `role_expires_at` + `role_fallback` columns on `users` and `bots`. The existing `messages.replyToMessageId` column is leveraged for feed threading — no new schema column needed. All resolution is server-side; clients receive derived booleans only.
 
 **Tech Stack:** PostgreSQL + Drizzle ORM, Next.js 15 App Router, Socket.IO WS server, existing `rolesPermissions` table, existing admin UI panels.
 
@@ -30,7 +30,7 @@ CREATE TABLE topic_principal_grants (
   topic_id        uuid NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
   principal_type  text NOT NULL CHECK (principal_type IN ('user', 'bot')),
   principal_id    uuid NOT NULL,
-  action          text NOT NULL CHECK (action IN ('view', 'read', 'post')),
+  action          text NOT NULL CHECK (action IN ('view', 'read', 'post', 'reply')),
   effect          text NOT NULL CHECK (effect IN ('allow', 'deny')),
   expires_at      timestamptz,   -- NULL = permanent
   granted_by      uuid REFERENCES users(id) ON DELETE SET NULL,
@@ -60,6 +60,14 @@ CREATE TABLE principal_permission_overrides (
 CREATE INDEX principal_permission_overrides_principal_idx
   ON principal_permission_overrides(principal_type, principal_id);
 ```
+
+### Modify `topics` table
+
+```sql
+ALTER TABLE topics ADD COLUMN reply_roles jsonb NOT NULL DEFAULT '[]';
+```
+
+`replyRoles` — role names that may reply to posts in feed topics. Empty = everyone who can read may reply. Ignored for non-feed topics (all replies there use `postRoles`).
 
 ### Modify `users` table
 
@@ -123,11 +131,17 @@ Called in `getCurrentUser()` and bot token validation:
 6.                                                              → DENY
 ```
 
+Action mapping:
+- `view` — can see the topic in sidebar
+- `read` — can read messages
+- `post` — can create top-level messages (in feed: create a post; in chat: send a message)
+- `reply` — can reply to an existing message (in feed: comment on a post; in chat: falls back to `post` check — no separate `replyRoles` for chat)
+
 `canPrincipal` is a shared pure function in `apps/web/lib/permissions.ts`. It takes pre-loaded grant rows and role data — no DB calls inside.
 
 ### Client receives derived booleans only
 
-`TopicView.tsx` receives `canPost: boolean` as a prop (server-computed). The raw `postRoles` array is no longer used client-side for access decisions — only for the "Only X roles can post" display hint.
+`TopicView.tsx` receives `canPost: boolean` and `canReply: boolean` as props (server-computed). Raw role arrays are no longer used client-side for access decisions — only for display hints.
 
 ---
 
@@ -141,9 +155,9 @@ export function resolvePermissions(
 
 export function canPrincipal(
   grants: { action: string; effect: 'allow' | 'deny' }[],
-  postRoles: string[],
+  actionRoles: string[],   // viewRoles | readRoles | postRoles | replyRoles
   principalRole: string,
-  action: 'view' | 'read' | 'post',
+  action: 'view' | 'read' | 'post' | 'reply',
 ): boolean
 ```
 
@@ -155,8 +169,8 @@ export function canPrincipal(
 |---|---|
 | `apps/web/lib/auth.ts → getCurrentUser()` | Lazy role expiry revert; load + apply `principal_permission_overrides` |
 | `apps/web/lib/topics.ts → getTopics()` | Query `topic_principal_grants` for current user; pass to `canPrincipal` for view/read filter |
-| `apps/web/app/t/[slug]/page.tsx` | Compute `canPost` server-side, pass to `TopicLayout` → `TopicView` |
-| `apps/web/components/TopicView.tsx` | Accept `canPost: boolean` prop; remove client-side `postRoles.includes(role)` |
+| `apps/web/app/t/[slug]/page.tsx` | Compute `canPost` + `canReply` server-side, pass to `TopicLayout` → `TopicView` |
+| `apps/web/components/TopicView.tsx` | Accept `canPost: boolean` + `canReply: boolean` props; remove client-side `postRoles.includes(role)`; feed threading UI |
 | `apps/ws` message handler | Call `canPrincipal` before accepting a post event (user path) |
 | `apps/web/app/api/bot/v1/sendMessage` | Load `bots.role`, lazy expiry revert, apply overrides, call `canPrincipal` before insert |
 
@@ -213,7 +227,7 @@ All admin endpoints require `PERMISSIONS.ADMIN_CONFIG`.
 ### Topic detail panel (`AdminTopicsForm`) — new "Access Grants" section
 
 - Search box (debounced) to find user or bot by name/username
-- Per result: checkboxes for view/read/post, allow/deny toggle, optional expiry date picker, "Add grant" button
+- Per result: checkboxes for view/read/post/reply, allow/deny toggle, optional expiry date picker, "Add grant" button
 - Table of current grants: principal name, type badge (user/bot), action, effect, expiry, delete button
 - Expired grants shown greyed out with bulk "Remove expired" button
 
@@ -240,6 +254,52 @@ Bot roles (`bot`, `bot-extended`) appear in the existing roles list and are edit
 
 ---
 
+## Feed Topic Threading
+
+### Data model — no changes
+
+`messages.replyToMessageId` already exists. A reply to a feed post sets `replyToMessageId = postId`. Top-level posts have `replyToMessageId IS NULL`.
+
+### Rendering in feed mode (`TopicView.tsx`)
+
+Current: all messages rendered as flat cards.
+
+New: two-level structure only (no infinite nesting):
+- **Top-level posts** (`replyToMessageId IS NULL`) — rendered as full post cards, same as today
+- **Replies** (`replyToMessageId = parentId`) — rendered as a collapsed comment thread anchored below their parent post card
+
+Comment thread per post:
+- Shows "N comments" count collapsed by default
+- Click → expands inline list of reply messages (compact row: avatar, name, content, timestamp)
+- If `canReply`: inline reply composer appears at bottom of expanded thread
+- If `!canReply && canRead`: thread is read-only, no composer
+- Replies that arrive via WS append to the correct thread in real time
+
+Messages with a `replyToMessageId` that points to another reply (depth > 1) are flattened into the same thread as the parent post — no nested threads.
+
+### WS message handler — reply routing
+
+When a new message arrives with `replyToMessageId`:
+- If feed topic: emit to `topic:<id>` room with `parentId` field so clients route it to the correct thread
+- If chat topic: existing quote-reply rendering unchanged
+
+### Sending a reply
+
+Reply composer sends `POST /api/topics/[id]/messages` (existing endpoint) with `replyToMessageId` in body. Server enforces `canReply` before insert.
+
+### Permissions enforcement for reply
+
+On message insert (WS handler + bot API):
+- `replyToMessageId` present → check `canPrincipal(..., 'reply')`
+- `replyToMessageId` absent → check `canPrincipal(..., 'post')`
+- In chat topics: `replyRoles` is empty by default → `canReply` always matches `canPost`
+
+### Admin UI — feed topic settings
+
+`AdminTopicsForm` — when `isFeed` is true, show `replyRoles` checkbox group alongside existing `postRoles`. Label: "Who can comment?" vs "Who can post?"
+
+---
+
 ## Bot Auth Changes
 
 Bots post via `POST /api/bot/v1/sendMessage` (HTTP API, token auth). Bot token validation must:
@@ -258,9 +318,10 @@ Bots post via `POST /api/bot/v1/sendMessage` (HTTP API, token auth). Bot token v
 One migration file (`0032_fine_grained_permissions`):
 1. `ALTER TABLE users ADD COLUMN role_expires_at / role_fallback`
 2. `ALTER TABLE bots ADD COLUMN role / role_expires_at / role_fallback`
-3. `CREATE TABLE topic_principal_grants`
-4. `CREATE TABLE principal_permission_overrides`
-5. `INSERT INTO roles / roles_permissions` for bot roles
+3. `ALTER TABLE topics ADD COLUMN reply_roles jsonb NOT NULL DEFAULT '[]'`
+4. `CREATE TABLE topic_principal_grants`
+5. `CREATE TABLE principal_permission_overrides`
+6. `INSERT INTO roles / roles_permissions` for bot roles
 
 No data backfill required. Existing `viewRoles/readRoles/postRoles` arrays and `rolesPermissions` entries are untouched and continue working as before — new tables are purely additive.
 
@@ -271,6 +332,6 @@ No data backfill required. Existing `viewRoles/readRoles/postRoles` arrays and `
 - `topicBots` table and bot event subscription logic
 - `syncTopicPermissions()` and role-based topic permission flow
 - Existing `rolesPermissions` schema
-- Topics `viewRoles / readRoles / postRoles` arrays (still used for role-based access)
+- Topics `viewRoles / readRoles / postRoles` arrays (still used for role-based access); `replyRoles` is new but follows the same pattern
 - Roles admin panel
 - Invite/ban/mute system
