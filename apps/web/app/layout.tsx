@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { themes } from "@legends/db/schema";
 import { asc } from "drizzle-orm";
 import { PushSetup } from "@/components/PushSetup";
+import { SymbolsProvider } from "@/contexts/SymbolsContext";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +145,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           document.addEventListener('touchmove', function(e) { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
         `}} />
       </head>
-      <body className="bg-bg text-text"><PushSetup />{children}</body>
+      <body className="bg-bg text-text">
+        <PushSetup />
+        <SymbolsProvider>{children}</SymbolsProvider>
+      </body>
     </html>
   );
 }
