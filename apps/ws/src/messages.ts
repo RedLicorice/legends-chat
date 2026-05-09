@@ -136,6 +136,7 @@ export async function insertMessage(args: {
   attachments?: MessageAttachment[];
   replyToMessageId?: string | null;
   searchText?: string;
+  hashtags?: string[];
 }): Promise<InsertedMessage> {
   const key = await currentDataKey();
   const aad = new TextEncoder().encode(args.topicId);
@@ -151,6 +152,7 @@ export async function insertMessage(args: {
       contentCiphertext: ciphertext,
       contentNonce: nonce,
       keyId: key.id,
+      hashtags: args.hashtags && args.hashtags.length > 0 ? args.hashtags : [],
     })
     .returning();
 

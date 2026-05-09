@@ -38,6 +38,7 @@ import {
   reactionToggleSchema,
   sendMessageSchema,
   topicReadSchema,
+  stripMarkdownPreview,
   type AccessTokenPayload,
 } from "@legends/shared";
 import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth";
@@ -158,6 +159,10 @@ io.on("connection", async (socket: AuthedSocket) => {
       }
       const topic = await getTopicById(parsed.topicId);
       const isE2ee = topic?.isE2ee ?? false;
+      const incomingHashtags = parsed.hashtags ?? [];
+      const validHashtags = incomingHashtags
+        .filter((t) => /^[#$][a-zA-Z]\w*$/.test(t))
+        .slice(0, 20);
       const msg = await insertMessage({
         topicId: parsed.topicId,
         senderUserId: user.sub,
@@ -165,15 +170,16 @@ io.on("connection", async (socket: AuthedSocket) => {
         attachments: parsed.content.attachments as import("./messages").MessageAttachment[] | undefined,
         replyToMessageId: parsed.content.replyToMessageId ?? null,
         searchText: isE2ee ? undefined : parsed.content.text,
+        hashtags: validHashtags,
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
-      const plainPreview = isE2ee ? "(encrypted message)" : parsed.content.text;
+      const plainPreview = isE2ee ? "(encrypted message)" : stripMarkdownPreview(parsed.content.text, topic?.isFeed ?? false);
       // Broadcast sidebar update to all topic members so their sidebar refreshes in real time
       getTopicMemberUserIds(parsed.topicId).then((memberIds) => {
         const sidebarPayload = {
           topicId: parsed.topicId,
-          preview: plainPreview.slice(0, 120),
+          preview: plainPreview,
           senderName: msg.senderDisplayName ?? null,
           at: typeof msg.createdAt === "string" ? msg.createdAt : (msg.createdAt as Date).toISOString(),
         };
@@ -181,6 +187,12 @@ io.on("connection", async (socket: AuthedSocket) => {
           io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
         }
       }).catch((e) => console.error("[sidebar] broadcast failed", e));
+      if (validHashtags.length > 0) {
+        io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.HASHTAG_CLOUD_UPDATE, {
+          topicId: parsed.topicId,
+          tags: validHashtags,
+        });
+      }
       dispatchMessageNotifications(io, {
         messageId: msg.id,
         topicId: parsed.topicId,
@@ -385,6 +397,7 @@ subClient.subscribe(
   REDIS_CHANNELS.BOT_MESSAGE_DELETE,
   REDIS_CHANNELS.BOT_NEW_MEMBER,
   REDIS_CHANNELS.NOTIFICATION_BROADCAST,
+  REDIS_CHANNELS.SYMBOLS_UPDATE,
   (err) => { if (err) console.error("redis subscribe failed", err); },
 );
 
@@ -402,7 +415,7 @@ subClient.on("message", (channel, message) => {
       getTopicMemberUserIds(topicId).then((memberIds) => {
         const sidebarPayload = {
           topicId,
-          preview: (msg.text ?? "").slice(0, 120),
+          preview: stripMarkdownPreview(msg.text ?? ""),
           senderName: msg.senderDisplayName ?? null,
           at: msg.createdAt ?? new Date().toISOString(),
         };
@@ -435,6 +448,8 @@ subClient.on("message", (channel, message) => {
           createdAt: n.createdAt,
         });
       }
+    } else if (channel === REDIS_CHANNELS.SYMBOLS_UPDATE) {
+      io.emit(WS_EVENTS.SYMBOLS_UPDATE, {});
     }
   } catch (e) {
     console.error("pubsub parse failed", e);
