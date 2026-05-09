@@ -196,6 +196,9 @@ export const topics = pgTable(
     p2pFallbackE2ee: boolean("p2p_fallback_e2ee").notNull().default(false),
     p2pMaxParticipants: integer("p2p_max_participants"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    passwordHash: text("password_hash"),
+    passwordVersion: integer("password_version").notNull().default(0),
+    passwordReentryDays: integer("password_reentry_days").notNull().default(7),
   },
   (t) => ({
     slugIdx: uniqueIndex("topics_slug_idx").on(t.slug),
