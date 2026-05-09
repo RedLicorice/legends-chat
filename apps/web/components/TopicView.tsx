@@ -1338,7 +1338,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                                     <span className="text-xs font-medium">{r.senderDisplayName ?? communityName ?? "System"}</span>
                                     <span suppressHydrationWarning className="text-[10px] text-muted">{friendlyTime(r.createdAt)}</span>
                                   </div>
-                                  <div className="text-sm text-text">{r.text}</div>
+                                  <MarkdownContent content={r.text ?? ""} className="text-sm" />
                                 </div>
                               </div>
                             ))}
