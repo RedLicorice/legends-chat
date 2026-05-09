@@ -123,5 +123,5 @@ export function appPublicUrl(): string {
 }
 
 export function loginUrl(token: string): string {
-  return `${appPublicUrl()}/auth/callback?token=${token}`;
+  return `${appPublicUrl()}/auth/browser-open?token=${token}`;
 }
