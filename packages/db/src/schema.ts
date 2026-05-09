@@ -202,7 +202,7 @@ export const topics = pgTable(
     passwordHash: text("password_hash"),
     passwordVersion: integer("password_version").notNull().default(0),
     passwordReentryDays: integer("password_reentry_days").notNull().default(7),
-    replyRoles: jsonb("reply_roles").$type<string[]>().default([]),
+    replyRoles: jsonb("reply_roles").$type<string[]>().notNull().default([]),
   },
   (t) => ({
     slugIdx: uniqueIndex("topics_slug_idx").on(t.slug),
