@@ -14,6 +14,9 @@ interface BotRow {
   webhookUrl: string | null;
   isActive: boolean;
   createdAt: Date | string;
+  role: string | null;
+  roleExpiresAt: Date | string | null;
+  roleFallback: string | null;
 }
 
 interface TopicRow {
@@ -25,6 +28,13 @@ interface TopicRow {
 interface Assignment {
   botId: string;
   topicId: string;
+}
+
+interface BotOverride {
+  id: string;
+  permission: string;
+  effect: string;
+  expiresAt: string | null;
 }
 
 interface Props {
@@ -46,6 +56,34 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
   const [editWebhooks, setEditWebhooks] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
+  // Role editing state (per-bot maps)
+  const [botRoles, setBotRoles] = useState<Record<string, string>>({});
+  const [botRoleExpiresAts, setBotRoleExpiresAts] = useState<Record<string, string>>({});
+  const [botRoleFallbacks, setBotRoleFallbacks] = useState<Record<string, string>>({});
+
+  // Overrides state (only one bot expanded at a time)
+  const [botOverrides, setBotOverrides] = useState<BotOverride[]>([]);
+  const [botOverridesLoading, setBotOverridesLoading] = useState(false);
+  const [overridesBotId, setOverridesBotId] = useState<string | null>(null);
+
+  async function expandBot(botId: string | null) {
+    setExpandedBot(botId);
+    if (!botId) {
+      setOverridesBotId(null);
+      setBotOverrides([]);
+      return;
+    }
+    setOverridesBotId(botId);
+    setBotOverridesLoading(true);
+    try {
+      const ovRes = await apiFetch(`/api/admin/bots/${botId}/permission-overrides`);
+      const ovData = await ovRes.json() as { overrides: BotOverride[] };
+      setBotOverrides(ovData.overrides ?? []);
+    } finally {
+      setBotOverridesLoading(false);
+    }
+  }
+
   async function createBot() {
     if (!newBotName.trim()) return;
     setCreating(true);
@@ -61,7 +99,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
       setBots((prev) => [...prev, data.bot]);
       setRevealedToken({ botId: data.bot.id, token: data.token });
       setNewBotName("");
-      setExpandedBot(data.bot.id);
+      await expandBot(data.bot.id);
     } finally {
       setCreating(false);
     }
@@ -116,6 +154,11 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
     if (res.ok) {
       setBots((prev) => prev.filter((b) => b.id !== botId));
       setAssignments((prev) => prev.filter((a) => a.botId !== botId));
+      if (expandedBot === botId) {
+        setExpandedBot(null);
+        setOverridesBotId(null);
+        setBotOverrides([]);
+      }
     }
   }
 
@@ -172,6 +215,11 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
         const assignedTopicIds = new Set(botAssignments.map((a) => a.topicId));
         const expanded = expandedBot === bot.id;
 
+        // Role values for this bot (from edit state or from bot data)
+        const currentRole = botRoles[bot.id] ?? (bot.role ?? "bot");
+        const currentRoleExpiresAt = botRoleExpiresAts[bot.id] ?? (bot.roleExpiresAt ? new Date(bot.roleExpiresAt as string).toISOString().slice(0, 16) : "");
+        const currentRoleFallback = botRoleFallbacks[bot.id] ?? (bot.roleFallback ?? "");
+
         return (
           <div key={bot.id} className="rounded-xl border border-border bg-panel overflow-hidden">
             <div className="flex items-center gap-3 px-5 py-4">
@@ -185,7 +233,7 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                 <div className="font-medium text-sm">{bot.name}</div>
                 <div className={cn("text-xs", bot.isActive ? "text-green-500" : "text-muted")}>{bot.isActive ? "active" : "inactive"}</div>
               </div>
-              <button type="button" onClick={() => setExpandedBot(expanded ? null : bot.id)} className="text-muted hover:text-text">
+              <button type="button" onClick={() => expandBot(expanded ? null : bot.id)} className="text-muted hover:text-text">
                 {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </button>
             </div>
@@ -307,6 +355,124 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                   </button>
                 </div>
 
+                {/* Bot Role */}
+                <div className="mt-4">
+                  <h4 className="mb-2 text-xs font-semibold text-muted uppercase tracking-wide">Bot Role</h4>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="block text-xs text-muted mb-0.5">Role</label>
+                      <select
+                        className="rounded border border-border bg-panel px-2 py-1 text-sm"
+                        value={currentRole}
+                        onChange={(e) => setBotRoles((p) => ({ ...p, [bot.id]: e.target.value }))}
+                      >
+                        <option value="bot">bot</option>
+                        <option value="bot-extended">bot-extended</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-0.5">Expires (optional)</label>
+                      <input
+                        type="datetime-local"
+                        className="rounded border border-border bg-panel px-2 py-1 text-sm"
+                        value={currentRoleExpiresAt}
+                        onChange={(e) => setBotRoleExpiresAts((p) => ({ ...p, [bot.id]: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted mb-0.5">Reverts to</label>
+                      <select
+                        className="rounded border border-border bg-panel px-2 py-1 text-sm"
+                        value={currentRoleFallback}
+                        onChange={(e) => setBotRoleFallbacks((p) => ({ ...p, [bot.id]: e.target.value }))}
+                      >
+                        <option value="">— none —</option>
+                        <option value="bot">bot</option>
+                        <option value="bot-extended">bot-extended</option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded bg-accent px-3 py-1.5 text-sm text-white"
+                      onClick={async () => {
+                        const res = await apiFetch(`/api/admin/bots/${bot.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            role: currentRole,
+                            roleExpiresAt: currentRoleExpiresAt || null,
+                            roleFallback: currentRoleFallback || null,
+                          }),
+                        });
+                        const data = await res.json() as { bot: BotRow; error?: string };
+                        if (!res.ok) { setError(data.error ?? "Failed to save role"); return; }
+                        setBots((prev) => prev.map((b) => b.id === bot.id ? data.bot : b));
+                      }}
+                    >
+                      Save role
+                    </button>
+                  </div>
+                </div>
+
+                {/* Permission Overrides */}
+                <div className="mt-4">
+                  <h4 className="mb-2 text-xs font-semibold text-muted uppercase tracking-wide">Permission Overrides</h4>
+                  {overridesBotId === bot.id && botOverridesLoading ? (
+                    <p className="text-xs text-muted">Loading…</p>
+                  ) : (
+                    <>
+                      {botOverrides.length > 0 && overridesBotId === bot.id && (
+                        <table className="w-full text-xs mb-3">
+                          <thead>
+                            <tr className="text-left text-muted">
+                              <th className="pb-1 pr-2">Permission</th>
+                              <th className="pb-1 pr-2">Effect</th>
+                              <th className="pb-1 pr-2">Expires</th>
+                              <th className="pb-1" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {botOverrides.map((o) => (
+                              <tr key={o.permission} className={o.expiresAt && new Date(o.expiresAt) < new Date() ? "opacity-40" : ""}>
+                                <td className="pr-2 py-0.5 font-mono text-[11px]">{o.permission}</td>
+                                <td className={`pr-2 py-0.5 font-medium ${o.effect === "allow" ? "text-green-500" : "text-red-500"}`}>{o.effect}</td>
+                                <td className="pr-2 py-0.5">{o.expiresAt ? new Date(o.expiresAt).toLocaleDateString() : "—"}</td>
+                                <td className="py-0.5">
+                                  <button
+                                    type="button"
+                                    className="text-muted hover:text-red-500 transition"
+                                    onClick={async () => {
+                                      await apiFetch(`/api/admin/bots/${bot.id}/permission-overrides`, {
+                                        method: "DELETE",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ permission: o.permission }),
+                                      });
+                                      setBotOverrides((ov) => ov.filter((x) => x.permission !== o.permission));
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                      <BotAddOverrideForm
+                        onAdd={async (permission, effect, expiresAt) => {
+                          const res = await apiFetch(`/api/admin/bots/${bot.id}/permission-overrides`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ permission, effect, expiresAt }),
+                          });
+                          const data = await res.json() as { override: BotOverride };
+                          setBotOverrides((ov) => [...ov.filter((x) => x.permission !== permission), data.override]);
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+
                 {/* Topic assignments */}
                 <div>
                   <h3 className="text-xs font-semibold text-muted mb-2">Assigned Topics</h3>
@@ -335,6 +501,43 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
       {bots.length === 0 && (
         <p className="text-sm text-muted text-center py-8">No bots yet. Create one above.</p>
       )}
+    </div>
+  );
+}
+
+function BotAddOverrideForm({ onAdd }: { onAdd: (permission: string, effect: string, expiresAt: string | null) => Promise<void> }) {
+  const [permission, setPermission] = useState("");
+  const [effect, setEffect] = useState("deny");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!permission.trim()) return;
+    setSaving(true);
+    try {
+      await onAdd(permission.trim(), effect, expiresAt || null);
+      setPermission("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <input
+        className="rounded border border-border bg-panel px-2 py-1 text-xs font-mono w-52"
+        placeholder="permission string"
+        value={permission}
+        onChange={(e) => setPermission(e.target.value)}
+      />
+      <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={effect} onChange={(e) => setEffect(e.target.value)}>
+        <option value="allow">allow</option>
+        <option value="deny">deny</option>
+      </select>
+      <input type="datetime-local" className="rounded border border-border bg-panel px-2 py-1 text-xs" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+      <button type="button" onClick={submit} disabled={saving} className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-50">
+        {saving ? "…" : "Add Override"}
+      </button>
     </div>
   );
 }
