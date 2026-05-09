@@ -4,6 +4,7 @@ import { messages, rolesPermissions, topics } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { hashPassword } from "@/lib/password";
 
 async function syncTopicPermissions(slug: string, viewRoles: string[], readRoles: string[], postRoles: string[]) {
   await db.delete(rolesPermissions).where(
@@ -53,6 +54,9 @@ export async function PATCH(
     autoDeleteMode?: "none" | "age" | "count";
     autoDeleteAgeSeconds?: number | null;
     autoDeleteMaxMessages?: number | null;
+    newPassword?: string | null;
+    passwordReentryDays?: number;
+    requireImmediateReentry?: boolean;
   };
 
   const [existing] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
@@ -122,6 +126,24 @@ export async function PATCH(
   if ("autoDeleteAgeSeconds" in body) patch.autoDeleteAgeSeconds = body.autoDeleteAgeSeconds ?? null;
   if ("autoDeleteMaxMessages" in body) patch.autoDeleteMaxMessages = body.autoDeleteMaxMessages ?? null;
 
+  if ("newPassword" in body) {
+    if (body.newPassword === null) {
+      patch.passwordHash = null;
+      patch.passwordVersion = 0;
+    } else if (typeof body.newPassword === "string" && body.newPassword.length > 0) {
+      patch.passwordHash = await hashPassword(body.newPassword);
+      if (body.requireImmediateReentry === true) {
+        patch.passwordVersion = (existing.passwordVersion ?? 0) + 1;
+      }
+    }
+  }
+  if (typeof body.passwordReentryDays === "number" && body.passwordReentryDays > 0) {
+    patch.passwordReentryDays = body.passwordReentryDays;
+  }
+  if (body.requireImmediateReentry === true && !("newPassword" in body)) {
+    patch.passwordVersion = (existing.passwordVersion ?? 0) + 1;
+  }
+
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
@@ -141,7 +163,8 @@ export async function PATCH(
     );
   }
 
-  return NextResponse.json({ topic: updated });
+  const { passwordHash: _omit, ...safeUpdated } = updated;
+  return NextResponse.json({ topic: safeUpdated });
 }
 
 export async function DELETE(
