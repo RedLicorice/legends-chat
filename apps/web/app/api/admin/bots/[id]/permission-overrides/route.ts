@@ -7,7 +7,7 @@ import { getCurrentUser } from "@/lib/auth";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
-  if (!actor?.permissions.has(PERMISSIONS.ADMIN_CONFIG)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (!actor?.permissions.has(PERMISSIONS.BOTS_MANAGE)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await params;
   const rows = await db.select().from(principalPermissionOverrides).where(
     and(eq(principalPermissionOverrides.principalType, "bot"), eq(principalPermissionOverrides.principalId, id)),
@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
-  if (!actor?.permissions.has(PERMISSIONS.ADMIN_CONFIG)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (!actor?.permissions.has(PERMISSIONS.BOTS_MANAGE)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await params;
   const body = await req.json() as { permission: string; effect: string; expiresAt?: string | null };
   if (!body.permission || !body.effect) return NextResponse.json({ error: "permission and effect required" }, { status: 400 });
@@ -34,7 +34,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
-  if (!actor?.permissions.has(PERMISSIONS.ADMIN_CONFIG)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (!actor?.permissions.has(PERMISSIONS.BOTS_MANAGE)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { id } = await params;
   const body = await req.json() as { permission: string };
   if (!body.permission) return NextResponse.json({ error: "permission required" }, { status: 400 });
