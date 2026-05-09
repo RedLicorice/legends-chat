@@ -1,6 +1,6 @@
-import { ilike, or } from "drizzle-orm";
+import { and, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
-import { users } from "@legends/db/schema";
+import { userBans, userMutes, users } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
@@ -36,5 +36,32 @@ export async function GET(req: NextRequest) {
     .orderBy(users.displayName)
     .limit(100);
 
-  return NextResponse.json(rows);
+  if (rows.length === 0) return NextResponse.json([]);
+
+  const userIds = rows.map((r) => r.id);
+  const now = sql`NOW()`;
+
+  const [activeBans, activeMutes] = await Promise.all([
+    db
+      .select({ userId: userBans.userId, expiresAt: userBans.expiresAt })
+      .from(userBans)
+      .where(and(inArray(userBans.userId, userIds), isNull(userBans.liftedAt), or(isNull(userBans.expiresAt), gt(userBans.expiresAt, now)))),
+    db
+      .select({ userId: userMutes.userId, expiresAt: userMutes.expiresAt })
+      .from(userMutes)
+      .where(and(inArray(userMutes.userId, userIds), isNull(userMutes.liftedAt), or(isNull(userMutes.expiresAt), gt(userMutes.expiresAt, now)))),
+  ]);
+
+  const bannedMap = new Map(activeBans.map((b) => [b.userId, b.expiresAt?.toISOString() ?? null]));
+  const mutedMap = new Map(activeMutes.map((m) => [m.userId, m.expiresAt?.toISOString() ?? null]));
+
+  return NextResponse.json(
+    rows.map((r) => ({
+      ...r,
+      isBanned: bannedMap.has(r.id),
+      banExpiresAt: bannedMap.get(r.id) ?? null,
+      isMuted: mutedMap.has(r.id),
+      muteExpiresAt: mutedMap.get(r.id) ?? null,
+    })),
+  );
 }

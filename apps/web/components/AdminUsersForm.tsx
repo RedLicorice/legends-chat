@@ -14,6 +14,10 @@ interface UserRow {
   telegramUsername: string | null;
   email: string | null;
   createdAt: string;
+  isBanned: boolean;
+  banExpiresAt: string | null;
+  isMuted: boolean;
+  muteExpiresAt: string | null;
 }
 
 const ROLES = ["user", "moderator", "admin"] as const;
@@ -244,7 +248,17 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
                       )}
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+                    {u.isBanned && (
+                      <span className="rounded-full bg-danger/20 px-1.5 py-0.5 text-[10px] font-medium text-danger">
+                        BANNED{u.banExpiresAt ? ` until ${new Date(u.banExpiresAt).toLocaleDateString()}` : ""}
+                      </span>
+                    )}
+                    {u.isMuted && (
+                      <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                        MUTED{u.muteExpiresAt ? ` until ${new Date(u.muteExpiresAt).toLocaleDateString()}` : ""}
+                      </span>
+                    )}
                     {u.telegramUsername && <span>@{u.telegramUsername}</span>}
                     {u.email && <span className="truncate max-w-[180px]">{u.email}</span>}
                     <span>{new Date(u.createdAt).toLocaleDateString()}</span>
