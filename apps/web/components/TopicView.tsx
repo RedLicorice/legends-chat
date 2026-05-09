@@ -425,11 +425,28 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       refetchSymbols();
     });
 
+    let refreshing = false;
+    socket.on("connect_error", async (err: Error) => {
+      if (!active) return;
+      const msg = err?.message ?? "";
+      if (msg === "no auth cookie" || msg === "auth failed" || msg === "token revoked") {
+        if (refreshing) return;
+        refreshing = true;
+        const ok = await fetch("/api/auth/refresh", { method: "POST" }).then((r) => r.ok).catch(() => false);
+        refreshing = false;
+        if (!ok && typeof window !== "undefined") {
+          window.location.replace("/login");
+        }
+        // Socket.IO auto-retries; next attempt will use the refreshed cookie.
+      }
+    });
+
     return () => {
       active = false;
       setSocket(null);
       socket.emit(WS_EVENTS.TOPIC_LEAVE, topic.id);
       socket.off(WS_EVENTS.SYMBOLS_UPDATE);
+      socket.off("connect_error");
       socket.disconnect();
     };
   }, [topic.id, wsUrl]);
@@ -485,7 +502,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
       return;
     }
     setFilteredLoading(true);
-    fetch(`/api/topics/${topic.id}/messages?hashtag=${encodeURIComponent(hashtagFilter)}`)
+    apiFetch(`/api/topics/${topic.id}/messages?hashtag=${encodeURIComponent(hashtagFilter)}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Message[]) => setFilteredMessages(data))
       .catch(() => setFilteredMessages([]))
