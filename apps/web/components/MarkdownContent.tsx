@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { marked } from "marked";
+import { useSymbols } from "@/contexts/SymbolsContext";
+import { useHashtagClick } from "@/contexts/HashtagClickContext";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -26,8 +28,8 @@ function preprocessMentions(content: string): string {
   });
 }
 
-// Walk text nodes and wrap #hashtags in styled spans (skip code/pre).
-function applyHashtags(root: HTMLElement) {
+// Walk text nodes and wrap #hashtags and known $symbols in styled spans (skip code/pre/a).
+function applyTags(root: HTMLElement, isKnownSymbol: (s: string) => boolean) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
@@ -40,16 +42,30 @@ function applyHashtags(root: HTMLElement) {
   const nodes: Text[] = [];
   let n: Node | null;
   while ((n = walker.nextNode())) nodes.push(n as Text);
+
   for (const textNode of nodes) {
-    if (!/#[a-zA-Z]\w*/.test(textNode.nodeValue ?? "")) continue;
+    const val = textNode.nodeValue ?? "";
+    if (!/#[a-zA-Z]\w*|\$[a-zA-Z]\w*/.test(val)) continue;
     const frag = document.createDocumentFragment();
-    const parts = (textNode.nodeValue ?? "").split(/(#[a-zA-Z]\w*)/g);
+    const parts = val.split(/(#[a-zA-Z]\w*|\$[a-zA-Z]\w*)/g);
     for (const part of parts) {
       if (/^#[a-zA-Z]\w*$/.test(part)) {
         const span = document.createElement("span");
-        span.className = "hashtag-tag";
+        span.className = "hashtag-tag cursor-pointer";
+        span.setAttribute("data-tag", part);
         span.textContent = part;
         frag.appendChild(span);
+      } else if (/^\$[a-zA-Z]\w*$/.test(part)) {
+        const sym = part.slice(1).toLowerCase();
+        if (isKnownSymbol(sym)) {
+          const span = document.createElement("span");
+          span.className = "symbol-tag cursor-pointer";
+          span.setAttribute("data-tag", part);
+          span.textContent = part;
+          frag.appendChild(span);
+        } else {
+          frag.appendChild(document.createTextNode(part));
+        }
       } else {
         frag.appendChild(document.createTextNode(part));
       }
@@ -65,6 +81,8 @@ interface Props {
 
 export function MarkdownContent({ content, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const { isKnownSymbol } = useSymbols();
+  const { onHashtagClick } = useHashtagClick();
 
   useEffect(() => {
     if (!ref.current) return;
@@ -81,8 +99,21 @@ export function MarkdownContent({ content, className }: Props) {
       el.setAttribute("rel", "noopener noreferrer");
     });
     ref.current.innerHTML = doc.body.innerHTML;
-    applyHashtags(ref.current);
-  }, [content]);
+    applyTags(ref.current, isKnownSymbol);
+  }, [content, isKnownSymbol]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const handler = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest("[data-tag]") as HTMLElement | null;
+      if (!target) return;
+      const tag = target.getAttribute("data-tag");
+      if (tag) onHashtagClick(tag);
+    };
+    el.addEventListener("click", handler);
+    return () => el.removeEventListener("click", handler);
+  }, [onHashtagClick]);
 
   return (
     <div

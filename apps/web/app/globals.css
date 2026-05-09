@@ -163,6 +163,16 @@ main.selectable {
   font-weight: 600;
 }
 
+/* Symbol tag highlights ($BTC, $ETH, etc.) in rendered messages */
+.symbol-tag {
+  color: var(--ch-accent, #f59e0b);
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+}
+.symbol-tag:hover {
+  text-decoration: underline;
+}
+
 /* Prose content fixes */
 .prose { overflow-wrap: break-word; word-break: break-word; }
 .prose pre { overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
