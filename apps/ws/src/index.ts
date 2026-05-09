@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { Server, type Socket, type DefaultEventsMap } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
-import { users } from "@legends/db/schema";
+import { users, topicPrincipalGrants } from "@legends/db/schema";
 import { db } from "./db";
 import { cacheClient } from "./redis";
 
@@ -39,7 +39,10 @@ import {
   sendMessageSchema,
   topicReadSchema,
   stripMarkdownPreview,
+  canPrincipal,
   type AccessTokenPayload,
+  type TopicGrant,
+  type GrantEffect,
 } from "@legends/shared";
 import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth";
 import { pubClient, subClient } from "./redis";
@@ -158,6 +161,29 @@ io.on("connection", async (socket: AuthedSocket) => {
         return;
       }
       const topic = await getTopicById(parsed.topicId);
+      // Enforce post/reply permission
+      const now = new Date();
+      const grantRows = await db
+        .select({ action: topicPrincipalGrants.action, effect: topicPrincipalGrants.effect })
+        .from(topicPrincipalGrants)
+        .where(
+          and(
+            eq(topicPrincipalGrants.topicId, parsed.topicId),
+            eq(topicPrincipalGrants.principalType, "user"),
+            eq(topicPrincipalGrants.principalId, user.sub),
+            or(isNull(topicPrincipalGrants.expiresAt), gt(topicPrincipalGrants.expiresAt, now)),
+          ),
+        );
+      const grants: TopicGrant[] = grantRows.map((g) => ({ action: g.action, effect: g.effect as GrantEffect }));
+      const isReply = !!(parsed.content?.replyToMessageId);
+      const actionRoles = isReply && topic?.isFeed
+        ? ((topic?.replyRoles as string[] | null) ?? [])
+        : ((topic?.postRoles as string[] | null) ?? []);
+      const action = isReply && topic?.isFeed ? "reply" : "post";
+      if (!canPrincipal(grants, actionRoles, user.role, action)) {
+        ack?.({ ok: false, error: "FORBIDDEN" });
+        return;
+      }
       const isE2ee = topic?.isE2ee ?? false;
       const incomingHashtags = parsed.hashtags ?? [];
       const validHashtags = incomingHashtags

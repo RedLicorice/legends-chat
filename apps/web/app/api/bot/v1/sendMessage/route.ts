@@ -1,7 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { encryptionKeys, messages, topicBots, topics, users } from "@legends/db/schema";
-import { REDIS_CHANNELS } from "@legends/shared";
+import { encryptionKeys, messages, topicBots, topicPrincipalGrants, topics, users } from "@legends/db/schema";
+import { canPrincipal, REDIS_CHANNELS, type GrantEffect, type TopicGrant } from "@legends/shared";
 import { encryptMessage, unwrapKey, generateDataKey, wrapKey } from "@legends/crypto";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
@@ -39,6 +39,29 @@ export async function POST(req: Request) {
 
   const [assignment] = await db.select().from(topicBots).where(and(eq(topicBots.botId, bot.id), eq(topicBots.topicId, body.topicId))).limit(1);
   if (!assignment) return NextResponse.json({ ok: false, error: "bot not assigned to topic" }, { status: 403 });
+
+  const now = new Date();
+  const grantRows = await db
+    .select({ action: topicPrincipalGrants.action, effect: topicPrincipalGrants.effect })
+    .from(topicPrincipalGrants)
+    .where(
+      and(
+        eq(topicPrincipalGrants.topicId, body.topicId),
+        eq(topicPrincipalGrants.principalType, "bot"),
+        eq(topicPrincipalGrants.principalId, bot.id),
+        or(isNull(topicPrincipalGrants.expiresAt), gt(topicPrincipalGrants.expiresAt, now)),
+      ),
+    );
+  const grants: TopicGrant[] = grantRows.map((g) => ({ action: g.action, effect: g.effect as GrantEffect }));
+  const isReply = !!body.replyToMessageId;
+  const [topicDetail] = await db.select({ postRoles: topics.postRoles, replyRoles: topics.replyRoles, isFeed: topics.isFeed }).from(topics).where(eq(topics.id, body.topicId)).limit(1);
+  const actionRoles = isReply && topicDetail?.isFeed
+    ? ((topicDetail?.replyRoles as string[] | null) ?? [])
+    : ((topicDetail?.postRoles as string[] | null) ?? []);
+  const action = isReply && topicDetail?.isFeed ? "reply" : "post";
+  if (!canPrincipal(grants, actionRoles, bot.role, action)) {
+    return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+  }
 
   const key = await currentDataKey();
   const aad = new TextEncoder().encode(body.topicId);
