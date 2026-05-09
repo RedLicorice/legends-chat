@@ -23,6 +23,8 @@ CREATE TABLE "topic_principal_grants" (
   "expires_at" timestamptz,
   "granted_by" uuid,
   "granted_at" timestamptz DEFAULT now() NOT NULL,
+  CONSTRAINT "topic_principal_grants_principal_type_check" CHECK ("principal_type" IN ('user', 'bot')),
+  CONSTRAINT "topic_principal_grants_effect_check" CHECK ("effect" IN ('allow', 'deny')),
   CONSTRAINT "topic_principal_grants_pk" PRIMARY KEY ("topic_id","principal_type","principal_id","action")
 );
 --> statement-breakpoint
@@ -30,9 +32,9 @@ ALTER TABLE "topic_principal_grants" ADD CONSTRAINT "topic_principal_grants_topi
 --> statement-breakpoint
 ALTER TABLE "topic_principal_grants" ADD CONSTRAINT "topic_principal_grants_granted_by_users_id_fk" FOREIGN KEY ("granted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
 --> statement-breakpoint
-CREATE INDEX "topic_principal_grants_topic_idx" ON "topic_principal_grants" ("topic_id");
+CREATE INDEX IF NOT EXISTS "topic_principal_grants_topic_idx" ON "topic_principal_grants" ("topic_id");
 --> statement-breakpoint
-CREATE INDEX "topic_principal_grants_principal_idx" ON "topic_principal_grants" ("principal_type","principal_id");
+CREATE INDEX IF NOT EXISTS "topic_principal_grants_principal_idx" ON "topic_principal_grants" ("principal_type","principal_id");
 --> statement-breakpoint
 
 -- principal_permission_overrides
@@ -45,12 +47,15 @@ CREATE TABLE "principal_permission_overrides" (
   "expires_at" timestamptz,
   "granted_by" uuid,
   "granted_at" timestamptz DEFAULT now() NOT NULL,
-  CONSTRAINT "principal_permission_overrides_uniq" UNIQUE ("principal_type","principal_id","permission")
+  CONSTRAINT "principal_permission_overrides_principal_type_check" CHECK ("principal_type" IN ('user', 'bot')),
+  CONSTRAINT "principal_permission_overrides_effect_check" CHECK ("effect" IN ('allow', 'deny'))
 );
 --> statement-breakpoint
 ALTER TABLE "principal_permission_overrides" ADD CONSTRAINT "principal_permission_overrides_granted_by_users_id_fk" FOREIGN KEY ("granted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
 --> statement-breakpoint
-CREATE INDEX "principal_permission_overrides_principal_idx" ON "principal_permission_overrides" ("principal_type","principal_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "principal_permission_overrides_uniq" ON "principal_permission_overrides" ("principal_type","principal_id","permission");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "principal_permission_overrides_principal_idx" ON "principal_permission_overrides" ("principal_type","principal_id");
 --> statement-breakpoint
 
 -- seed bot roles
