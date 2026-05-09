@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
-import { Search, Pencil, Trash2, Ban, VolumeX, Check, X } from "lucide-react";
+import { Search, Pencil, Trash2, Ban, VolumeX, Check, X, Info } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 interface UserRow {
@@ -20,6 +20,47 @@ interface UserRow {
   muteExpiresAt: string | null;
 }
 
+interface BanMuteRecord {
+  id: string;
+  reason: string;
+  createdAt: string;
+  expiresAt: string | null;
+  liftedAt: string | null;
+}
+
+interface UserDetails {
+  id: string;
+  displayName: string;
+  avatarUrl: string | null;
+  bannerUrl: string | null;
+  role: string;
+  email: string | null;
+  telegramUsername: string | null;
+  isAnon: boolean;
+  presenceOptOut: boolean;
+  createdAt: string;
+  passkeys: { id: string; name: string; deviceType: string; createdAt: string }[];
+  activeBans: BanMuteRecord[];
+  activeMutes: BanMuteRecord[];
+  bansHistory: BanMuteRecord[];
+  mutesHistory: BanMuteRecord[];
+}
+
+interface ActivityEvent {
+  type:
+    | "session_created"
+    | "session_revoked"
+    | "ban_applied"
+    | "ban_lifted"
+    | "mute_applied"
+    | "mute_lifted"
+    | "topic_joined"
+    | "message_activity";
+  timestamp: string;
+  description: string;
+  meta?: Record<string, string | number | null>;
+}
+
 const ROLES = ["user", "moderator", "admin"] as const;
 
 export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
@@ -35,6 +76,12 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
   const [banDuration, setBanDuration] = useState("");
   const [banning, setBanning] = useState(false);
   const [banError, setBanError] = useState<string | null>(null);
+  const [detailsUserId, setDetailsUserId] = useState<string | null>(null);
+  const [details, setDetails] = useState<UserDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [activity, setActivity] = useState<ActivityEvent[] | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityLimit, setActivityLimit] = useState(30);
 
   const search = useCallback((q: string) => {
     setLoading(true);
@@ -134,6 +181,41 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
       setBanning(false);
     }
   }
+
+  const fetchActivity = useCallback(async (userId: string, limit: number) => {
+    setActivityLoading(true);
+    try {
+      const res = await apiFetch(`/api/admin/users/${userId}/activity?limit=${limit}`);
+      if (res.ok) setActivity(await res.json());
+      else setActivity([]);
+    } catch {
+      setActivity([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, []);
+
+  async function openDetails(userId: string) {
+    setDetailsUserId(userId);
+    setDetails(null);
+    setDetailsLoading(true);
+    setActivity(null);
+    try {
+      const [detailsRes] = await Promise.all([
+        apiFetch(`/api/admin/users/${userId}`),
+        fetchActivity(userId, activityLimit),
+      ]);
+      if (detailsRes.ok) setDetails(await detailsRes.json());
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (detailsUserId) {
+      fetchActivity(detailsUserId, activityLimit);
+    }
+  }, [activityLimit, detailsUserId, fetchActivity]);
 
   return (
     <div>
@@ -281,39 +363,168 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
                 >
                   {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
-                {!isSelf && (
-                  <div className="ml-auto flex gap-1.5">
-                    <button
-                      onClick={() => { setBanTarget({ id: u.id, type: "mute" }); setBanReason(""); setBanDuration(""); }}
-                      disabled={dis}
-                      title="Mute"
-                      className="rounded-lg border border-border p-1.5 text-muted hover:border-accent hover:text-accent disabled:opacity-50"
-                    >
-                      <VolumeX className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => { setBanTarget({ id: u.id, type: "ban" }); setBanReason(""); setBanDuration(""); }}
-                      disabled={dis}
-                      title="Ban"
-                      className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
-                    >
-                      <Ban className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => deleteUser(u.id, u.displayName)}
-                      disabled={dis}
-                      title="Delete user"
-                      className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
+                <div className="ml-auto flex gap-1.5">
+                  <button
+                    onClick={() => openDetails(u.id)}
+                    title="Details"
+                    className="rounded-lg border border-border p-1.5 text-muted hover:border-accent hover:text-accent"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                  {!isSelf && (
+                    <>
+                      <button
+                        onClick={() => { setBanTarget({ id: u.id, type: "mute" }); setBanReason(""); setBanDuration(""); }}
+                        disabled={dis}
+                        title="Mute"
+                        className="rounded-lg border border-border p-1.5 text-muted hover:border-accent hover:text-accent disabled:opacity-50"
+                      >
+                        <VolumeX className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => { setBanTarget({ id: u.id, type: "ban" }); setBanReason(""); setBanDuration(""); }}
+                        disabled={dis}
+                        title="Ban"
+                        className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => deleteUser(u.id, u.displayName)}
+                        disabled={dis}
+                        title="Delete user"
+                        className="rounded-lg border border-border p-1.5 text-muted hover:border-danger hover:text-danger disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* User details modal */}
+      {detailsUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { setDetailsUserId(null); setActivity(null); }}>
+          <div className="w-full max-w-lg rounded-xl border border-border bg-panel p-5 shadow-xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-semibold">User Details</h2>
+              <button onClick={() => { setDetailsUserId(null); setActivity(null); }} className="text-muted hover:text-text"><X className="h-4 w-4" /></button>
+            </div>
+            {detailsLoading && <p className="text-sm text-muted">Loading…</p>}
+            {details && (
+              <div className="space-y-4 text-sm">
+                <div className="flex items-center gap-3">
+                  {details.avatarUrl && <img src={details.avatarUrl} className="h-12 w-12 rounded-full object-cover" alt="" />}
+                  <div>
+                    <p className="font-medium">{details.displayName}</p>
+                    <p className="text-xs text-muted capitalize">{details.role}{details.isAnon ? " · anon" : ""}</p>
+                  </div>
+                </div>
+                <table className="w-full text-xs border-collapse">
+                  <tbody>
+                    {[
+                      ["ID", details.id],
+                      ["Email", details.email ?? "—"],
+                      ["Telegram", details.telegramUsername ? `@${details.telegramUsername}` : "—"],
+                      ["Joined", new Date(details.createdAt).toLocaleString()],
+                      ["Presence opt-out", details.presenceOptOut ? "Yes" : "No"],
+                      ["Passkeys", details.passkeys.length > 0 ? details.passkeys.map(p => `${p.name} (${p.deviceType})`).join(", ") : "None"],
+                    ].map(([label, value]) => (
+                      <tr key={label} className="border-b border-border">
+                        <td className="py-1.5 pr-3 text-muted w-24">{label}</td>
+                        <td className="py-1.5 break-all">{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {details.activeBans.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-danger uppercase tracking-wide">Active Bans</p>
+                    {details.activeBans.map((b) => (
+                      <div key={b.id} className="rounded-lg border border-border bg-panel2 px-3 py-2 text-xs mb-1">
+                        <p>{b.reason}</p>
+                        <p className="text-muted">{new Date(b.createdAt).toLocaleString()}{b.expiresAt ? ` · until ${new Date(b.expiresAt).toLocaleString()}` : " · permanent"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {details.activeMutes.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-warning uppercase tracking-wide">Active Mutes</p>
+                    {details.activeMutes.map((m) => (
+                      <div key={m.id} className="rounded-lg border border-border bg-panel2 px-3 py-2 text-xs mb-1">
+                        <p>{m.reason}</p>
+                        <p className="text-muted">{new Date(m.createdAt).toLocaleString()}{m.expiresAt ? ` · until ${new Date(m.expiresAt).toLocaleString()}` : " · permanent"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {details.bansHistory.length > 0 && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted hover:text-text">Ban history ({details.bansHistory.length})</summary>
+                    <div className="mt-2 space-y-1">
+                      {details.bansHistory.map((b) => (
+                        <div key={b.id} className="rounded-lg border border-border bg-panel2 px-3 py-2">
+                          <p>{b.reason}</p>
+                          <p className="text-muted">{new Date(b.createdAt).toLocaleString()}{b.liftedAt ? ` · lifted ${new Date(b.liftedAt).toLocaleString()}` : b.expiresAt ? ` · until ${new Date(b.expiresAt).toLocaleString()}` : ""}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+                {details.mutesHistory.length > 0 && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted hover:text-text">Mute history ({details.mutesHistory.length})</summary>
+                    <div className="mt-2 space-y-1">
+                      {details.mutesHistory.map((m) => (
+                        <div key={m.id} className="rounded-lg border border-border bg-panel2 px-3 py-2">
+                          <p>{m.reason}</p>
+                          <p className="text-muted">{new Date(m.createdAt).toLocaleString()}{m.liftedAt ? ` · lifted ${new Date(m.liftedAt).toLocaleString()}` : m.expiresAt ? ` · until ${new Date(m.expiresAt).toLocaleString()}` : ""}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+                {/* Activity Log */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted uppercase tracking-wide">Activity Log</p>
+                    <select
+                      value={activityLimit}
+                      onChange={(e) => setActivityLimit(Number(e.target.value))}
+                      className="rounded border border-border bg-panel2 px-1.5 py-0.5 text-xs outline-none focus:border-accent"
+                    >
+                      {[30, 50, 100].map((n) => (
+                        <option key={n} value={n}>Show: {n}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {activityLoading && <p className="text-xs text-muted">Loading…</p>}
+                  {!activityLoading && activity !== null && activity.length === 0 && (
+                    <p className="text-xs text-muted">No activity recorded.</p>
+                  )}
+                  {!activityLoading && activity && activity.length > 0 && (
+                    <ul className="space-y-1 text-xs">
+                      {activity.map((ev, i) => (
+                        <li key={i} className="flex gap-2 items-start border-b border-border/50 pb-1 last:border-0">
+                          <span className="shrink-0 text-muted w-36">
+                            {new Date(ev.timestamp).toLocaleString()}
+                          </span>
+                          <span className="break-words min-w-0">{ev.description}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
