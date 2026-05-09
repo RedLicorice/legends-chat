@@ -64,3 +64,56 @@ export function can(user: AuthUser | null | undefined, permission: Permission): 
   if (!user) return false;
   return user.permissions.has(permission);
 }
+
+export type GrantAction = "view" | "read" | "post" | "reply";
+export type GrantEffect = "allow" | "deny";
+
+export interface TopicGrant {
+  action: string;
+  effect: GrantEffect;
+}
+
+export interface PermissionOverride {
+  permission: string;
+  effect: GrantEffect;
+}
+
+/**
+ * Applies per-principal allow/deny overrides on top of role permissions.
+ * 'allow' overrides add to the set; 'deny' overrides remove from it.
+ */
+export function resolvePermissions(
+  rolePerms: string[],
+  overrides: PermissionOverride[],
+): Set<string> {
+  const set = new Set(rolePerms);
+  for (const o of overrides) {
+    if (o.effect === "allow") set.add(o.permission);
+    else set.delete(o.permission);
+  }
+  return set;
+}
+
+/**
+ * Determines whether a principal may perform `action` in a topic.
+ * Resolution order:
+ *  1. admin role → always allowed
+ *  2. explicit deny grant → denied
+ *  3. explicit allow grant → allowed
+ *  4. actionRoles empty → allowed (no restriction)
+ *  5. role in actionRoles → allowed
+ *  6. denied
+ */
+export function canPrincipal(
+  grants: TopicGrant[],
+  actionRoles: string[],
+  principalRole: string,
+  action: GrantAction,
+): boolean {
+  if (principalRole === "admin") return true;
+  const forAction = grants.filter((g) => g.action === action);
+  if (forAction.some((g) => g.effect === "deny")) return false;
+  if (forAction.some((g) => g.effect === "allow")) return true;
+  if (actionRoles.length === 0) return true;
+  return actionRoles.includes(principalRole);
+}
