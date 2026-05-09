@@ -14,9 +14,11 @@ import { getCurrentUser } from "@/lib/auth";
 
 const bodySchema = z.object({
   role: z.enum(["user", "moderator", "admin"]).default("user"),
-  // null = unlimited (only allowed for user role)
   maxUses: z.number().int().positive().nullable().optional(),
-  expiresInDays: z.number().int().positive().max(365).nullable().default(7),
+  validFrom: z.string().datetime().optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+  expiresInDays: z.number().int().positive().max(365).nullable().optional(),
+  notes: z.string().max(500).optional(),
 });
 
 async function uniqueCode(): Promise<string> {
@@ -44,13 +46,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { role, expiresInDays } = parsed.data;
+  const { role, validFrom, expiresAt, expiresInDays, notes } = parsed.data;
   let { maxUses } = parsed.data;
 
   if (role !== "user" && !user.permissions.has(PERMISSIONS.INVITES_CREATE_ELEVATED)) {
     return NextResponse.json({ error: "forbidden: elevated role" }, { status: 403 });
   }
-  // Non-user codes are always single-use regardless of what the caller asked for.
   if (role !== "user") {
     maxUses = 1;
   } else if (maxUses === undefined) {
@@ -80,6 +81,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Resolve expiry: explicit expiresAt takes precedence over expiresInDays; default 7 days
+  let resolvedExpiresAt: Date | null = null;
+  if (expiresAt !== undefined) {
+    resolvedExpiresAt = expiresAt ? new Date(expiresAt) : null;
+  } else if (expiresInDays != null) {
+    resolvedExpiresAt = new Date(Date.now() + expiresInDays * 86_400_000);
+  } else {
+    resolvedExpiresAt = new Date(Date.now() + 7 * 86_400_000);
+  }
+
   const code = await uniqueCode();
   const [row] = await db
     .insert(inviteCodes)
@@ -88,7 +99,9 @@ export async function POST(req: NextRequest) {
       role,
       maxUses: maxUses ?? null,
       createdByUserId: user.id,
-      expiresAt: expiresInDays != null ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null,
+      validFrom: validFrom ? new Date(validFrom) : new Date(),
+      expiresAt: resolvedExpiresAt,
+      notes: notes ?? null,
     })
     .returning();
   return NextResponse.json({ invite: row });
@@ -100,7 +113,6 @@ export async function GET() {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  // Admins see all codes; everyone else sees their own.
   const isAdmin = user.permissions.has(PERMISSIONS.ADMIN_CONFIG);
 
   const rows = await db
@@ -110,7 +122,10 @@ export async function GET() {
       role: inviteCodes.role,
       maxUses: inviteCodes.maxUses,
       usesCount: inviteCodes.usesCount,
+      validFrom: inviteCodes.validFrom,
       expiresAt: inviteCodes.expiresAt,
+      disabledAt: inviteCodes.disabledAt,
+      notes: inviteCodes.notes,
       createdAt: inviteCodes.createdAt,
       createdBy: {
         id: users.id,
@@ -123,7 +138,6 @@ export async function GET() {
     .orderBy(desc(inviteCodes.createdAt))
     .limit(100);
 
-  // Fixed daily limit + today's used count so the UI can show it.
   const [quota] = await db
     .select()
     .from(inviteQuotaConfig)

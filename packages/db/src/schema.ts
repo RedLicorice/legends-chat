@@ -117,6 +117,7 @@ export const inviteCodes = pgTable(
     validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

@@ -218,6 +218,13 @@
       "when": 1747100000000,
       "tag": "0030_topic_password",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1747200000000,
+      "tag": "0031_invite_notes",
+      "breakpoints": true
     }
   ]
 }
