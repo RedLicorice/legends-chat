@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Plus, Trash2, Radio } from "lucide-react";
 import { ImageUploadButton } from "@/components/ImageUploadButton";
@@ -357,7 +357,7 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
   return (
     <div className="flex overflow-hidden rounded-xl border border-border" style={{ height: "min(calc(100vh - 12rem), 800px)" }}>
       {/* Left: topic list */}
-      <div className={`flex w-56 shrink-0 flex-col border-r border-border bg-panel ${selected ? "hidden md:flex" : "flex"}`}>
+      <div className={`flex-col border-r border-border bg-panel ${selected ? "hidden md:flex md:w-56 md:shrink-0" : "flex w-full md:w-56 md:shrink-0"}`}>
         <div className="flex items-center justify-between border-b border-border p-3">
           <span className="text-xs font-medium uppercase tracking-wide text-muted">Topics</span>
           <button
@@ -749,10 +749,61 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
 function AddGrantForm({ topicId, onAdded }: { topicId: string; onAdded: () => void }) {
   const [principalType, setPrincipalType] = useState<"user" | "bot">("user");
   const [principalId, setPrincipalId] = useState("");
+  const [principalName, setPrincipalName] = useState("");
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<{ id: string; label: string }[]>([]);
+  const [showResults, setShowResults] = useState(false);
   const [action, setAction] = useState("post");
   const [effect, setEffect] = useState("allow");
   const [expiresAt, setExpiresAt] = useState("");
   const [saving, setSaving] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowResults(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const doSearch = useCallback(async (q: string, type: "user" | "bot") => {
+    if (!q.trim()) { setResults([]); return; }
+    if (type === "user") {
+      const res = await fetch(`/api/admin/users?q=${encodeURIComponent(q)}`);
+      if (!res.ok) return;
+      const data = await res.json() as { id: string; displayName: string }[];
+      setResults(data.slice(0, 8).map((u) => ({ id: u.id, label: u.displayName })));
+    } else {
+      const res = await fetch("/api/admin/bots");
+      if (!res.ok) return;
+      const data = await res.json() as { id: string; name: string }[];
+      const filtered = data.filter((b) => b.name.toLowerCase().includes(q.toLowerCase()));
+      setResults(filtered.slice(0, 8).map((b) => ({ id: b.id, label: b.name })));
+    }
+    setShowResults(true);
+  }, []);
+
+  useEffect(() => {
+    if (!search.trim()) { setResults([]); setShowResults(false); return; }
+    const t = setTimeout(() => void doSearch(search, principalType), 250);
+    return () => clearTimeout(t);
+  }, [search, principalType, doSearch]);
+
+  function selectResult(r: { id: string; label: string }) {
+    setPrincipalId(r.id);
+    setPrincipalName(r.label);
+    setSearch(r.label);
+    setShowResults(false);
+  }
+
+  function handleTypeChange(t: "user" | "bot") {
+    setPrincipalType(t);
+    setPrincipalId("");
+    setPrincipalName("");
+    setSearch("");
+    setResults([]);
+  }
 
   async function submit() {
     if (!principalId.trim()) return;
@@ -765,6 +816,8 @@ function AddGrantForm({ topicId, onAdded }: { topicId: string; onAdded: () => vo
       });
       onAdded();
       setPrincipalId("");
+      setPrincipalName("");
+      setSearch("");
     } finally {
       setSaving(false);
     }
@@ -772,11 +825,35 @@ function AddGrantForm({ topicId, onAdded }: { topicId: string; onAdded: () => vo
 
   return (
     <div className="mt-3 flex flex-wrap items-end gap-2">
-      <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={principalType} onChange={(e) => setPrincipalType(e.target.value as "user" | "bot")}>
+      <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={principalType} onChange={(e) => handleTypeChange(e.target.value as "user" | "bot")}>
         <option value="user">User</option>
         <option value="bot">Bot</option>
       </select>
-      <input className="rounded border border-border bg-panel px-2 py-1 text-xs w-48" placeholder="Principal ID (UUID)" value={principalId} onChange={(e) => setPrincipalId(e.target.value)} />
+      <div ref={searchRef} className="relative">
+        <input
+          className="rounded border border-border bg-panel px-2 py-1 text-xs w-48"
+          placeholder={`Search ${principalType} by name…`}
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPrincipalId(""); setPrincipalName(""); }}
+          onFocus={() => { if (results.length > 0) setShowResults(true); }}
+        />
+        {principalId && <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-accent">✓</span>}
+        {showResults && results.length > 0 && (
+          <div className="absolute left-0 top-full z-50 mt-0.5 w-56 rounded border border-border bg-panel shadow-lg">
+            {results.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onMouseDown={() => selectResult(r)}
+                className="flex w-full flex-col px-2 py-1.5 text-left hover:bg-panel2"
+              >
+                <span className="text-xs font-medium">{r.label}</span>
+                <span className="font-mono text-[9px] text-muted">{r.id}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={action} onChange={(e) => setAction(e.target.value)}>
         <option value="view">view</option>
         <option value="read">read</option>
@@ -788,7 +865,7 @@ function AddGrantForm({ topicId, onAdded }: { topicId: string; onAdded: () => vo
         <option value="deny">deny</option>
       </select>
       <input type="datetime-local" className="rounded border border-border bg-panel px-2 py-1 text-xs" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-      <button type="button" onClick={submit} disabled={saving} className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-50">
+      <button type="button" onClick={submit} disabled={saving || !principalId} className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-50">
         {saving ? "…" : "Add Grant"}
       </button>
     </div>

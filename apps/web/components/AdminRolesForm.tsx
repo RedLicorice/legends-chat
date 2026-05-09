@@ -151,7 +151,7 @@ export function AdminRolesForm({ roles: initial }: Props) {
   return (
     <div className="flex overflow-hidden rounded-xl border border-border" style={{ height: "min(calc(100vh - 12rem), 800px)" }}>
       {/* Left: role list */}
-      <div className={`flex w-56 shrink-0 flex-col border-r border-border bg-panel ${selected ? "hidden md:flex" : "flex"}`}>
+      <div className={`flex-col border-r border-border bg-panel ${selected ? "hidden md:flex md:w-56 md:shrink-0" : "flex w-full md:w-56 md:shrink-0"}`}>
         <div className="flex items-center justify-between border-b border-border p-3">
           <span className="text-xs font-medium uppercase tracking-wide text-muted">Roles</span>
           <button

@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
-import { Search, Pencil, Trash2, Ban, VolumeX, Check, X, Info } from "lucide-react";
+import { Search, Pencil, Trash2, Ban, VolumeX, Check, X, Info, Copy } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 interface UserRow {
@@ -390,6 +390,13 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
                   {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
                 <div className="ml-auto flex gap-1.5">
+                  <button
+                    onClick={() => void navigator.clipboard.writeText(u.id)}
+                    title={`Copy ID: ${u.id}`}
+                    className="rounded-lg border border-border p-1.5 text-muted hover:border-accent hover:text-accent"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
                   <button
                     onClick={() => openDetails(u.id)}
                     title="Details"
