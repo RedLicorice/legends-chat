@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  serial,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -113,7 +114,9 @@ export const inviteCodes = pgTable(
     maxUses: integer("max_uses"),
     usesCount: integer("uses_count").notNull().default(0),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -237,6 +240,7 @@ export const messages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    hashtags: text("hashtags").array().default(sql`'{}'::text[]`),
   },
   (t) => ({
     topicCreatedIdx: index("messages_topic_created_idx").on(t.topicId, t.createdAt),
@@ -522,5 +526,14 @@ export const customGifs = pgTable("custom_gifs", {
   title: text("title").notNull().default(""),
   tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
   uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const symbols = pgTable("symbols", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  linkedUserId: uuid("linked_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
