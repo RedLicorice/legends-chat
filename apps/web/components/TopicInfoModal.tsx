@@ -1,19 +1,32 @@
 "use client";
 
 import { X } from "lucide-react";
+import { useTopicHashtags } from "@/hooks/useTopicHashtags";
+import { useSymbols } from "@/contexts/SymbolsContext";
+import type { Socket } from "socket.io-client";
 
 interface Props {
   topic: {
+    id: string;
     title: string;
     iconUrl: string | null;
     bannerUrl: string | null;
     description: string | null;
   };
+  socket: Socket | null;
   onClose: () => void;
+  onHashtagFilter: (tag: string) => void;
 }
 
-export function TopicInfoModal({ topic, onClose }: Props) {
+export function TopicInfoModal({ topic, socket, onClose, onHashtagFilter }: Props) {
   const initials = topic.title.slice(0, 1).toUpperCase();
+  const { tags } = useTopicHashtags(topic.id, socket);
+  const { getSymbol } = useSymbols();
+
+  function handleTagClick(tag: string) {
+    onClose();
+    onHashtagFilter(tag);
+  }
 
   return (
     <div
@@ -58,6 +71,44 @@ export function TopicInfoModal({ topic, onClose }: Props) {
             <p className="mt-1 text-sm text-muted leading-relaxed">{topic.description}</p>
           ) : (
             <p className="mt-1 text-sm text-muted italic">No description.</p>
+          )}
+
+          {/* Tag cloud */}
+          {tags.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-muted uppercase tracking-wide">Tags</p>
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map(({ tag }) => {
+                  const isSymbol = tag.startsWith("$");
+                  const sym = isSymbol ? getSymbol(tag.slice(1)) : null;
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => handleTagClick(tag)}
+                      className={[
+                        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-mono transition",
+                        isSymbol
+                          ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                          : "bg-panel2 text-muted hover:bg-border hover:text-text",
+                      ].join(" ")}
+                    >
+                      {sym?.linkedUserAvatarUrl && (
+                        <img
+                          src={sym.linkedUserAvatarUrl}
+                          alt=""
+                          className="h-3.5 w-3.5 rounded-full object-cover"
+                        />
+                      )}
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {tags.length === 0 && (
+            <p className="mt-4 text-xs text-muted">No tags yet.</p>
           )}
         </div>
       </div>
