@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Plus, Trash2, Radio } from "lucide-react";
 import { ImageUploadButton } from "@/components/ImageUploadButton";
@@ -24,6 +24,7 @@ interface TopicRow {
   viewRoles: string[];
   postRoles: string[];
   readRoles: string[];
+  replyRoles: string[];
   autoDeleteMode: "none" | "age" | "count";
   autoDeleteAgeSeconds: number | null;
   autoDeleteMaxMessages: number | null;
@@ -80,12 +81,22 @@ function RolesCheckboxes({
   );
 }
 
+interface Grant {
+  topicId: string;
+  principalType: string;
+  principalId: string;
+  principalName: string;
+  action: string;
+  effect: string;
+  expiresAt: string | null;
+}
+
 type RetentionDraft = Record<string, { ageValue: string; ageUnit: "hours" | "days"; maxMessages: string }>;
 const EMPTY_CREATE = { slug: "", title: "", description: "" };
 
-export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
+export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: TopicRow[]; initialSelected?: string }) {
   const [topics, setTopics] = useState(initial);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
   const [allRoles, setAllRoles] = useState<string[]>(["user", "moderator", "admin"]);
   const [saving, setSaving] = useState<string | null>(null);
   const [purging, setPurging] = useState<string | null>(null);
@@ -116,6 +127,8 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
   const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [grants, setGrants] = useState<Grant[]>([]);
+  const [grantsLoading, setGrantsLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -127,6 +140,25 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
       })
       .catch(() => {});
   }, []);
+
+  const fetchGrants = useCallback(async (topicId: string) => {
+    setGrantsLoading(true);
+    try {
+      const res = await fetch(`/api/admin/topics/${topicId}/grants`);
+      const data = await res.json() as { grants: Grant[] };
+      setGrants(data.grants ?? []);
+    } finally {
+      setGrantsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selected && selected !== "__new__") {
+      void fetchGrants(selected);
+    } else {
+      setGrants([]);
+    }
+  }, [selected, fetchGrants]);
 
   async function save(id: string, patch: Partial<TopicRow>, extra?: Record<string, unknown>) {
     setSaving(id);
@@ -297,6 +329,7 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
         viewRoles: (t.viewRoles as string[] | null) ?? [],
         postRoles: (t.postRoles as string[] | null) ?? [],
         readRoles: (t.readRoles as string[] | null) ?? [],
+        replyRoles: (t.replyRoles as string[] | null) ?? [],
         autoDeleteMode: t.autoDeleteMode,
         autoDeleteAgeSeconds: t.autoDeleteAgeSeconds,
         autoDeleteMaxMessages: t.autoDeleteMaxMessages,
@@ -501,6 +534,17 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
                 <RolesCheckboxes roles={topic.postRoles} allRoles={allRoles} onSave={(r) => save(topic.id, { postRoles: r })} disabled={dis} />
                 <p className="mt-1 text-xs text-muted">{topic.postRoles.length === 0 ? "Everyone can post." : `Only ${topic.postRoles.join(", ")} can post.`}</p>
               </div>
+              {topic.isFeed && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted">Who can comment?</label>
+                  <RolesCheckboxes roles={topic.replyRoles} allRoles={allRoles} onSave={(r) => save(topic.id, { replyRoles: r })} disabled={dis} />
+                  <p className="mt-1 text-xs text-muted">
+                    {topic.replyRoles.length === 0
+                      ? "Everyone who can read may comment."
+                      : `Only ${topic.replyRoles.join(", ")} may comment.`}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* P2P config */}
@@ -637,6 +681,59 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
               )}
             </div>
 
+            {/* Per-Principal Access Grants */}
+            <div className="mt-6 border-t border-border pt-3">
+              <h3 className="mb-3 text-sm font-semibold">Per-Principal Access Grants</h3>
+
+              {grantsLoading ? (
+                <p className="text-xs text-muted">Loading…</p>
+              ) : grants.length === 0 ? (
+                <p className="text-xs text-muted">No per-principal grants.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-muted">
+                      <th className="pb-1 pr-2">Principal</th>
+                      <th className="pb-1 pr-2">Type</th>
+                      <th className="pb-1 pr-2">Action</th>
+                      <th className="pb-1 pr-2">Effect</th>
+                      <th className="pb-1 pr-2">Expires</th>
+                      <th className="pb-1" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grants.map((g) => (
+                      <tr key={`${g.principalId}-${g.action}`} className={g.expiresAt && new Date(g.expiresAt) < new Date() ? "opacity-40" : ""}>
+                        <td className="pr-2 py-0.5">{g.principalName}</td>
+                        <td className="pr-2 py-0.5">{g.principalType}</td>
+                        <td className="pr-2 py-0.5">{g.action}</td>
+                        <td className={`pr-2 py-0.5 font-medium ${g.effect === "allow" ? "text-green-500" : "text-red-500"}`}>{g.effect}</td>
+                        <td className="pr-2 py-0.5">{g.expiresAt ? new Date(g.expiresAt).toLocaleDateString() : "—"}</td>
+                        <td className="py-0.5">
+                          <button
+                            type="button"
+                            className="text-muted hover:text-red-500 transition"
+                            onClick={async () => {
+                              await fetch(`/api/admin/topics/${topic.id}/grants`, {
+                                method: "DELETE",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ principalType: g.principalType, principalId: g.principalId, action: g.action }),
+                              });
+                              await fetchGrants(topic.id);
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <AddGrantForm topicId={topic.id} onAdded={() => fetchGrants(topic.id)} />
+            </div>
+
             {errors[topic.id] && <p className="text-xs text-danger">{errors[topic.id]}</p>}
           </div>
         ) : (
@@ -645,6 +742,55 @@ export function AdminTopicsForm({ topics: initial }: { topics: TopicRow[] }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function AddGrantForm({ topicId, onAdded }: { topicId: string; onAdded: () => void }) {
+  const [principalType, setPrincipalType] = useState<"user" | "bot">("user");
+  const [principalId, setPrincipalId] = useState("");
+  const [action, setAction] = useState("post");
+  const [effect, setEffect] = useState("allow");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!principalId.trim()) return;
+    setSaving(true);
+    try {
+      await fetch(`/api/admin/topics/${topicId}/grants`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ principalType, principalId: principalId.trim(), action, effect, expiresAt: expiresAt || null }),
+      });
+      onAdded();
+      setPrincipalId("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-end gap-2">
+      <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={principalType} onChange={(e) => setPrincipalType(e.target.value as "user" | "bot")}>
+        <option value="user">User</option>
+        <option value="bot">Bot</option>
+      </select>
+      <input className="rounded border border-border bg-panel px-2 py-1 text-xs w-48" placeholder="Principal ID (UUID)" value={principalId} onChange={(e) => setPrincipalId(e.target.value)} />
+      <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={action} onChange={(e) => setAction(e.target.value)}>
+        <option value="view">view</option>
+        <option value="read">read</option>
+        <option value="post">post</option>
+        <option value="reply">reply</option>
+      </select>
+      <select className="rounded border border-border bg-panel px-2 py-1 text-xs" value={effect} onChange={(e) => setEffect(e.target.value)}>
+        <option value="allow">allow</option>
+        <option value="deny">deny</option>
+      </select>
+      <input type="datetime-local" className="rounded border border-border bg-panel px-2 py-1 text-xs" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+      <button type="button" onClick={submit} disabled={saving} className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-50">
+        {saving ? "…" : "Add Grant"}
+      </button>
     </div>
   );
 }
