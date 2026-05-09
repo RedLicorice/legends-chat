@@ -195,9 +195,6 @@ export function AppSidebar({
                   <Link href="/" title="Home" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
                     <Home className="h-5 w-5" />
                   </Link>
-                  <Link href="/settings" title="Settings" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
-                    <Settings className="h-5 w-5" />
-                  </Link>
                   {isStaff && (
                     <Link href="/admin" title="Admin" className="rounded-lg p-2 text-muted hover:text-text hover:bg-panel2 transition">
                       <Shield className="h-5 w-5" />
@@ -291,12 +288,6 @@ export function AppSidebar({
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
                 >
                   <Home className="h-4 w-4" /> Home
-                </Link>
-                <Link
-                  href="/settings"
-                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-                >
-                  <Settings className="h-4 w-4" /> Settings
                 </Link>
                 {isStaff && (
                   <Link
