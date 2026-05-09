@@ -9,7 +9,17 @@ self.addEventListener("activate", (event) => {
 });
 
 // Required by Android Chrome for PWA install eligibility.
+// Skip navigation and RSC requests so the browser handles them natively —
+// the previous pass-through caused the SW to follow redirects transparently,
+// hiding 302s from the Next.js client router and delivering HTML to the RSC
+// parser instead of an RSC payload. That killed React hydration in PWA mode.
 self.addEventListener("fetch", (event) => {
+  if (event.request.mode === "navigate") return;
+  if (
+    event.request.headers.has("RSC") ||
+    event.request.headers.has("Next-Router-State-Tree") ||
+    event.request.headers.has("Next-Router-Prefetch")
+  ) return;
   event.respondWith(fetch(event.request));
 });
 
