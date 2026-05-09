@@ -217,6 +217,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressMoved = useRef(false);
   const isSelecting = selectedIds.size > 0;
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
+  const [replyingToPost, setReplyingToPost] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState("");
 
   const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
 
@@ -380,6 +383,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     socket.on(WS_EVENTS.MESSAGE_NEW, (msg: Message) => {
       if (!active || msg.topicId !== topic.id) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      if (msg.replyToMessageId && topic.isFeed) {
+        setExpandedThreads((prev) => new Set([...prev, String(msg.replyToMessageId)]));
+      }
     });
     socket.on(WS_EVENTS.POLL_UPDATED, (d: { pollId: string; options: PollOption[]; totalVotes: number; isClosed: boolean }) => {
       if (!active) return;
@@ -897,6 +903,23 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !mute && !uploading && canPost;
 
+  function toggleThread(postId: string) {
+    setExpandedThreads((prev) => {
+      const next = new Set(prev);
+      if (next.has(postId)) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
+  }
+
+  function sendReply(parentId: string, text: string) {
+    if (!socketRef.current) return;
+    socketRef.current.emit(WS_EVENTS.MESSAGE_SEND, {
+      topicId: topic.id,
+      content: { text, attachments: [], replyToMessageId: parentId },
+    });
+  }
+
   const filteredMembers = useMemo(() => {
     const q = membersSearch.trim().toLowerCase();
     if (!q) return members;
@@ -1169,11 +1192,24 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
             onDismiss={handleDismissWarning}
           />
         )}
+        {(() => {
+          const topLevelMessages = topic.isFeed ? messages.filter((m) => !m.replyToMessageId) : messages;
+          const repliesByParent = topic.isFeed
+            ? messages.reduce<Map<string, Message[]>>((acc, m) => {
+                if (!m.replyToMessageId) return acc;
+                const parentId = String(m.replyToMessageId);
+                const arr = acc.get(parentId) ?? [];
+                arr.push(m);
+                acc.set(parentId, arr);
+                return acc;
+              }, new Map())
+            : new Map<string, Message[]>();
+          return (
         <AnimatePresence initial={false}>
-          {messages.map((m, i) => {
+          {topLevelMessages.map((m, i) => {
             const mine = m.senderUserId === currentUser.id;
             const perEmoji = reactionsByMessage.get(m.id);
-            const prevMsg = messages[i - 1];
+            const prevMsg = topLevelMessages[i - 1];
             const isNewGroup =
               !prevMsg ||
               prevMsg.senderUserId !== m.senderUserId ||
@@ -1270,6 +1306,93 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                       onClose={() => setPickerFor(null)}
                     />
                   )}
+
+                  {/* Thread section */}
+                  {(() => {
+                    const postId = String(m.id);
+                    const replies = repliesByParent.get(postId) ?? [];
+                    const isExpanded = expandedThreads.has(postId);
+                    return (
+                      <div className="mt-3 pt-3 border-t border-border/50">
+                        <button
+                          type="button"
+                          className="text-xs text-muted hover:text-text transition"
+                          onClick={(e) => { e.stopPropagation(); toggleThread(postId); }}
+                        >
+                          {replies.length > 0
+                            ? `${isExpanded ? "Hide" : "Show"} ${replies.length} comment${replies.length === 1 ? "" : "s"}`
+                            : canReply ? "Leave a comment" : "No comments yet"}
+                        </button>
+
+                        {isExpanded && (
+                          <div className="mt-3 space-y-3">
+                            {replies.map((r) => (
+                              <div key={String(r.id)} className="flex items-start gap-2">
+                                <Avatar
+                                  name={r.senderDisplayName ?? (r.senderUserId ? null : (communityName ?? "System"))}
+                                  url={r.senderAvatarUrl ?? (r.senderUserId ? null : null)}
+                                  size={6}
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-xs font-medium">{r.senderDisplayName ?? communityName ?? "System"}</span>
+                                    <span suppressHydrationWarning className="text-[10px] text-muted">{friendlyTime(r.createdAt)}</span>
+                                  </div>
+                                  <div className="text-sm text-text">{r.text}</div>
+                                </div>
+                              </div>
+                            ))}
+
+                            {canReply && replyingToPost !== postId && (
+                              <button
+                                type="button"
+                                className="text-xs text-accent mt-1"
+                                onClick={(e) => { e.stopPropagation(); setReplyingToPost(postId); }}
+                              >
+                                + Comment
+                              </button>
+                            )}
+
+                            {canReply && replyingToPost === postId && (
+                              <div className="flex items-start gap-2 mt-2">
+                                <textarea
+                                  className="flex-1 rounded border border-border bg-panel px-2 py-1.5 text-sm resize-none"
+                                  rows={2}
+                                  placeholder="Write a comment…"
+                                  value={replyDraft}
+                                  onChange={(e) => setReplyDraft(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => {
+                                    e.stopPropagation();
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                      e.preventDefault();
+                                      if (!replyDraft.trim()) return;
+                                      sendReply(postId, replyDraft.trim());
+                                      setReplyDraft("");
+                                      setReplyingToPost(null);
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="rounded bg-accent px-2 py-1.5 text-xs text-white"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!replyDraft.trim()) return;
+                                    sendReply(postId, replyDraft.trim());
+                                    setReplyDraft("");
+                                    setReplyingToPost(null);
+                                  }}
+                                >
+                                  Send
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </motion.div>
               );
             }
@@ -1513,6 +1636,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
             );
           })}
         </AnimatePresence>
+          );
+        })()}
       </div>
 
       {threadFor && (
