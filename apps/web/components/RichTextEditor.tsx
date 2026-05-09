@@ -21,6 +21,9 @@ interface MentionMember {
   avatarUrl: string | null;
 }
 
+interface TagEntry { tag: string; count: number; }
+interface AppSymbolEntry { symbol: string; name: string; avatarUrl: string | null; }
+
 interface Props {
   value: string;
   onChange: (markdown: string) => void;
@@ -30,6 +33,8 @@ interface Props {
   enterSends?: boolean;
   disabled?: boolean;
   members?: MentionMember[];
+  topicTags?: TagEntry[];
+  symbols?: AppSymbolEntry[];
 }
 
 function ToolbarBtn({
@@ -182,14 +187,125 @@ function buildMentionSuggestion(membersRef: React.RefObject<MentionMember[]>) {
   };
 }
 
+function buildTagSuggestion(
+  getItems: (query: string) => { id: string; label: string; sub?: string; avatarUrl?: string | null }[],
+) {
+  return {
+    items: ({ query }: { query: string }) => getItems(query).slice(0, 8),
+    render: () => {
+      let el: HTMLDivElement | null = null;
+      let selectedIndex = 0;
+      let currentItems: { id: string; label: string; sub?: string; avatarUrl?: string | null }[] = [];
+      let currentCommand: ((props: { id: string; label: string }) => void) | null = null;
+
+      function renderItems() {
+        if (!el) return;
+        el.innerHTML = "";
+        if (currentItems.length === 0) { el.style.display = "none"; return; }
+        el.style.display = "";
+        currentItems.forEach((item, i) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = [
+            "w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition cursor-pointer",
+            i === selectedIndex
+              ? "bg-[color:var(--ch-panel2,#1e2130)] text-[color:var(--ch-text,#e8eaf2)]"
+              : "text-[color:var(--ch-muted,#6b7280)] hover:bg-[color:var(--ch-panel2,#1e2130)] hover:text-[color:var(--ch-text,#e8eaf2)]",
+          ].join(" ");
+          if (item.avatarUrl) {
+            const img = document.createElement("img");
+            img.src = item.avatarUrl;
+            img.className = "h-6 w-6 rounded-full object-cover shrink-0";
+            btn.appendChild(img);
+          }
+          const labelEl = document.createElement("span");
+          labelEl.textContent = item.label;
+          btn.appendChild(labelEl);
+          if (item.sub) {
+            const sub = document.createElement("span");
+            sub.className = "text-xs text-[color:var(--ch-muted,#6b7280)] ml-auto";
+            sub.textContent = item.sub;
+            btn.appendChild(sub);
+          }
+          btn.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            currentCommand?.({ id: item.id, label: item.label });
+          });
+          el!.appendChild(btn);
+        });
+      }
+
+      function position(clientRect: (() => DOMRect | null) | null | undefined) {
+        if (!el || !clientRect) return;
+        const rect = clientRect();
+        if (!rect) return;
+        const vvh = window.visualViewport?.height ?? window.innerHeight;
+        const vvy = window.visualViewport?.offsetTop ?? 0;
+        const estimatedH = Math.min(currentItems.length * 44 + 8, 320);
+        const spaceBelow = (vvy + vvh) - rect.bottom;
+        const top = spaceBelow >= estimatedH
+          ? rect.bottom + 4
+          : Math.max(vvy + 4, rect.top - estimatedH - 4);
+        el.style.top = `${top}px`;
+        el.style.left = `${rect.left}px`;
+        el.style.maxWidth = `${window.innerWidth - rect.left - 8}px`;
+      }
+
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onStart(props: any) {
+          currentItems = props.items;
+          currentCommand = props.command;
+          selectedIndex = 0;
+          el = document.createElement("div");
+          el.className = "fixed z-[9999] min-w-[180px] rounded-xl border border-[color:var(--ch-border,#2a2d3e)] bg-[color:var(--ch-panel,#141721)] shadow-2xl py-1 overflow-y-auto";
+          el.style.maxHeight = "320px";
+          document.body.appendChild(el);
+          position(props.clientRect);
+          renderItems();
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onUpdate(props: any) {
+          currentItems = props.items;
+          currentCommand = props.command;
+          selectedIndex = 0;
+          position(props.clientRect);
+          renderItems();
+        },
+        onKeyDown({ event }: { event: KeyboardEvent }) {
+          if (!currentItems.length) return false;
+          if (event.key === "ArrowDown") { selectedIndex = (selectedIndex + 1) % currentItems.length; renderItems(); return true; }
+          if (event.key === "ArrowUp") { selectedIndex = (selectedIndex - 1 + currentItems.length) % currentItems.length; renderItems(); return true; }
+          if (event.key === "Enter" || event.key === "Tab") {
+            const item = currentItems[selectedIndex];
+            if (item) currentCommand?.({ id: item.id, label: item.label });
+            return true;
+          }
+          return false;
+        },
+        onExit() { el?.remove(); el = null; },
+      };
+    },
+  };
+}
+
+const HashtagMention = Mention.extend({ name: "hashtagMention" });
+const SymbolMention = Mention.extend({ name: "symbolMention" });
+
 export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function RichTextEditor(
-  { value, onChange, onSubmit, placeholder, compact, enterSends, disabled, members },
+  { value, onChange, onSubmit, placeholder, compact, enterSends, disabled, members, topicTags, symbols },
   ref,
 ) {
   const sendOnEnter = enterSends !== undefined ? enterSends : !!compact;
 
   const membersRef = useRef<MentionMember[]>(members ?? []);
   useEffect(() => { membersRef.current = members ?? []; }, [members]);
+
+  const topicTagsRef = useRef<TagEntry[]>(topicTags ?? []);
+  useEffect(() => { topicTagsRef.current = topicTags ?? []; }, [topicTags]);
+
+  const symbolsRef = useRef<AppSymbolEntry[]>(symbols ?? []);
+  useEffect(() => { symbolsRef.current = symbols ?? []; }, [symbols]);
 
   const editor = useEditor({
     extensions: [
@@ -200,6 +316,37 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
       Mention.configure({
         HTMLAttributes: { class: "mention-tag" },
         suggestion: buildMentionSuggestion(membersRef),
+      }),
+      HashtagMention.configure({
+        HTMLAttributes: { class: "hashtag-tag" },
+        suggestion: {
+          char: "#",
+          ...buildTagSuggestion((query) => {
+            const q = query.toLowerCase();
+            return (topicTagsRef.current ?? [])
+              .filter((t) => t.tag.slice(1).includes(q))
+              .sort((a, b) => b.count - a.count)
+              .slice(0, 8)
+              .map((t) => ({ id: t.tag, label: t.tag }));
+          }),
+        },
+      }),
+      SymbolMention.configure({
+        HTMLAttributes: { class: "symbol-tag" },
+        suggestion: {
+          char: "$",
+          ...buildTagSuggestion((query) => {
+            const q = query.toLowerCase();
+            return (symbolsRef.current ?? [])
+              .filter((s) => s.symbol.includes(q) || s.name.toLowerCase().includes(q))
+              .map((s) => ({
+                id: `$${s.symbol}`,
+                label: `$${s.symbol}`,
+                sub: s.name,
+                avatarUrl: s.avatarUrl,
+              }));
+          }),
+        },
       }),
     ],
     content: value ? { type: "doc", content: [] } : undefined,
