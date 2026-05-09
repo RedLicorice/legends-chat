@@ -110,6 +110,8 @@ interface TopicViewProps {
   currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   giphyEnabled?: boolean;
+  communityName?: string | null;
+  communityIconUrl?: string | null;
   highlightMessageId?: string;
   onMenuOpen?: () => void;
   onConnectionChange?: (connected: boolean) => void;
@@ -157,7 +159,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1091,7 +1093,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
                   {!mine ? (
                     <div className="mt-1 w-8 shrink-0 flex items-start justify-center">
                       <button type="button" onClick={() => msg.senderUserId && setViewingUserId(msg.senderUserId)} className="rounded-full focus:outline-none">
-                        <Avatar name={msg.senderDisplayName} url={msg.senderAvatarUrl} size={8} />
+                        <Avatar name={msg.senderDisplayName ?? (msg.senderUserId ? null : (communityName ?? "System"))} url={msg.senderAvatarUrl ?? (msg.senderUserId ? null : (communityIconUrl ?? null))} size={8} />
                       </button>
                     </div>
                   ) : (
@@ -1204,13 +1206,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
                   )}
                   <div className="mb-3 flex items-center gap-3">
                     <Avatar
-                      name={m.senderDisplayName}
-                      url={m.senderAvatarUrl}
+                      name={m.senderDisplayName ?? (m.senderUserId ? null : (communityName ?? "System"))}
+                      url={m.senderAvatarUrl ?? (m.senderUserId ? null : (communityIconUrl ?? null))}
                       size={9}
                       online={!currentUser.presenceOptOut && !!m.senderUserId && onlineUsers.has(m.senderUserId)}
                     />
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{m.senderDisplayName ?? "System"}</div>
+                      <div className="text-sm font-medium">{m.senderDisplayName ?? communityName ?? "System"}</div>
                       <div suppressHydrationWarning className="text-xs text-muted">{friendlyTime(m.createdAt)}</div>
                     </div>
                     <div className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100">
@@ -1299,7 +1301,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, highlightMes
                       </button>
                     ) : isNewGroup ? (
                       <button type="button" onClick={(e) => { e.stopPropagation(); m.senderUserId && setViewingUserId(m.senderUserId); }} className="rounded-full focus:outline-none">
-                        <Avatar name={m.senderDisplayName} url={m.senderAvatarUrl} size={8}
+                        <Avatar name={m.senderDisplayName ?? (m.senderUserId ? null : (communityName ?? "System"))} url={m.senderAvatarUrl ?? (m.senderUserId ? null : (communityIconUrl ?? null))} size={8}
                           online={!currentUser.presenceOptOut && !!m.senderUserId && onlineUsers.has(m.senderUserId)} />
                       </button>
                     ) : null}

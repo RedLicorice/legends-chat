@@ -15,12 +15,14 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const [topic, topicList, mute, giphySetting, passkeyCount] = await Promise.all([
+  const [topic, topicList, mute, giphySetting, passkeyCount, communityName, communityIconUrl] = await Promise.all([
     db.select().from(topics).where(eq(topics.slug, slug)).limit(1).then((r) => r[0]),
     listTopicsForUser(user.id, user.role, user.permissions),
     getUserMute(user.id),
     getSetting(db, "giphy_enabled"),
     db.select({ n: count() }).from(passkeyCredentials).where(eq(passkeyCredentials.userId, user.id)).then((r) => r[0]?.n ?? 0),
+    getSetting(db, "community_name").catch(() => null),
+    getSetting(db, "pwa_icon_url").catch(() => null),
   ]);
   if (!topic) notFound();
 
@@ -38,6 +40,8 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
       mute={mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null}
       hasPasskey={passkeyCount > 0}
       giphyEnabled={giphySetting === "true"}
+      communityName={communityName ?? null}
+      communityIconUrl={communityIconUrl ?? null}
       highlightMessageId={highlightMessageId}
     />
   );

@@ -26,10 +26,12 @@ interface Props {
   mute: { reason: string; expiresAt: string | null } | null;
   hasPasskey: boolean;
   giphyEnabled?: boolean;
+  communityName?: string | null;
+  communityIconUrl?: string | null;
   highlightMessageId?: string;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasPasskey, giphyEnabled, highlightMessageId }: Props) {
+export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
@@ -161,6 +163,8 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
               }}
               mute={mute}
               giphyEnabled={giphyEnabled}
+              communityName={communityName}
+              communityIconUrl={communityIconUrl}
               highlightMessageId={highlightMessageId}
               onMenuOpen={() => setSidebarOpen(true)}
               onConnectionChange={setConnected}
