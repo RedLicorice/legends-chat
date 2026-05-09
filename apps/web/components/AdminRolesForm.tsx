@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Copy } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Copy } from "lucide-react";
 import { PERMISSIONS } from "@legends/shared";
 
 interface RoleData {
@@ -44,8 +44,11 @@ interface Props {
   roles: RoleData[];
 }
 
+const EMPTY_CREATE = { name: "", label: "", cloneFrom: "" };
+
 export function AdminRolesForm({ roles: initial }: Props) {
   const [roles, setRoles] = useState(initial);
+  const [selected, setSelected] = useState<string | null>(null);
   const [editPerms, setEditPerms] = useState<Record<string, string[]>>(() =>
     Object.fromEntries(initial.map((r) => [r.name, r.permissions])),
   );
@@ -56,27 +59,17 @@ export function AdminRolesForm({ roles: initial }: Props) {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
-  const [showCreate, setShowCreate] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [createLabel, setCreateLabel] = useState("");
-  const [cloneFrom, setCloneFrom] = useState("");
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [topicPerms, setTopicPerms] = useState<TopicPerm[]>([]);
 
   useEffect(() => {
-    // Load topics to build dynamic topic permission list
     apiFetch("/api/admin/topics")
-      .then((r) => r.ok ? r.json() : null)
+      .then((r) => (r.ok ? r.json() : null))
       .then((data: { topics: { slug: string; title: string }[] } | null) => {
         if (!data?.topics) return;
-        setTopicPerms(
-          data.topics.map((t) => ({
-            slug: t.slug,
-            title: t.title,
-            actions: ["view", "read", "post"],
-          })),
-        );
+        setTopicPerms(data.topics.map((t) => ({ slug: t.slug, title: t.title, actions: ["view", "read", "post"] })));
       })
       .catch(() => {});
   }, []);
@@ -111,6 +104,7 @@ export function AdminRolesForm({ roles: initial }: Props) {
         throw new Error(d.error ?? "delete failed");
       }
       setRoles((prev) => prev.filter((r) => r.name !== name));
+      setSelected(null);
     } catch (e) {
       setErrors((prev) => ({ ...prev, [name]: (e as Error).message }));
     } finally {
@@ -119,15 +113,15 @@ export function AdminRolesForm({ roles: initial }: Props) {
   }
 
   async function createRole() {
-    const name = createName.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
-    if (!name || !createLabel.trim()) { setCreateError("Name and label required"); return; }
+    const name = createForm.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (!name || !createForm.label.trim()) { setCreateError("Name and label required"); return; }
     setCreating(true);
     setCreateError(null);
     try {
       const res = await apiFetch("/api/admin/roles", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, label: createLabel.trim(), cloneFrom: cloneFrom || undefined }),
+        body: JSON.stringify({ name, label: createForm.label.trim(), cloneFrom: createForm.cloneFrom || undefined }),
       });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error ?? "Create failed"); return; }
@@ -135,10 +129,8 @@ export function AdminRolesForm({ roles: initial }: Props) {
       setRoles((prev) => [...prev, newRole]);
       setEditPerms((p) => ({ ...p, [newRole.name]: newRole.permissions }));
       setEditLabels((l) => ({ ...l, [newRole.name]: newRole.label }));
-      setCreateName("");
-      setCreateLabel("");
-      setCloneFrom("");
-      setShowCreate(false);
+      setCreateForm(EMPTY_CREATE);
+      setSelected(newRole.name);
     } catch {
       setCreateError("Create failed");
     } finally {
@@ -153,85 +145,115 @@ export function AdminRolesForm({ roles: initial }: Props) {
     });
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Create form */}
-      {showCreate ? (
-        <div className="rounded-xl border border-accent bg-panel p-5 space-y-3">
-          <h2 className="text-sm font-semibold">New role</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Name</label>
-              <input
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
-                placeholder="premium"
-                className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm font-mono outline-none focus:border-accent"
-              />
-              <p className="mt-1 text-xs text-muted">Lowercase letters, numbers, underscores.</p>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Label</label>
-              <input
-                value={createLabel}
-                onChange={(e) => setCreateLabel(e.target.value)}
-                placeholder="Premium"
-                className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Copy permissions from</label>
-            <select
-              value={cloneFrom}
-              onChange={(e) => setCloneFrom(e.target.value)}
-              className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent sm:w-64"
-            >
-              <option value="">— start empty —</option>
-              {roles.map((r) => <option key={r.name} value={r.name}>{r.label} ({r.name})</option>)}
-            </select>
-          </div>
-          {createError && <p className="text-xs text-danger">{createError}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={createRole}
-              disabled={creating || !createName || !createLabel}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {creating ? "Creating…" : "Create role"}
-            </button>
-            <button
-              onClick={() => { setShowCreate(false); setCreateName(""); setCreateLabel(""); setCloneFrom(""); setCreateError(null); }}
-              className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-panel2"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-panel2"
-        >
-          <Plus className="h-4 w-4" /> New role
-        </button>
-      )}
+  const role = roles.find((r) => r.name === selected) ?? null;
+  const dis = role ? saving === role.name || deleting === role.name : false;
 
-      {/* Role list */}
-      {roles.map((role) => {
-        const perms = editPerms[role.name] ?? [];
-        const dis = saving === role.name || deleting === role.name;
-        return (
-          <div key={role.name} className="rounded-xl border border-border bg-panel p-5 space-y-4">
+  return (
+    <div className="flex overflow-hidden rounded-xl border border-border" style={{ height: "min(calc(100vh - 12rem), 800px)" }}>
+      {/* Left: role list */}
+      <div className={`flex w-56 shrink-0 flex-col border-r border-border bg-panel ${selected ? "hidden md:flex" : "flex"}`}>
+        <div className="flex items-center justify-between border-b border-border p-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted">Roles</span>
+          <button
+            type="button"
+            onClick={() => { setSelected("__new__"); setCreateForm(EMPTY_CREATE); setCreateError(null); }}
+            className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs text-muted hover:bg-panel2 hover:text-text"
+          >
+            <Plus className="h-3.5 w-3.5" /> New
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {roles.length === 0 && <p className="p-4 text-xs text-muted">No roles yet.</p>}
+          {roles.map((r) => (
+            <button
+              key={r.name}
+              type="button"
+              onClick={() => setSelected(r.name)}
+              className={`w-full border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-panel2 ${selected === r.name ? "border-l-2 border-l-accent bg-panel2" : ""}`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-medium">{r.label}</span>
+                {r.isSystem && <span className="shrink-0 rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-accent">sys</span>}
+              </div>
+              <div className="truncate font-mono text-xs text-muted">{r.name}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: detail */}
+      <div className={`flex-1 overflow-y-auto bg-panel ${selected ? "flex" : "hidden md:flex"} flex-col`}>
+        {selected === "__new__" ? (
+          <div className="space-y-4 p-6">
+            <div className="flex items-center gap-2">
+              <button type="button" className="flex items-center gap-1 text-sm text-muted md:hidden" onClick={() => setSelected(null)}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <h2 className="text-sm font-semibold">New role</h2>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Name</label>
+                <input
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_") }))}
+                  placeholder="premium"
+                  className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm font-mono outline-none focus:border-accent"
+                />
+                <p className="mt-1 text-xs text-muted">Lowercase letters, numbers, underscores.</p>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Label</label>
+                <input
+                  value={createForm.label}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, label: e.target.value }))}
+                  placeholder="Premium"
+                  className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Copy permissions from</label>
+              <select
+                value={createForm.cloneFrom}
+                onChange={(e) => setCreateForm((f) => ({ ...f, cloneFrom: e.target.value }))}
+                className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent sm:w-64"
+              >
+                <option value="">— start empty —</option>
+                {roles.map((r) => <option key={r.name} value={r.name}>{r.label} ({r.name})</option>)}
+              </select>
+            </div>
+            {createError && <p className="text-xs text-danger">{createError}</p>}
+            <div className="flex gap-2">
+              <button
+                onClick={createRole}
+                disabled={creating || !createForm.name || !createForm.label}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {creating ? "Creating…" : "Create role"}
+              </button>
+              <button
+                onClick={() => { setSelected(null); setCreateForm(EMPTY_CREATE); setCreateError(null); }}
+                className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-panel2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : role ? (
+          <div key={role.name} className="space-y-4 p-6">
+            {/* Mobile back */}
+            <button type="button" className="flex items-center gap-1 text-sm text-muted md:hidden" onClick={() => setSelected(null)}>
+              <ChevronLeft className="h-4 w-4" /> Back
+            </button>
+
             {/* Header */}
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1 space-y-2">
                 <div className="flex items-center gap-2">
-                  <code className="rounded bg-panel2 px-2 py-0.5 text-xs font-mono text-muted">{role.name}</code>
+                  <code className="rounded bg-panel2 px-2 py-0.5 font-mono text-xs text-muted">{role.name}</code>
                   {role.isSystem && (
-                    <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
-                      system
-                    </span>
+                    <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">system</span>
                   )}
                 </div>
                 <div>
@@ -262,16 +284,8 @@ export function AdminRolesForm({ roles: initial }: Props) {
               <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
                 {STATIC_PERMISSIONS.map((perm) => (
                   <label key={perm} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="accent-accent"
-                      checked={perms.includes(perm)}
-                      disabled={dis}
-                      onChange={() => togglePerm(role.name, perm)}
-                    />
-                    <span className="min-w-0 truncate" title={perm}>
-                      {PERMISSION_LABELS[perm] ?? perm}
-                    </span>
+                    <input type="checkbox" className="accent-accent" checked={(editPerms[role.name] ?? []).includes(perm)} disabled={dis} onChange={() => togglePerm(role.name, perm)} />
+                    <span className="min-w-0 truncate" title={perm}>{PERMISSION_LABELS[perm] ?? perm}</span>
                   </label>
                 ))}
               </div>
@@ -285,20 +299,14 @@ export function AdminRolesForm({ roles: initial }: Props) {
                   {topicPerms.map((tp) => (
                     <div key={tp.slug} className="rounded-lg border border-border bg-panel2 p-3">
                       <div className="mb-1.5 text-xs font-medium">
-                        {tp.title} <span className="text-muted font-mono">#{tp.slug}</span>
+                        {tp.title} <span className="font-mono text-muted">#{tp.slug}</span>
                       </div>
                       <div className="flex flex-wrap gap-4">
                         {tp.actions.map((action) => {
                           const perm = `topic.${tp.slug}.${action}`;
                           return (
                             <label key={action} className="flex cursor-pointer items-center gap-1.5 text-sm capitalize">
-                              <input
-                                type="checkbox"
-                                className="accent-accent"
-                                checked={perms.includes(perm)}
-                                disabled={dis}
-                                onChange={() => togglePerm(role.name, perm)}
-                              />
+                              <input type="checkbox" className="accent-accent" checked={(editPerms[role.name] ?? []).includes(perm)} disabled={dis} onChange={() => togglePerm(role.name, perm)} />
                               {action}
                             </label>
                           );
@@ -307,9 +315,7 @@ export function AdminRolesForm({ roles: initial }: Props) {
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 text-xs text-muted">
-                  Unchecked = unrestricted (everyone). Check to restrict that action to this role.
-                </p>
+                <p className="mt-2 text-xs text-muted">Unchecked = unrestricted (everyone). Check to restrict that action to this role.</p>
               </div>
             )}
 
@@ -324,12 +330,10 @@ export function AdminRolesForm({ roles: initial }: Props) {
               </button>
               <button
                 onClick={() => {
-                  setCreateName(role.name + "_copy");
-                  setCreateLabel(role.label + " (copy)");
-                  setCloneFrom(role.name);
-                  setShowCreate(true);
+                  setCreateForm({ name: role.name + "_copy", label: role.label + " (copy)", cloneFrom: role.name });
+                  setSelected("__new__");
                 }}
-                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text hover:bg-panel2"
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:bg-panel2 hover:text-text"
               >
                 <Copy className="h-3.5 w-3.5" /> Clone
               </button>
@@ -337,8 +341,12 @@ export function AdminRolesForm({ roles: initial }: Props) {
               {saved[role.name] && <p className="text-xs text-green-400">Saved.</p>}
             </div>
           </div>
-        );
-      })}
+        ) : (
+          <div className="flex h-full items-center justify-center p-8 text-sm text-muted">
+            Select a role to edit, or create a new one.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

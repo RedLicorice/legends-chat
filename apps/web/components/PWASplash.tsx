@@ -12,9 +12,5 @@ export function PWASplash() {
     // No stored topic: Suspense server component handles redirect
   }, [router]);
 
-  return (
-    <div className="flex h-dvh items-center justify-center bg-bg">
-      <div className="size-10 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
-    </div>
-  );
+  return <div className="h-dvh bg-bg" />;
 }

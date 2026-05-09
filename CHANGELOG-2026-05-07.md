@@ -40,6 +40,14 @@
 
 - Disabled the iOS autofill shortcuts bar (credit cards, addresses, etc.) above the keyboard in the message input area.
 
+## Security: End-to-End Encryption Improvements
+
+- **Your encryption keys now rotate every time you log in.** If a session key were ever stolen after you've logged out, your past messages stay protected — the server no longer holds copies of old keys.
+- **Identity key pinning (TOFU).** Your client now remembers the security fingerprint of every person you've talked to. If the server ever tries to swap someone's key, you'll see a warning banner before sending any further messages to that person.
+- **Safety numbers.** You can verify someone's identity by comparing a 60-digit safety number with them out-of-band (voice call, in person) — accessible from the member list under "Verify identity."
+- **Warning banner.** If a contact's identity key changes unexpectedly, a yellow banner appears in the channel. You can review the old and new fingerprints, then tap **Trust** to accept the change or **✕** to dismiss and decide later.
+- Updated the Privacy & Security Whitepaper to reflect these improvements and their remaining limitations.
+
 ## UI Polish
 
 - Notification bell icon resized to match the other sidebar icons.

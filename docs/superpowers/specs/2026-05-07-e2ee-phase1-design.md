@@ -71,7 +71,7 @@ Result: after session rotation, the server holds only the new session's encrypte
 ```typescript
 {
   senderKey: Uint8Array,   // 32-byte raw key
-  sessionId: string,       // UUID from sessionStorage at time of generation
+  sessionId: string,       // UUID from localStorage at time of generation
 }
 ```
 
@@ -136,7 +136,7 @@ Formatted as 12 groups of 5 digits (60 chars total, Signal-style). Users who wan
 
 ```
 TopicView mounts
-  → read sessionStorage e2ee-session-id (absent or new)
+  → read localStorage e2ee-session-id (absent or new)
   → read IndexedDB sk:<topicId>:<userId> sessionId field
   → mismatch → delete IndexedDB sender key
   → needsRotation = true
@@ -154,7 +154,7 @@ TopicView mounts
 
 ```
 TopicView mounts
-  → read sessionStorage e2ee-session-id (present)
+  → read localStorage e2ee-session-id (present)
   → read IndexedDB sk:<topicId>:<userId> sessionId field
   → match → use existing sender key
   → decrypt messages normally
