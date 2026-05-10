@@ -36,9 +36,16 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
 
       onSuccess?.();
     } catch (e) {
-      const msg = (e as Error).message;
-      if (!msg.includes("cancelled") && !msg.includes("AbortError") && !msg.includes("NotAllowedError")) {
-        setError(msg);
+      const err = e as Error;
+      const msg = err.message ?? "";
+      const isCancel = msg.includes("cancelled") || err.name === "AbortError" || msg.includes("NotAllowedError");
+      if (!isCancel) {
+        const isBackup = msg.toLowerCase().includes("backup");
+        setError(
+          isBackup
+            ? "Your authenticator doesn't support cloud backup. Register it via Settings → Security using \"Use external authenticator\"."
+            : msg,
+        );
       }
     } finally {
       setLoading(false);
