@@ -40,11 +40,14 @@ export function PasskeyPanel() {
 
   useEffect(() => { void load(); }, [load]);
 
-  async function register() {
+  async function register(attachment?: "cross-platform") {
     setError(null);
     setRegistering(true);
     try {
-      const optRes = await apiFetch("/api/auth/passkey/register");
+      const url = attachment
+        ? `/api/auth/passkey/register?attachment=${attachment}`
+        : "/api/auth/passkey/register";
+      const optRes = await apiFetch(url);
       if (!optRes.ok) throw new Error("Failed to get registration options.");
       const options = await optRes.json() as PublicKeyCredentialCreationOptionsJSON;
 
@@ -66,7 +69,14 @@ export function PasskeyPanel() {
       const isAbort = err.name === "AbortError" || err.message?.includes("cancelled") || err.message?.includes("The operation was aborted");
       if (!isAbort) {
         const isNotAllowed = err.name === "NotAllowedError" || err.message?.includes("NotAllowedError");
-        setError(isNotAllowed ? "Not allowed — check your device has a screen lock enabled." : err.message ?? "Unknown error.");
+        const isBackup = err.message?.toLowerCase().includes("backup");
+        if (isBackup) {
+          setError("Your authenticator stores credentials locally and doesn't support cloud backup. Try clicking \"Use external authenticator\" below.");
+        } else if (isNotAllowed) {
+          setError("Not allowed — check your device has a screen lock enabled.");
+        } else {
+          setError(err.message ?? "Unknown error.");
+        }
       }
     } finally {
       setRegistering(false);
@@ -169,7 +179,7 @@ export function PasskeyPanel() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={register}
+              onClick={() => register()}
               disabled={registering}
               className="flex-1 rounded-lg bg-accent py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
@@ -179,6 +189,14 @@ export function PasskeyPanel() {
               Cancel
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => register("cross-platform")}
+            disabled={registering}
+            className="w-full rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:bg-panel hover:text-text disabled:opacity-50"
+          >
+            Use external authenticator (KeePass, security key, MS Authenticator)
+          </button>
         </div>
       )}
 
