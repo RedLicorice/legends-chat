@@ -19,6 +19,13 @@ export async function GET(req: Request) {
 
   const { rpName, rpID, origin: _o } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
 
+  const url = new URL(req.url);
+  const rawAttachment = url.searchParams.get("attachment");
+  const attachment =
+    rawAttachment === "platform" || rawAttachment === "cross-platform"
+      ? (rawAttachment as AuthenticatorAttachment)
+      : undefined;
+
   const existingCreds = await db
     .select({ id: passkeyCredentials.id, transports: passkeyCredentials.transports })
     .from(passkeyCredentials)
@@ -38,6 +45,7 @@ export async function GET(req: Request) {
     authenticatorSelection: {
       residentKey: "preferred",
       userVerification: "preferred",
+      ...(attachment ? { authenticatorAttachment: attachment } : {}),
     },
   });
 
