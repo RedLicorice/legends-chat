@@ -16,8 +16,9 @@ interface PasskeyRow {
   createdAt: string;
 }
 
+const EXTERNAL_AUTH_LABEL = "Use external authenticator (KeePass, security key, MS Authenticator)";
+
 export function PasskeyPanel() {
-  const EXTERNAL_AUTH_LABEL = "Use external authenticator (KeePass, security key, MS Authenticator)";
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
