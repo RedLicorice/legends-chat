@@ -17,6 +17,7 @@ interface PasskeyRow {
 }
 
 export function PasskeyPanel() {
+  const EXTERNAL_AUTH_LABEL = "Use external authenticator (KeePass, security key, MS Authenticator)";
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
@@ -71,7 +72,11 @@ export function PasskeyPanel() {
         const isNotAllowed = err.name === "NotAllowedError" || err.message?.includes("NotAllowedError");
         const isBackup = err.message?.toLowerCase().includes("backup");
         if (isBackup) {
-          setError("Your authenticator stores credentials locally and doesn't support cloud backup. Try clicking \"Use external authenticator\" below.");
+          setError(
+            attachment === "cross-platform"
+              ? "Your authenticator doesn't support cloud backup."
+              : "Your authenticator stores credentials locally and doesn't support cloud backup. Try clicking \"Use external authenticator\" below.",
+          );
         } else if (isNotAllowed) {
           setError("Not allowed — check your device has a screen lock enabled.");
         } else {
@@ -195,7 +200,7 @@ export function PasskeyPanel() {
             disabled={registering}
             className="w-full rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:bg-panel hover:text-text disabled:opacity-50"
           >
-            Use external authenticator (KeePass, security key, MS Authenticator)
+            {EXTERNAL_AUTH_LABEL}
           </button>
         </div>
       )}
