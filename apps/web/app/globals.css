@@ -294,6 +294,23 @@ main.selectable {
   animation: cp-neon-pulse 3s ease-in-out infinite, cp-flicker 8s step-end infinite;
 }
 
+/* Chat bubbles — much subtler glow so content stays readable */
+@keyframes cp-bubble-glow {
+  0%, 100% { box-shadow: 0 0 4px rgb(var(--ch-accent) / 0.25), 0 0 10px rgb(var(--ch-accent) / 0.08); }
+  50%       { box-shadow: 0 0 6px rgb(var(--ch-accent) / 0.35), 0 0 14px rgb(var(--ch-accent) / 0.12); }
+}
+
+[data-theme="cyberpunk"] .group\/bubble.bg-accent {
+  animation: cp-bubble-glow 4s ease-in-out infinite;
+}
+[data-theme="cyberpunk"] .group\/bubble.bg-accent:hover {
+  animation: cp-bubble-glow 2s ease-in-out infinite;
+}
+[data-theme="cyberpunk"] .group\/bubble.bg-panel2 {
+  animation: none;
+  box-shadow: 0 0 4px rgb(var(--ch-accent) / 0.06);
+}
+
 /* Rounded panels — neon hover edge */
 [data-theme="cyberpunk"] .rounded-xl,
 [data-theme="cyberpunk"] .rounded-2xl {
