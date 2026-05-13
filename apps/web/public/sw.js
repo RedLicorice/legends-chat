@@ -20,7 +20,7 @@ self.addEventListener("fetch", (event) => {
     event.request.headers.has("Next-Router-State-Tree") ||
     event.request.headers.has("Next-Router-Prefetch")
   ) return;
-  event.respondWith(fetch(event.request));
+  event.respondWith(fetch(event.request).catch(() => new Response(null, { status: 503 })));
 });
 
 self.addEventListener("push", (event) => {
