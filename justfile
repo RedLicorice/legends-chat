@@ -37,6 +37,10 @@ logs:
 migrate:
     pnpm --filter @legends/db run migrate
 
+# Rotate JWT signing secrets in .env. Invalidates all sessions.
+rotate-secrets:
+    ./scripts/rotate-secrets.sh
+
 clearlogs:
     pm2 flush
     rm -f logs/*.log logs/ngrok.env
