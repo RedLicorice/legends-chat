@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
         .returning({ id: inviteCodes.id, role: inviteCodes.role, createdByUserId: inviteCodes.createdByUserId });
       if (claimed.length === 0) {
         tx.rollback();
+        throw new Error("invite_claim_failed");
       }
       const c = claimed[0]!;
       inviteCodeId = c.id;
