@@ -27,7 +27,9 @@ export type SystemSettingKey =
   | "banner_topic_overlap"
   | "banner_overlay_enabled"
   | "banner_overlay_opacity"
-  | "banner_fade_enabled";
+  | "banner_fade_enabled"
+  | "require_passkey_at_registration" // "true" | "false"
+  | "magic_link_login_disabled"; // "true" | "false"
 
 export async function getSetting(
   dbInstance: DB,

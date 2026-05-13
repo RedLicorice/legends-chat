@@ -133,14 +133,15 @@ export const authLoginTokens = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     token: text("token").notNull(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     telegramChatId: bigint("telegram_chat_id", { mode: "bigint" }),
     telegramMessageId: integer("telegram_message_id"),
+    telegramUserId: bigint("telegram_user_id", { mode: "bigint" }),
+    telegramUsername: text("telegram_username"),
+    inviteCode: text("invite_code"),
   },
   (t) => ({
     tokenIdx: uniqueIndex("auth_login_tokens_token_idx").on(t.token),
