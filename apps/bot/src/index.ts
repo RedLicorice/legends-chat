@@ -191,7 +191,14 @@ bot.command("anon", async (ctx) => {
 });
 
 bot.catch((err) => {
-  console.error("bot error", err);
+  console.error("[bot] handler error", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[bot] unhandledRejection", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[bot] uncaughtException", err);
 });
 
 subscribeToConsumption(bot.api);
@@ -228,5 +235,12 @@ if (BOT_MODE === "webhook") {
       process.exit(1);
     });
 } else {
-  bot.start();
+  bot.start({
+    onStart: (me) => console.log(`[bot] polling started as @${me.username}`),
+  })
+    .then(() => console.log("[bot] polling loop ended"))
+    .catch((err) => {
+      console.error("[bot] polling failed to start", err);
+      process.exit(1);
+    });
 }

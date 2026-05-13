@@ -32,6 +32,14 @@ else
   exit 1
 fi
 
+# Point Node at the system CA bundle. Without this, fetch() to api.telegram.org
+# and other HTTPS endpoints fails on hosts whose Node build doesn't trust the
+# local cert chain. PM2 picks this up via --update-env on reload, or via the
+# captured environ on fresh start.
+if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
+  export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+fi
+
 echo "[1/4] postgres + redis"
 docker compose up -d
 
