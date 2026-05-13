@@ -4,8 +4,12 @@ import { authLoginTokens, users } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { getAllSettings } from "@legends/db/system-settings";
+import { cleanupAbandonedRegistrations } from "@/lib/registration-cleanup";
 
 export async function GET(req: NextRequest) {
+  // Fire-and-forget cleanup. Best-effort; ignore errors.
+  cleanupAbandonedRegistrations().catch(() => {});
+
   const token = req.nextUrl.searchParams.get("token") ?? "";
   const settings = await getAllSettings(db);
   const settingsOut = {
