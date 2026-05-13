@@ -62,7 +62,14 @@ export async function GET(req: NextRequest) {
   }
 
   const secure = process.env.NODE_ENV === "production";
-  const res = NextResponse.redirect(new URL("/", publicOriginServer(req)));
+  // Defensive: if the request host doesn't match the configured public origin
+  // (e.g. user reached us via localhost while APP_PUBLIC_URL points at LAN IP),
+  // redirect to the same origin the user is on so the cookies we set here apply.
+  const publicOrigin = publicOriginServer(req);
+  const reqHost = req.headers.get("host");
+  const publicHost = (() => { try { return new URL(publicOrigin).host; } catch { return null; } })();
+  const redirectOrigin = publicHost && reqHost && publicHost !== reqHost ? req.nextUrl.origin : publicOrigin;
+  const res = NextResponse.redirect(new URL("/", redirectOrigin));
   res.cookies.set(ACCESS_COOKIE, accessJwt, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: ACCESS_TTL });
   res.cookies.set(REFRESH_COOKIE, refreshJwt, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: REFRESH_TTL });
   return res;
