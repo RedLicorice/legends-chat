@@ -33,6 +33,9 @@ export async function GET(req: NextRequest) {
   }
 
   const row = consumed[0]!;
+  if (!row.userId) {
+    return NextResponse.json({ error: "wrong token type" }, { status: 400 });
+  }
   const [u] = await db.select().from(users).where(eq(users.id, row.userId)).limit(1);
   if (!u) return NextResponse.json({ error: "user not found" }, { status: 404 });
 
