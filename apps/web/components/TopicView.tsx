@@ -1682,16 +1682,16 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       )}
 
       {!hashtagFilter && (mute ? (
-        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-danger">
+        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-danger shrink-0">
           You are muted: {mute.reason}
           {mute.expiresAt ? ` (until ${new Date(mute.expiresAt).toLocaleString()})` : " (permanent)"}
         </div>
       ) : !canPost ? (
-        <div className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-muted">
+        <div className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-muted shrink-0">
           Only {topic.postRoles.join(", ")} can post in this channel.
         </div>
       ) : (
-        <div className="border-t border-border bg-panel px-3 pt-2 pb-[calc(0.375rem+var(--sab))]">
+        <div className="border-t border-border bg-panel px-3 pt-2 pb-[calc(0.375rem+var(--sab))] shrink-0">
           {replyingTo && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
               <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent2" />

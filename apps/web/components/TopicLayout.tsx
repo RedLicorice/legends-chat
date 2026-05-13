@@ -134,7 +134,7 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
           ))}
         </div>
       </AppSidebar>
-      <main className="relative flex flex-1 min-w-0 flex-col overflow-x-hidden">
+      <main className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
         {!hasPasskey && <PasskeyBanner />}
         <TopicPasswordGate
           topicId={topic.id}

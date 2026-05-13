@@ -96,7 +96,7 @@ export function P2PView({ topic, currentUser, onMenuOpen, showExpandSidebar, onE
   const canSend = mode === "p2p" && input.trim().length > 0;
 
   return (
-    <div className="flex flex-1 min-w-0 flex-col overflow-x-hidden">
+    <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
       {/* Header */}
       <div className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-panel px-4">
         {onMenuOpen && (
