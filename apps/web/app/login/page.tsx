@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 import { clearSessionId } from "@/lib/e2ee-session";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PasskeyAuthButton } from "@/components/PasskeyAuthButton";
@@ -14,6 +14,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+
+  useEffect(() => {
+    apiFetch("/api/register-config")
+      .then((r) => r.json())
+      .then((d: { registrationMode: string }) => setEmailEnabled(d.registrationMode === "open"))
+      .catch(() => {});
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -48,7 +56,7 @@ export default function LoginPage() {
         {/* Tab switcher */}
         <div className="mb-6 flex rounded-lg border border-border bg-panel p-1">
           <TabBtn active={tab === "passkey"} onClick={() => setTab("passkey")}>Passkey</TabBtn>
-          <TabBtn active={tab === "email"} onClick={() => setTab("email")}>Email</TabBtn>
+          {emailEnabled && <TabBtn active={tab === "email"} onClick={() => setTab("email")}>Email</TabBtn>}
           <TabBtn active={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</TabBtn>
         </div>
 
@@ -65,7 +73,7 @@ export default function LoginPage() {
               Use a registered passkey to sign in instantly.
             </p>
           </div>
-        ) : (
+        ) : emailEnabled ? (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Email</label>
@@ -98,12 +106,14 @@ export default function LoginPage() {
               {loading ? "Signing in…" : "Sign in"}
             </button>
           </form>
-        )}
+        ) : null}
 
-        <p className="mt-4 text-center text-sm text-muted">
-          No account?{" "}
-          <Link href="/register" className="text-accent hover:underline">Create one</Link>
-        </p>
+        {emailEnabled && (
+          <p className="mt-4 text-center text-sm text-muted">
+            No account?{" "}
+            <Link href="/register" className="text-accent hover:underline">Create one</Link>
+          </p>
+        )}
         <p className="mt-6 text-center text-xs text-muted/60">
           <Link href="/docs/whitepaper" className="hover:text-muted underline underline-offset-2">
             Privacy &amp; Security Whitepaper

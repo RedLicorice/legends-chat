@@ -4,8 +4,14 @@ import { users } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 import { issueSession, setAuthCookies } from "@/lib/auth";
+import { getSetting } from "@legends/db/system-settings";
 
 export async function POST(req: Request) {
+  const mode = await getSetting(db, "registration_mode");
+  if ((mode ?? "telegram_only") !== "open") {
+    return NextResponse.json({ error: "Email login is not enabled." }, { status: 403 });
+  }
+
   const body = await req.json() as { email: string; password: string };
   const email = body.email?.trim().toLowerCase();
   const password = body.password;
