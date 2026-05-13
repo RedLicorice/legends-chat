@@ -73,6 +73,35 @@ export async function issueLoginToken(userId: string): Promise<IssuedToken> {
   });
 }
 
+export async function issuePendingToken(
+  telegramUserId: bigint,
+  telegramUsername: string | null,
+  inviteCode: string | null,
+): Promise<IssuedToken> {
+  const now = new Date();
+
+  // Invalidate prior pending tokens for this Telegram user. No reuse window —
+  // bot retries are rare and we want a fresh form each time.
+  await db
+    .update(authLoginTokens)
+    .set({ consumedAt: now })
+    .where(
+      and(
+        eq(authLoginTokens.telegramUserId, telegramUserId),
+        isNull(authLoginTokens.userId),
+        isNull(authLoginTokens.consumedAt),
+      ),
+    );
+
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(now.getTime() + TOKEN_TTL_MS);
+  const [row] = await db
+    .insert(authLoginTokens)
+    .values({ token, expiresAt, telegramUserId, telegramUsername, inviteCode })
+    .returning({ id: authLoginTokens.id });
+  return { id: row!.id, token, expiresAt, reused: false };
+}
+
 export async function attachTelegramMessage(
   tokenId: string,
   chatId: bigint,
@@ -123,5 +152,5 @@ export function appPublicUrl(): string {
 }
 
 export function loginUrl(token: string): string {
-  return `${appPublicUrl()}/auth/browser-open?token=${token}`;
+  return `${appPublicUrl()}/auth/landing?token=${token}`;
 }
