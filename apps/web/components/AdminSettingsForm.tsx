@@ -70,6 +70,8 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [bannerOverlayOpacity, setBannerOverlayOpacity] = useState(settings.banner_overlay_opacity ?? "40");
   const [bannerFadeEnabled, setBannerFadeEnabled] = useState(settings.banner_fade_enabled !== "false");
   const [registrationMode, setRegistrationMode] = useState<string>(settings.registration_mode ?? "telegram_only");
+  const [requirePasskey, setRequirePasskey] = useState(settings.require_passkey_at_registration === "true");
+  const [magicLinkDisabled, setMagicLinkDisabled] = useState(settings.magic_link_login_disabled === "true");
   const [defaultTopicId, setDefaultTopicId] = useState(settings.default_topic_id ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcome_message ?? "Welcome, {nickname}!");
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
@@ -296,6 +298,13 @@ export function AdminSettingsForm({ settings, topics }: Props) {
       </Section>
 
       <InviteConfigSection />
+
+      <SecuritySection
+        requirePasskey={requirePasskey}
+        setRequirePasskey={setRequirePasskey}
+        magicLinkDisabled={magicLinkDisabled}
+        setMagicLinkDisabled={setMagicLinkDisabled}
+      />
     </div>
   );
 }
@@ -414,5 +423,53 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted">{label}</label>
       {children}
     </div>
+  );
+}
+
+function SecuritySection({
+  requirePasskey, setRequirePasskey,
+  magicLinkDisabled, setMagicLinkDisabled,
+}: {
+  requirePasskey: boolean;
+  setRequirePasskey: (v: boolean) => void;
+  magicLinkDisabled: boolean;
+  setMagicLinkDisabled: (v: boolean) => void;
+}) {
+  const { saving, error, saved, save } = useSectionSave(
+    ["require_passkey_at_registration", "magic_link_login_disabled"],
+    () => ({
+      require_passkey_at_registration: requirePasskey ? "true" : "false",
+      magic_link_login_disabled: magicLinkDisabled ? "true" : "false",
+    }),
+  );
+  return (
+    <section className="mt-8 space-y-4">
+      <h2 className="text-lg font-semibold">Security</h2>
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={requirePasskey}
+          onChange={(e) => setRequirePasskey(e.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          <span className="font-medium">Require passkey at registration</span>
+          <span className="block text-xs text-muted">New users via Telegram must complete passkey setup before their session is issued.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={magicLinkDisabled}
+          onChange={(e) => setMagicLinkDisabled(e.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          <span className="font-medium">Passkey-only login</span>
+          <span className="block text-xs text-muted">Bot is funnel only. Existing users with passkeys authenticate inside the app. Users without passkeys are exempt.</span>
+        </span>
+      </label>
+      <SaveBar saving={saving} error={error} saved={saved} onSave={save} />
+    </section>
   );
 }

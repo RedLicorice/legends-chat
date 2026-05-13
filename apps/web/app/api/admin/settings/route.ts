@@ -53,6 +53,8 @@ export async function PATCH(req: Request) {
     "banner_overlay_enabled",
     "banner_overlay_opacity",
     "banner_fade_enabled",
+    "require_passkey_at_registration",
+    "magic_link_login_disabled",
   ] as const;
 
   for (const key of allowed) {
