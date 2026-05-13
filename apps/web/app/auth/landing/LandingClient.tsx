@@ -52,38 +52,60 @@ export function LandingClient() {
           setDisplayName(data.pending.telegramUsername || "");
         }
         if (data.settings) setSettings(data.settings);
+
+        // Desktop existing users: skip landing entirely. Mobile users still see
+        // the profile card so they can deliberately leave the in-app browser /
+        // hit the "Open app" platform-detection flow.
+        // Desktop authenticated user: nothing to do here, just open the app.
+        // Token is unused; cookies already present in this browser.
+        const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+        const isMobile = /android|iphone|ipad|ipod/i.test(ua);
+        if (data.state === "authenticated" && !isMobile) {
+          window.location.replace("/");
+          return;
+        }
+        // Desktop existing user: redirect straight to /auth/callback?token=X.
+        // /auth/callback consumes the token AND sets cookies in this same
+        // browser (so the home page sees a valid session). The /api/auth/
+        // telegram-login POST is for same-browser flows that don't want to
+        // navigate — currently unused by the happy path because cookies set
+        // by an in-app WebView never transfer to the user's real browser.
+        if (
+          data.state === "existing" &&
+          !isMobile &&
+          !data.settings?.magicLinkLoginDisabled
+        ) {
+          window.location.replace(`/auth/callback?token=${encodeURIComponent(token)}`);
+        }
       })
       .catch(() => setState("invalid"));
   }, [token]);
 
+  // Build the URL the user lands on AFTER leaving this page.
+  // - Token still pending consumption (existing user OR new user we just
+  //   registered): /auth/callback?token=X (sets cookies in target browser,
+  //   then bounces to /).
+  // - Anyone else: just / (already authenticated, or no consumable token).
+  function buildOpenPath(): string {
+    const tokenStillPending =
+      (state === "existing" || state === "new") &&
+      !settings.magicLinkLoginDisabled &&
+      token;
+    if (tokenStillPending) {
+      return `/auth/callback?token=${encodeURIComponent(token)}`;
+    }
+    return "/";
+  }
+
   function openApp() {
-    const result = openInBrowser("/");
+    const target = buildOpenPath();
+    const result = openInBrowser(target);
     if (result.kind === "android") {
       window.location.href = result.intentUrl;
     } else if (result.kind === "ios-instructions") {
       setIosInstructions(true);
     } else {
-      window.location.replace("/");
-    }
-  }
-
-  async function consumeAndOpen() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await apiFetch("/api/auth/telegram-login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "Login failed.");
-        return;
-      }
-      openApp();
-    } finally {
-      setSubmitting(false);
+      window.location.replace(target);
     }
   }
 
@@ -167,12 +189,11 @@ export function LandingClient() {
   if (state === "authenticated" || state === "existing") {
     // Magic link on + existing user: consume token to get session.
     // Magic link off OR already authenticated: skip session step, just open the app.
-    const needsTokenConsume = state === "existing" && !settings.magicLinkLoginDisabled;
     return (
       <ProfileCard
         user={user}
-        buttonLabel={submitting ? "Opening…" : "Open app"}
-        onAction={needsTokenConsume ? consumeAndOpen : openApp}
+        buttonLabel="Open app"
+        onAction={openApp}
         error={error}
       />
     );

@@ -4,7 +4,6 @@ import { authLoginTokens, inviteCodes, users } from "@legends/db/schema";
 import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
-import { issueSession, setAuthCookies } from "@/lib/auth";
 import { getAllSettings, getSetting } from "@legends/db/system-settings";
 import { generateRegistrationOptions } from "@simplewebauthn/server";
 import { getRpConfig } from "@/lib/passkey";
@@ -111,10 +110,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ requirePasskey: true, userId: created.user.id, passkeyOptions: options });
   }
 
-  // No passkey required: consume token, issue session.
-  await db.update(authLoginTokens).set({ consumedAt: now }).where(eq(authLoginTokens.id, row.id));
-  const { accessJwt, refreshJwt } = await issueSession(created.user.id, created.user.role);
-  await setAuthCookies(accessJwt, refreshJwt);
+  // No passkey required: attach the user to the token but DO NOT consume it
+  // and DO NOT set cookies on this response. The client is often a Telegram
+  // in-app WebView whose cookies never transfer to the user's real browser.
+  // Instead, the client navigates to /auth/callback?token=X in the target
+  // browser; that route consumes the token + sets cookies in the right place.
+  await db
+    .update(authLoginTokens)
+    .set({ userId: created.user.id })
+    .where(eq(authLoginTokens.id, row.id));
 
   // Fire-and-forget welcome notifications.
   getSetting(db, "default_topic_id").then((topicId) => {
