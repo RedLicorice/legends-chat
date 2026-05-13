@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { themes } from "@legends/db/schema";
 import { asc } from "drizzle-orm";
 import { PushSetup } from "@/components/PushSetup";
+import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
 
 export const dynamic = "force-dynamic";
@@ -147,6 +148,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="bg-bg text-text">
         <PushSetup />
+        <TokenRefresh />
         <SymbolsProvider>{children}</SymbolsProvider>
       </body>
     </html>
