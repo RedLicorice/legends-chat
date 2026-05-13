@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { Bot, webhookCallback, session, type Context, type SessionFlavor } from "grammy";
 import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { inviteCodes } from "@legends/db/schema";
+import { createLogger } from "@legends/shared";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
 import { appPublicUrl, attachTelegramMessage, issueLoginToken, issuePendingToken, loginUrl } from "./login";
@@ -11,6 +12,8 @@ import {
   scheduleExpiryCheck,
   subscribeToConsumption,
 } from "./token-lifecycle";
+
+const log = createLogger("bot");
 
 interface BotSession {
   awaitingInvite: boolean;
@@ -191,24 +194,24 @@ bot.command("anon", async (ctx) => {
 });
 
 bot.catch((err) => {
-  console.error("[bot] handler error", err);
+  log.error("handler error", err);
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[bot] unhandledRejection", reason);
+  log.error("unhandledRejection", reason);
 });
 process.on("uncaughtException", (err) => {
-  console.error("[bot] uncaughtException", err);
+  log.error("uncaughtException", err);
 });
 
 subscribeToConsumption(bot.api);
-rescheduleOnStartup(bot.api).catch((err) => console.error("[lifecycle] reschedule failed", err));
+rescheduleOnStartup(bot.api).catch((err) => log.error("lifecycle reschedule failed", err));
 
 const BOT_MODE = process.env.BOT_MODE ?? "polling";
 const BOT_WEBHOOK_PORT = Number(process.env.BOT_WEBHOOK_PORT ?? 3002);
 const BOT_WEBHOOK_PATH = "/bot/webhook";
 
-console.log(`legends-chat telegram bot starting (mode: ${BOT_MODE})...`);
+log.info(`starting (mode: ${BOT_MODE})`);
 
 if (BOT_MODE === "webhook") {
   const publicUrl = appPublicUrl();
@@ -217,7 +220,7 @@ if (BOT_MODE === "webhook") {
   bot.api
     .setWebhook(webhookUrl, { drop_pending_updates: false })
     .then(() => {
-      console.log(`[bot] webhook registered → ${webhookUrl}`);
+      log.info(`webhook registered → ${webhookUrl}`);
       const handleUpdate = webhookCallback(bot, "http");
       const server = createServer(async (req, res) => {
         if (req.url === BOT_WEBHOOK_PATH && req.method === "POST") {
@@ -227,20 +230,20 @@ if (BOT_MODE === "webhook") {
         }
       });
       server.listen(BOT_WEBHOOK_PORT, () => {
-        console.log(`[bot] webhook server listening on port ${BOT_WEBHOOK_PORT}`);
+        log.info(`webhook server listening on port ${BOT_WEBHOOK_PORT}`);
       });
     })
     .catch((err) => {
-      console.error("[bot] failed to set webhook", err);
+      log.error("failed to set webhook", err);
       process.exit(1);
     });
 } else {
   bot.start({
-    onStart: (me) => console.log(`[bot] polling started as @${me.username}`),
+    onStart: (me) => log.info(`polling started as @${me.username}`),
   })
-    .then(() => console.log("[bot] polling loop ended"))
+    .then(() => log.info("polling loop ended"))
     .catch((err) => {
-      console.error("[bot] polling failed to start", err);
+      log.error("polling failed to start", err);
       process.exit(1);
     });
 }

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { authLoginTokens, inviteCodes, users } from "@legends/db/schema";
-import { REDIS_CHANNELS } from "@legends/shared";
+import { createLogger, REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getAllSettings, getSetting } from "@legends/db/system-settings";
@@ -9,6 +9,7 @@ import { generateRegistrationOptions } from "@simplewebauthn/server";
 import { getRpConfig } from "@/lib/passkey";
 
 const CHALLENGE_TTL = 300;
+const log = createLogger("api:telegram-register");
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as { token: string; displayName: string };
@@ -37,6 +38,7 @@ export async function POST(req: NextRequest) {
     .limit(1);
 
   if (!row || row.telegramUserId === null) {
+    log.warn("invalid or expired token", { tokenPrefix: token.slice(0, 8) });
     return NextResponse.json({ error: "invalid or expired token" }, { status: 401 });
   }
 
@@ -88,8 +90,15 @@ export async function POST(req: NextRequest) {
   }).catch(() => null);
 
   if (!created) {
+    log.warn("invite claim failed", { code: row.inviteCode });
     return NextResponse.json({ error: "Invite code is no longer valid." }, { status: 400 });
   }
+  log.info("user created", {
+    userId: created.user.id,
+    telegramUserId: row.telegramUserId?.toString(),
+    role: created.user.role,
+    invite: !!created.inviteCodeId,
+  });
 
   // Passkey required path: do NOT consume token or issue session yet.
   if (requirePasskey) {
@@ -107,6 +116,7 @@ export async function POST(req: NextRequest) {
       challenge: options.challenge,
       tokenId: row.id,
     }), "EX", CHALLENGE_TTL);
+    log.debug("passkey challenge issued", { userId: created.user.id });
     return NextResponse.json({ requirePasskey: true, userId: created.user.id, passkeyOptions: options });
   }
 

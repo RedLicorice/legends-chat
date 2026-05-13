@@ -1,10 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { authLoginTokens, users } from "@legends/db/schema";
+import { createLogger } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { getAllSettings } from "@legends/db/system-settings";
 import { cleanupAbandonedRegistrations } from "@/lib/registration-cleanup";
+
+const log = createLogger("api:landing-info");
 
 export async function GET(req: NextRequest) {
   // Fire-and-forget cleanup. Best-effort; ignore errors.
@@ -55,6 +58,7 @@ export async function GET(req: NextRequest) {
     .limit(1);
 
   if (!row) {
+    log.debug("token not found or expired", { tokenPrefix: token.slice(0, 8) });
     return NextResponse.json({ state: "invalid", settings: settingsOut });
   }
 
@@ -69,12 +73,17 @@ export async function GET(req: NextRequest) {
       .from(users)
       .where(eq(users.id, row.userId))
       .limit(1);
-    if (!u) return NextResponse.json({ state: "invalid", settings: settingsOut });
+    if (!u) {
+      log.warn("token references missing user", { userId: row.userId });
+      return NextResponse.json({ state: "invalid", settings: settingsOut });
+    }
+    log.debug("state=existing", { userId: row.userId });
     return NextResponse.json({ state: "existing", user: u, settings: settingsOut });
   }
 
   // 4. Pending-registration token.
   if (row.telegramUserId !== null) {
+    log.debug("state=new", { telegramUserId: row.telegramUserId.toString() });
     return NextResponse.json({
       state: "new",
       pending: {
@@ -86,5 +95,6 @@ export async function GET(req: NextRequest) {
   }
 
   // Defensive: token with neither userId nor telegramUserId.
+  log.warn("token has neither userId nor telegramUserId", { id: row.id });
   return NextResponse.json({ state: "invalid", settings: settingsOut });
 }

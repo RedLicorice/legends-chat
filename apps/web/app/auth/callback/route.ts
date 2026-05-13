@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { authLoginTokens, users } from "@legends/db/schema";
-import { ACCESS_COOKIE, REFRESH_COOKIE } from "@legends/shared";
+import { ACCESS_COOKIE, REFRESH_COOKIE, createLogger } from "@legends/shared";
 import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
@@ -10,6 +10,7 @@ import { publicOriginServer } from "@/lib/public-origin.server";
 
 const ACCESS_TTL = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 900);
 const REFRESH_TTL = Number(process.env.JWT_REFRESH_TTL_SECONDS ?? 86_400);
+const log = createLogger("auth:callback");
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
@@ -29,17 +30,23 @@ export async function GET(req: NextRequest) {
     .returning();
 
   if (consumed.length === 0) {
+    log.warn("invalid or expired token", { tokenPrefix: token.slice(0, 8) });
     return NextResponse.json({ error: "invalid or expired token" }, { status: 401 });
   }
 
   const row = consumed[0]!;
   if (!row.userId) {
+    log.warn("wrong token type (pending registration not finished)", { id: row.id });
     return NextResponse.json({ error: "wrong token type" }, { status: 400 });
   }
   const [u] = await db.select().from(users).where(eq(users.id, row.userId)).limit(1);
-  if (!u) return NextResponse.json({ error: "user not found" }, { status: 404 });
+  if (!u) {
+    log.error("token references missing user", { userId: row.userId });
+    return NextResponse.json({ error: "user not found" }, { status: 404 });
+  }
 
   const { accessJwt, refreshJwt } = await issueSession(u.id, u.role);
+  log.info("session issued", { userId: u.id, role: u.role });
 
   // Tell the bot so it can edit its own message. Best-effort, non-blocking-ish.
   if (row.telegramChatId !== null && row.telegramMessageId !== null) {
@@ -51,7 +58,7 @@ export async function GET(req: NextRequest) {
           messageId: row.telegramMessageId,
         }),
       )
-      .catch((err) => console.warn("[auth/callback] publish failed", err));
+      .catch((err) => log.warn("redis publish failed", err));
   }
 
   const secure = process.env.NODE_ENV === "production";
