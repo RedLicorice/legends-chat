@@ -239,6 +239,13 @@
       "when": 1779400000000,
       "tag": "0033_landing_token_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0034_backfill_role_permissions",
+      "breakpoints": true
     }
   ]
 }

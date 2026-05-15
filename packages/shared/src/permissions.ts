@@ -22,6 +22,19 @@ export const PERMISSIONS = {
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 export type Role = string;
 
+const PERMISSION_VALUES: ReadonlySet<string> = new Set(Object.values(PERMISSIONS));
+const TOPIC_PERM_RE = /^topic\.[a-z0-9][a-z0-9_-]{0,63}\.(view|read|post|reply)$/;
+
+export function isValidPermission(perm: string): boolean {
+  if (PERMISSION_VALUES.has(perm)) return true;
+  return TOPIC_PERM_RE.test(perm);
+}
+
+export const GRANT_EFFECTS = ["allow", "deny"] as const;
+export function isValidEffect(effect: string): effect is GrantEffect {
+  return effect === "allow" || effect === "deny";
+}
+
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, Permission[]> = {
   user: [
     PERMISSIONS.MESSAGES_DELETE_OWN,

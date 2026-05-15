@@ -1,6 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 import { stripImageMetadata } from "@/lib/upload";
+import { Tooltip } from "@/components/Tooltip";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -179,6 +180,14 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [membersLoading, setMembersLoading] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showUploadError = useCallback((msg: string, ttlMs = 6000) => {
+    setUploadError(msg);
+    if (uploadErrorTimerRef.current) clearTimeout(uploadErrorTimerRef.current);
+    uploadErrorTimerRef.current = setTimeout(() => setUploadError(null), ttlMs);
+  }, []);
   const [myPollVotes, setMyPollVotes] = useState<Record<string, string[]>>({});
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
@@ -781,12 +790,31 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       form.append("bucket", bucket);
       if (preserveOriginal) form.append("preserveOriginal", "true");
       const res = await apiFetch("/api/upload", { method: "POST", body: form });
-      const data = await res.json() as { url?: string; filename?: string; mimeType?: string; size?: number; error?: string };
-      if (!res.ok || !data.url) return null;
+      const data = await res.json().catch(() => ({})) as { url?: string; filename?: string; mimeType?: string; size?: number; error?: string; scope?: string; retryAfter?: number };
+      if (!res.ok || !data.url) {
+        if (res.status === 429) {
+          const retry = data.retryAfter ?? Number(res.headers.get("retry-after")) ?? 60;
+          const mins = Math.max(1, Math.ceil(retry / 60));
+          const scopeLabel = data.scope === "hour" ? "hourly" : data.scope === "day" ? "daily" : "";
+          showUploadError(`Original-quality upload limit reached (${scopeLabel}). Try again in ${mins} min.`);
+        } else if (res.status === 403 && data.error === "originals disabled") {
+          showUploadError("Original-quality uploads are disabled by the admin.");
+        } else if (data.error === "image contains metadata") {
+          showUploadError("Image metadata detected. Re-encode failed — try a different image.");
+        } else if (data.error) {
+          showUploadError(data.error);
+        } else {
+          showUploadError(`Upload failed (${res.status})`);
+        }
+        return null;
+      }
       if (bucket === "files") {
         return { type: "file", url: data.url, filename: data.filename, mimeType: data.mimeType, size: data.size };
       }
       return { type: "image", url: data.url };
+    } catch (err) {
+      showUploadError((err as Error).message || "Upload failed");
+      return null;
     } finally {
       setUploading(false);
     }
@@ -1832,6 +1860,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               </button>
             </div>
           )}
+          {uploadError && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+              <span className="flex-1">{uploadError}</span>
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="text-danger/70 hover:text-danger shrink-0"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           {pendingAttachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2 px-1">
               {pendingAttachments.map((att, i) => (
@@ -1883,25 +1924,37 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               />
               <div className="flex items-center gap-2">
                 {canAttach && (
-                  <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-                    className="text-muted hover:text-text disabled:opacity-50" title="Attach image (compressed)">
-                    <ImagePlus className="h-4 w-4" />
-                  </button>
+                  <Tooltip label="Attach image — stripped & compressed">
+                    <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                      aria-label="Attach image — stripped and compressed"
+                      className="text-muted hover:text-text disabled:opacity-50">
+                      <ImagePlus className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
                 )}
                 {canAttach && (
-                  <button type="button" onClick={() => fileUploadRef.current?.click()} disabled={uploading}
-                    className="text-muted hover:text-text disabled:opacity-50" title="Attach file (original quality)">
-                    <Paperclip className="h-4 w-4" />
-                  </button>
+                  <Tooltip label="Attach file — original quality">
+                    <button type="button" onClick={() => fileUploadRef.current?.click()} disabled={uploading}
+                      aria-label="Attach file — original quality"
+                      className="text-muted hover:text-text disabled:opacity-50">
+                      <Paperclip className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
                 )}
-                <button type="button" onClick={() => setShowGifPicker((v) => !v)}
-                  className={cn("text-muted hover:text-text", showGifPicker && "text-accent")} title="GIF">
-                  <Sticker className="h-4 w-4" />
-                </button>
-                <button ref={composeEmojiRef} type="button" onClick={() => setShowComposeEmoji((v) => !v)}
-                  className={cn("text-muted hover:text-text", showComposeEmoji && "text-accent")} title="Emoji">
-                  <SmilePlus className="h-4 w-4" />
-                </button>
+                <Tooltip label="GIF picker">
+                  <button type="button" onClick={() => setShowGifPicker((v) => !v)}
+                    aria-label="GIF picker"
+                    className={cn("text-muted hover:text-text", showGifPicker && "text-accent")}>
+                    <Sticker className="h-4 w-4" />
+                  </button>
+                </Tooltip>
+                <Tooltip label="Emoji">
+                  <button ref={composeEmojiRef} type="button" onClick={() => setShowComposeEmoji((v) => !v)}
+                    aria-label="Emoji picker"
+                    className={cn("text-muted hover:text-text", showComposeEmoji && "text-accent")}>
+                    <SmilePlus className="h-4 w-4" />
+                  </button>
+                </Tooltip>
                 {canCreatePoll && (
                   <button type="button" onClick={() => setShowPollCreator(true)}
                     className={cn("text-muted hover:text-text", showPollCreator && "text-accent")} title="Create poll">

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { principalPermissionOverrides } from "@legends/db/schema";
-import { PERMISSIONS } from "@legends/shared";
+import { PERMISSIONS, isValidPermission, isValidEffect } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -30,6 +30,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const body = await req.json() as { permission: string; effect: string; expiresAt?: string | null };
   if (!body.permission || !body.effect) return NextResponse.json({ error: "permission and effect required" }, { status: 400 });
+  if (!isValidPermission(body.permission)) return NextResponse.json({ error: `unknown permission '${body.permission}'` }, { status: 400 });
+  if (!isValidEffect(body.effect)) return NextResponse.json({ error: "effect must be 'allow' or 'deny'" }, { status: 400 });
 
   const [override] = await db
     .insert(principalPermissionOverrides)
