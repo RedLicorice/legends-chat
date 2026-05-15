@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { marked } from "marked";
 import { useSymbols } from "@/contexts/SymbolsContext";
 import { useHashtagClick } from "@/contexts/HashtagClickContext";
+import { useExternalLink } from "@/contexts/ExternalLinkContext";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -83,6 +84,7 @@ export function MarkdownContent({ content, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { isKnownSymbol } = useSymbols();
   const { onHashtagClick } = useHashtagClick();
+  const { requestOpen } = useExternalLink();
 
   useEffect(() => {
     if (!ref.current) return;
@@ -93,10 +95,17 @@ export function MarkdownContent({ content, className }: Props) {
     doc.querySelectorAll("[onclick],[onerror],[onload],[onmouseover]").forEach((el) => {
       ["onclick", "onerror", "onload", "onmouseover"].forEach((attr) => el.removeAttribute(attr));
     });
-    // Force safe link attributes
+    // Force safe link attributes. Strip every signal that could deanonymize
+    // the chat origin to the external destination:
+    //   rel=noopener     — destination cannot reach back via window.opener
+    //   rel=noreferrer   — no Referer header sent (legacy + modern browsers)
+    //   rel=nofollow     — destination not endorsed for SEO; also signals
+    //                      "this URL is untrusted user content"
+    //   referrerpolicy   — explicit override; outranks any global policy
     doc.querySelectorAll("a[href]").forEach((el) => {
       el.setAttribute("target", "_blank");
-      el.setAttribute("rel", "noopener noreferrer");
+      el.setAttribute("rel", "noopener noreferrer nofollow");
+      el.setAttribute("referrerpolicy", "no-referrer");
     });
     ref.current.innerHTML = doc.body.innerHTML;
     applyTags(ref.current, isKnownSymbol);
@@ -106,14 +115,27 @@ export function MarkdownContent({ content, className }: Props) {
     const el = ref.current;
     if (!el) return;
     const handler = (e: MouseEvent) => {
-      const target = (e.target as HTMLElement).closest("[data-tag]") as HTMLElement | null;
-      if (!target) return;
-      const tag = target.getAttribute("data-tag");
-      if (tag) onHashtagClick(tag);
+      // Hashtags / symbols first
+      const tagEl = (e.target as HTMLElement).closest("[data-tag]") as HTMLElement | null;
+      if (tagEl) {
+        const tag = tagEl.getAttribute("data-tag");
+        if (tag) onHashtagClick(tag);
+        return;
+      }
+      // External link interception — route http(s) anchors through the warning
+      // dialog. Modifier-click (cmd/ctrl/shift/middle-click) bypasses so power
+      // users can open in their preferred tab without nag.
+      const link = (e.target as HTMLElement).closest("a[href]") as HTMLAnchorElement | null;
+      if (!link) return;
+      const href = link.getAttribute("href") ?? "";
+      if (!/^https?:\/\//i.test(href)) return; // mailto/tel/internal-relative → let browser handle
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
+      e.preventDefault();
+      requestOpen(href);
     };
     el.addEventListener("click", handler);
     return () => el.removeEventListener("click", handler);
-  }, [onHashtagClick]);
+  }, [onHashtagClick, requestOpen]);
 
   return (
     <div

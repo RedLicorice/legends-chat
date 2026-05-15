@@ -9,6 +9,8 @@ import { asc } from "drizzle-orm";
 import { PushSetup } from "@/components/PushSetup";
 import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
+import { ExternalLinkProvider, parseWhitelist } from "@/contexts/ExternalLinkContext";
+import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
 
 export const dynamic = "force-dynamic";
 
@@ -38,11 +40,13 @@ const getCachedThemes = unstable_cache(
 
 const getCachedLayoutSettings = unstable_cache(
   async () => {
-    const [defaultTheme, sidebarCompactDefault] = await Promise.all([
+    const [defaultTheme, sidebarCompactDefault, interstitialEnabledRaw, whitelistRaw] = await Promise.all([
       getSetting(db, "default_theme").catch(() => null),
       getSetting(db, "sidebar_compact_default").catch(() => null),
+      getSetting(db, "external_link_interstitial_enabled").catch(() => null),
+      getSetting(db, "external_link_whitelist").catch(() => null),
     ]);
-    return { defaultTheme, sidebarCompactDefault };
+    return { defaultTheme, sidebarCompactDefault, interstitialEnabledRaw, whitelistRaw };
   },
   ["layout-settings"],
   { revalidate: 300 },
@@ -112,12 +116,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const userTheme = jar.get("lc_theme")?.value;
   const userSidebarCompact = jar.get("lc_sidebar_compact")?.value;
 
-  const [allThemes, { defaultTheme, sidebarCompactDefault }] = await Promise.all([
+  const [allThemes, { defaultTheme, sidebarCompactDefault, interstitialEnabledRaw, whitelistRaw }] = await Promise.all([
     getCachedThemes(),
     getCachedLayoutSettings(),
   ]);
 
   const resolvedSidebarCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
+
+  const externalLinkConfig = {
+    interstitialEnabled: interstitialEnabledRaw !== "false", // default on
+    whitelist: parseWhitelist(whitelistRaw),
+    publicOrigin: process.env.APP_PUBLIC_URL ?? null,
+  };
 
   const validIds = new Set(allThemes.map((t) => t.id));
   const resolved = validIds.has(userTheme ?? "") ? userTheme! : (validIds.has(defaultTheme ?? "") ? defaultTheme! : "dark");
@@ -149,7 +159,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="bg-bg text-text">
         <PushSetup />
         <TokenRefresh />
-        <SymbolsProvider>{children}</SymbolsProvider>
+        <ExternalLinkProvider config={externalLinkConfig}>
+          <SymbolsProvider>{children}</SymbolsProvider>
+          <ExternalLinkDialog />
+        </ExternalLinkProvider>
       </body>
     </html>
   );

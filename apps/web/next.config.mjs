@@ -23,6 +23,22 @@ const nextConfig = {
       { source: "/bot/webhook", destination: `${botOrigin}/bot/webhook` },
     ];
   },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // External destinations must never learn the chat origin from a Referer
+          // header. Browsers default to strict-origin-when-cross-origin which still
+          // leaks the bare origin (chat.example.com). no-referrer suppresses it
+          // entirely. Combined with rel="noreferrer" + referrerpolicy="no-referrer"
+          // on rendered <a> tags this is belt-and-braces.
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

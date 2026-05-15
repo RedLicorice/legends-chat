@@ -37,7 +37,17 @@ export type SystemSettingKey =
   | "banner_overlay_opacity"
   | "banner_fade_enabled"
   | "require_passkey_at_registration" // "true" | "false"
-  | "magic_link_login_disabled"; // "true" | "false"
+  | "magic_link_login_disabled" // "true" | "false"
+  // link processing
+  | "shlink_enabled"
+  | "shlink_host"
+  | "shlink_api_key"
+  | "shlink_default_domain"
+  | "shlink_tag_with_user"
+  | "shlink_wrap_regex"
+  | "strip_tracking_params"
+  | "external_link_interstitial_enabled"
+  | "external_link_whitelist";
 
 export async function getSetting(
   dbInstance: DB,

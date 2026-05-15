@@ -26,6 +26,32 @@ async function markOffline(userId: string): Promise<void> {
 async function getOnlineUsers(): Promise<string[]> {
   return cacheClient.smembers(ONLINE_KEY);
 }
+
+async function loadLinkProcessorSettings(): Promise<LinkProcessorSettings> {
+  const s = await getAllSettings(db);
+  return {
+    shlinkEnabled: s.shlink_enabled === "true",
+    shlinkHost: s.shlink_host?.trim() || null,
+    shlinkApiKey: s.shlink_api_key?.trim() || null,
+    shlinkDefaultDomain: s.shlink_default_domain?.trim() || null,
+    shlinkTagWithUser: s.shlink_tag_with_user === "true",
+    shlinkWrapRegex: s.shlink_wrap_regex?.trim() || null,
+    stripTracking: s.strip_tracking_params === "true",
+    publicOrigin: process.env.APP_PUBLIC_URL ?? null,
+  };
+}
+
+async function maybeProcessLinks(text: string, senderUserId: string | null): Promise<string> {
+  if (!text || !text.trim()) return text;
+  try {
+    const cfg = await loadLinkProcessorSettings();
+    if (!cfg.stripTracking && !cfg.shlinkEnabled) return text;
+    return await processMessageLinks(text, cfg, senderUserId);
+  } catch (e) {
+    console.error("[link-processor] failed", e);
+    return text;
+  }
+}
 import {
   ACCESS_COOKIE,
   REDIS_CHANNELS,
@@ -40,10 +66,13 @@ import {
   topicReadSchema,
   stripMarkdownPreview,
   canPrincipal,
+  processMessageLinks,
+  type LinkProcessorSettings,
   type AccessTokenPayload,
   type TopicGrant,
   type GrantEffect,
 } from "@legends/shared";
+import { getAllSettings } from "@legends/db/system-settings";
 import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth";
 import { pubClient, subClient } from "./redis";
 import { purgeCountModeForTopic, startAutoDelete } from "./autodelete";
@@ -185,6 +214,12 @@ io.on("connection", async (socket: AuthedSocket) => {
         return;
       }
       const isE2ee = topic?.isE2ee ?? false;
+      // Link processing (strip tracking / shlink wrap). Skipped for E2EE
+      // topics — the client calls /api/links/process before encrypting. Server
+      // can't read ciphertext.
+      const processedText = isE2ee
+        ? parsed.content.text
+        : await maybeProcessLinks(parsed.content.text, user.sub);
       const incomingHashtags = parsed.hashtags ?? [];
       const validHashtags = incomingHashtags
         .filter((t) => /^[#$][a-zA-Z]\w*$/.test(t))
@@ -192,15 +227,15 @@ io.on("connection", async (socket: AuthedSocket) => {
       const msg = await insertMessage({
         topicId: parsed.topicId,
         senderUserId: user.sub,
-        text: parsed.content.text,
+        text: processedText,
         attachments: parsed.content.attachments as import("./messages").MessageAttachment[] | undefined,
         replyToMessageId: parsed.content.replyToMessageId ?? null,
-        searchText: isE2ee ? undefined : parsed.content.text,
+        searchText: isE2ee ? undefined : processedText,
         hashtags: validHashtags,
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
-      const plainPreview = isE2ee ? "(encrypted message)" : stripMarkdownPreview(parsed.content.text, topic?.isFeed ?? false);
+      const plainPreview = isE2ee ? "(encrypted message)" : stripMarkdownPreview(processedText, topic?.isFeed ?? false);
       // Broadcast sidebar update to all topic members so their sidebar refreshes in real time
       getTopicMemberUserIds(parsed.topicId).then((memberIds) => {
         const sidebarPayload = {
@@ -364,10 +399,15 @@ io.on("connection", async (socket: AuthedSocket) => {
       if (!isOwn && !canEditAny) {
         ack?.({ ok: false, error: "forbidden" }); return;
       }
+      // Skip link processing for E2EE topics; client handles it pre-encryption.
+      const editTopic = await getTopicById(parsed.topicId);
+      const editText = (editTopic?.isE2ee ?? false)
+        ? parsed.text
+        : await maybeProcessLinks(parsed.text, user.sub);
       const updated = await editMessage({
         messageId: parsed.messageId,
         topicId: parsed.topicId,
-        newText: parsed.text,
+        newText: editText,
         editedByUserId: user.sub,
       });
       if (!updated) { ack?.({ ok: false, error: "message not found or deleted" }); return; }

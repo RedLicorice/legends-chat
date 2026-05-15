@@ -124,6 +124,22 @@ interface TopicViewProps {
   canReply: boolean;
 }
 
+async function processLinks(text: string): Promise<string> {
+  if (!text.trim()) return text;
+  try {
+    const res = await apiFetch("/api/links/process", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return text;
+    const data = (await res.json()) as { text?: string };
+    return data.text ?? text;
+  } catch {
+    return text;
+  }
+}
+
 function friendlyTime(date: Date | string): string {
   const d = new Date(date);
   const now = new Date();
@@ -665,13 +681,15 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     const text = editText.trim();
     if (!text) return;
 
-    let finalText = text;
+    const processed = await processLinks(text);
+
+    let finalText = processed;
     if (topic.isE2ee && e2eeReady && e2eeKeyPairRef.current) {
       try {
         const { encryptE2EEMessage, getSenderKey } = await import("@/lib/e2ee");
         const mySenderKey = await getSenderKey(topic.id, currentUser.id);
         if (mySenderKey) {
-          finalText = await encryptE2EEMessage(text, currentUser.id, mySenderKey);
+          finalText = await encryptE2EEMessage(processed, currentUser.id, mySenderKey);
         }
       } catch (err) {
         console.error("[e2ee] edit encrypt failed", err);
@@ -873,7 +891,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     const text = draft.trim();
     if ((!text && pendingAttachments.length === 0) || mute) return;
 
-    let finalText = text;
+    // Strip tracking params / wrap external links server-side before
+    // (optionally) encrypting. On endpoint failure we fall back to original.
+    const processed = text ? await processLinks(text) : text;
+
+    let finalText = processed;
     if (topic.isE2ee && e2eeReady && e2eeKeyPairRef.current) {
       try {
         const {
@@ -962,7 +984,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
           mySenderKey = existingSenderKey;
         }
 
-        finalText = await encryptE2EEMessage(text, currentUser.id, mySenderKey);
+        finalText = await encryptE2EEMessage(processed, currentUser.id, mySenderKey);
       } catch (err) {
         console.error("[e2ee] encrypt failed", err);
         return;
@@ -973,11 +995,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     const hashRegex = /#([a-zA-Z]\w*)/g;
     const symRegex = /\$([a-zA-Z]\w*)/g;
     let m: RegExpExecArray | null;
-    while ((m = hashRegex.exec(text)) !== null) {
+    while ((m = hashRegex.exec(processed)) !== null) {
       const tag = `#${m[1]!.toLowerCase()}`;
       if (!hashtags.includes(tag)) hashtags.push(tag);
     }
-    while ((m = symRegex.exec(text)) !== null) {
+    while ((m = symRegex.exec(processed)) !== null) {
       const sym = m[1]!.toLowerCase();
       if (symbols.some((s) => s.symbol === sym)) {
         const tag = `$${sym}`;

@@ -5,3 +5,5 @@ export * from "./jwt";
 export * from "./format";
 export * from "./invite-code";
 export * from "./log";
+export * from "./link-processor";
+export * from "./shlink-client";

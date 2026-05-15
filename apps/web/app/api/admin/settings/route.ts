@@ -62,6 +62,15 @@ export async function PATCH(req: Request) {
     "upload_allow_original",
     "upload_original_per_hour",
     "upload_original_per_day",
+    "shlink_enabled",
+    "shlink_host",
+    "shlink_api_key",
+    "shlink_default_domain",
+    "shlink_tag_with_user",
+    "shlink_wrap_regex",
+    "strip_tracking_params",
+    "external_link_interstitial_enabled",
+    "external_link_whitelist",
   ] as const;
 
   for (const key of allowed) {

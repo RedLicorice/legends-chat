@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
-import { Palette, Shield, MessageSquare, Upload, Radio } from "lucide-react";
+import { Palette, Shield, MessageSquare, Upload, Radio, Link2 } from "lucide-react";
 import { ImageUrlField } from "@/components/ImageUrlField";
 import { SettingsTabs } from "@/components/SettingsTabs";
 
@@ -96,6 +96,15 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [uploadAllowOriginal, setUploadAllowOriginal] = useState((settings.upload_allow_original ?? "true") === "true");
   const [uploadOriginalPerHour, setUploadOriginalPerHour] = useState(settings.upload_original_per_hour ?? "10");
   const [uploadOriginalPerDay, setUploadOriginalPerDay] = useState(settings.upload_original_per_day ?? "50");
+  const [shlinkEnabled, setShlinkEnabled] = useState(settings.shlink_enabled === "true");
+  const [shlinkHost, setShlinkHost] = useState(settings.shlink_host ?? "");
+  const [shlinkApiKey, setShlinkApiKey] = useState(settings.shlink_api_key ?? "");
+  const [shlinkDefaultDomain, setShlinkDefaultDomain] = useState(settings.shlink_default_domain ?? "");
+  const [shlinkTagWithUser, setShlinkTagWithUser] = useState(settings.shlink_tag_with_user === "true");
+  const [shlinkWrapRegex, setShlinkWrapRegex] = useState(settings.shlink_wrap_regex ?? "");
+  const [stripTrackingParams, setStripTrackingParams] = useState(settings.strip_tracking_params === "true");
+  const [extLinkInterstitial, setExtLinkInterstitial] = useState((settings.external_link_interstitial_enabled ?? "true") !== "false");
+  const [extLinkWhitelist, setExtLinkWhitelist] = useState(settings.external_link_whitelist ?? "");
 
   const community = useSectionSave([], () => ({
     community_name: communityName.trim() || null,
@@ -139,6 +148,18 @@ export function AdminSettingsForm({ settings, topics }: Props) {
     turn_credential: turnCredential.trim() || null,
   }));
 
+  const linkWrap = useSectionSave([], () => ({
+    shlink_enabled: String(shlinkEnabled),
+    shlink_host: shlinkHost.trim() || null,
+    shlink_api_key: shlinkApiKey.trim() || null,
+    shlink_default_domain: shlinkDefaultDomain.trim() || null,
+    shlink_tag_with_user: String(shlinkTagWithUser),
+    shlink_wrap_regex: shlinkWrapRegex.trim() || null,
+    strip_tracking_params: String(stripTrackingParams),
+    external_link_interstitial_enabled: String(extLinkInterstitial),
+    external_link_whitelist: extLinkWhitelist.trim() || null,
+  }));
+
   const uploads = useSectionSave([], () => ({
     upload_resize_cap: uploadResizeCap || "2560",
     upload_jpeg_quality: uploadJpegQuality || "85",
@@ -158,6 +179,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           { key: "content", label: "Content", icon: MessageSquare },
           { key: "media", label: "Media", icon: Upload },
           { key: "realtime", label: "Realtime", icon: Radio },
+          { key: "integrations", label: "Integrations", icon: Link2 },
         ]}
         panels={{
           branding: (
@@ -290,21 +312,6 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         <SaveBar {...welcome} onSave={welcome.save} />
       </Section>
 
-      {/* Giphy */}
-      <Section title="GIF — Giphy integration">
-        <Field label="Enable Giphy">
-          <label className="flex cursor-pointer items-center gap-3">
-            <Toggle value={giphyEnabled} onChange={setGiphyEnabled} />
-            <span className="text-sm">{giphyEnabled ? "Giphy search enabled" : "Giphy disabled (library only)"}</span>
-          </label>
-        </Field>
-        <Field label="Giphy API key">
-          <input type="password" value={giphyApiKey} onChange={(e) => setGiphyApiKey(e.target.value)} placeholder="Paste your Giphy API key" className={inputCls} />
-          <p className="mt-1 text-xs text-muted">Required when Giphy is enabled. Get one at developers.giphy.com.</p>
-        </Field>
-        <SaveBar {...giphy} onSave={giphy.save} />
-      </Section>
-
       {/* Sidebar */}
       <Section title="Sidebar">
         <Field label="Default collapsed sidebar style">
@@ -375,6 +382,89 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         </Field>
         <SaveBar {...uploads} onSave={uploads.save} />
       </Section>
+            </>
+          ),
+          integrations: (
+            <>
+              {/* Giphy */}
+              <Section title="GIF — Giphy integration">
+                <Field label="Enable Giphy">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <Toggle value={giphyEnabled} onChange={setGiphyEnabled} />
+                    <span className="text-sm">{giphyEnabled ? "Giphy search enabled" : "Giphy disabled (library only)"}</span>
+                  </label>
+                </Field>
+                <Field label="Giphy API key">
+                  <input type="password" value={giphyApiKey} onChange={(e) => setGiphyApiKey(e.target.value)} placeholder="Paste your Giphy API key" className={inputCls} />
+                  <p className="mt-1 text-xs text-muted">Required when Giphy is enabled. Get one at developers.giphy.com.</p>
+                </Field>
+                <SaveBar {...giphy} onSave={giphy.save} />
+              </Section>
+
+              {/* Link wrapping */}
+              <Section title="Link wrapping">
+                <Field label="Strip tracking parameters">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <Toggle value={stripTrackingParams} onChange={setStripTrackingParams} />
+                    <span className="text-sm">{stripTrackingParams ? "Tracking params removed from outbound links" : "Links sent as-is"}</span>
+                  </label>
+                  <p className="mt-1 text-xs text-muted">Removes utm_*, fbclid, igsh, and host-scoped trackers (Twitter/X, YouTube, TikTok, Amazon). Works independently of Shlink.</p>
+                </Field>
+                <Field label="Enable Shlink shortener">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <Toggle value={shlinkEnabled} onChange={setShlinkEnabled} />
+                    <span className="text-sm">{shlinkEnabled ? "External links wrapped via Shlink" : "Shlink disabled"}</span>
+                  </label>
+                  <p className="mt-1 text-xs text-muted">Self-hosted URL shortener. Processing happens server-side; API key never reaches the browser.</p>
+                </Field>
+                {shlinkEnabled && (
+                  <>
+                    <Field label="Shlink host URL">
+                      <input value={shlinkHost} onChange={(e) => setShlinkHost(e.target.value)} placeholder="https://s.example.com" className={inputCls} />
+                      <p className="mt-1 text-xs text-muted">Base URL of your Shlink instance, no trailing slash.</p>
+                    </Field>
+                    <Field label="Shlink API key">
+                      <input type="password" value={shlinkApiKey} onChange={(e) => setShlinkApiKey(e.target.value)} placeholder="Paste your Shlink API key" className={inputCls} />
+                      <p className="mt-1 text-xs text-muted">Found under "API keys" in Shlink's web UI.</p>
+                    </Field>
+                    <Field label="Default domain (optional)">
+                      <input value={shlinkDefaultDomain} onChange={(e) => setShlinkDefaultDomain(e.target.value)} placeholder="s.example.com" className={inputCls} />
+                      <p className="mt-1 text-xs text-muted">Override the short-URL host for multi-domain Shlink setups. Leave blank to use Shlink's default.</p>
+                    </Field>
+                    <Field label="Tag with sender user ID">
+                      <label className="flex cursor-pointer items-center gap-3">
+                        <Toggle value={shlinkTagWithUser} onChange={setShlinkTagWithUser} />
+                        <span className="text-sm">{shlinkTagWithUser ? "Each short URL tagged user:<id>" : "No per-sender tagging"}</span>
+                      </label>
+                      <p className="mt-1 text-xs text-muted">Lets admins attribute clicks to senders in Shlink stats. Privacy implication: the bare user ID is stored on the Shlink server alongside the short URL.</p>
+                    </Field>
+                    <Field label="Wrap filter (regex)">
+                      <input value={shlinkWrapRegex} onChange={(e) => setShlinkWrapRegex(e.target.value)} placeholder="^https?://(.+\.ru|suspicious\.com)/" className={`${inputCls} font-mono`} />
+                      <p className="mt-1 text-xs text-muted">Only URLs matching this regex are wrapped. Empty = wrap nothing (strip-only mode). Tested against the full URL after tracking-param strip. Invalid regex disables wrap.</p>
+                    </Field>
+                  </>
+                )}
+                <Field label="External-link warning dialog">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <Toggle value={extLinkInterstitial} onChange={setExtLinkInterstitial} />
+                    <span className="text-sm">{extLinkInterstitial ? "Confirm before leaving the app" : "Links open without warning"}</span>
+                  </label>
+                  <p className="mt-1 text-xs text-muted">Shows the destination URL in a dialog. User must explicitly click "Open link" to proceed. Modifier-click (Ctrl/Cmd/middle) bypasses for power users.</p>
+                </Field>
+                {extLinkInterstitial && (
+                  <Field label="Whitelist (skip warning for these hosts)">
+                    <textarea
+                      value={extLinkWhitelist}
+                      onChange={(e) => setExtLinkWhitelist(e.target.value)}
+                      rows={4}
+                      placeholder={"youtube.com\ngithub.com\nwikipedia.org"}
+                      className={`${inputCls} font-mono resize-y`}
+                    />
+                    <p className="mt-1 text-xs text-muted">One hostname per line (or comma-separated). Subdomains match automatically (e.g. <code className="rounded bg-panel2 px-1">youtube.com</code> covers <code className="rounded bg-panel2 px-1">m.youtube.com</code>). Same-origin URLs always skip.</p>
+                  </Field>
+                )}
+                <SaveBar {...linkWrap} onSave={linkWrap.save} />
+              </Section>
             </>
           ),
         }}
