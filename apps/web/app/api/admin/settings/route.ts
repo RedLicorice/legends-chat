@@ -55,6 +55,13 @@ export async function PATCH(req: Request) {
     "banner_fade_enabled",
     "require_passkey_at_registration",
     "magic_link_login_disabled",
+    "upload_resize_cap",
+    "upload_jpeg_quality",
+    "upload_max_size_image_mb",
+    "upload_max_size_file_mb",
+    "upload_allow_original",
+    "upload_original_per_hour",
+    "upload_original_per_day",
   ] as const;
 
   for (const key of allowed) {

@@ -1,10 +1,11 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
+import { stripImageMetadata } from "@/lib/upload";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart2, Check, CheckSquare, Copy, CornerDownLeft, FileText, Flag, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
+import { BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { io, type Socket } from "socket.io-client";
@@ -220,6 +221,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
   const [replyingToPost, setReplyingToPost] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const [hoverZone, setHoverZone] = useState<"image" | "original" | null>(null);
+  const dragCounter = useRef(0);
 
   const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
 
@@ -308,6 +312,56 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   useEffect(() => { localStorage.setItem(draftKey, draft); }, [draft, draftKey]);
   useEffect(() => { localStorage.setItem("legends-enter-sends", String(enterSends)); }, [enterSends]);
   useEffect(() => { localStorage.setItem("lc-last-topic", topic.slug); }, [topic.slug]);
+
+  // Drag-and-drop: document-level enter/leave counter to avoid flicker
+  // between child elements. Overlay handles the actual drop routing.
+  useEffect(() => {
+    if (!canAttach || !canPost || mute) return;
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+    function onEnter(e: DragEvent) {
+      if (!hasFiles(e)) return;
+      dragCounter.current += 1;
+      if (dragCounter.current === 1) setDragActive(true);
+    }
+    function onLeave(e: DragEvent) {
+      if (!hasFiles(e)) return;
+      dragCounter.current = Math.max(0, dragCounter.current - 1);
+      if (dragCounter.current === 0) { setDragActive(false); setHoverZone(null); }
+    }
+    function onDrop() {
+      dragCounter.current = 0;
+      setDragActive(false);
+      setHoverZone(null);
+    }
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [canAttach, canPost, mute]);
+
+  // Prevent the browser from opening the file when dropped outside the overlay zones.
+  useEffect(() => {
+    function onDragOver(e: DragEvent) {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+        e.preventDefault();
+      }
+    }
+    function onDrop(e: DragEvent) {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+        e.preventDefault();
+      }
+    }
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   // E2EE initialization
   useEffect(() => {
@@ -718,12 +772,14 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     return decryptedTexts.get(msg.id) ?? "(encrypted…)";
   }
 
-  async function uploadFile(file: File, bucket: "uploads" | "files" = "uploads"): Promise<Attachment | null> {
+  async function uploadFile(file: File, bucket: "uploads" | "files" = "uploads", preserveOriginal = false): Promise<Attachment | null> {
     setUploading(true);
     try {
+      const safeFile = preserveOriginal ? file : await stripImageMetadata(file);
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", safeFile);
       form.append("bucket", bucket);
+      if (preserveOriginal) form.append("preserveOriginal", "true");
       const res = await apiFetch("/api/upload", { method: "POST", body: form });
       const data = await res.json() as { url?: string; filename?: string; mimeType?: string; size?: number; error?: string };
       if (!res.ok || !data.url) return null;
@@ -733,6 +789,27 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       return { type: "image", url: data.url };
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function uploadAsImage(file: File): Promise<Attachment | null> {
+    // Image path: strips+resizes via stripImageMetadata, attaches as image.
+    return uploadFile(file, "uploads", false);
+  }
+
+  async function uploadAsOriginal(file: File): Promise<Attachment | null> {
+    // File path: preserve original. Images go to uploads bucket (skip strip),
+    // anything else to files bucket.
+    const isImage = file.type.startsWith("image/");
+    return uploadFile(file, isImage ? "uploads" : "files", true);
+  }
+
+  async function uploadAndAttach(files: File[], mode: "image" | "original") {
+    for (const file of files) {
+      const att = mode === "image"
+        ? (file.type.startsWith("image/") ? await uploadAsImage(file) : await uploadAsOriginal(file))
+        : await uploadAsOriginal(file);
+      if (att) setPendingAttachments((prev) => [...prev, att]);
     }
   }
 
@@ -944,6 +1021,57 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       )}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      {dragActive && (
+        <div
+          className="fixed inset-0 z-[9990] flex flex-col bg-black/60 backdrop-blur-sm p-4 gap-3"
+          onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; }}
+        >
+          <div
+            onDragEnter={() => setHoverZone("original")}
+            onDragOver={(e) => { e.preventDefault(); if (hoverZone !== "original") setHoverZone("original"); }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              const files = Array.from(e.dataTransfer.files);
+              dragCounter.current = 0;
+              setDragActive(false);
+              setHoverZone(null);
+              if (files.length > 0) await uploadAndAttach(files, "original");
+            }}
+            className={cn(
+              "flex-1 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition",
+              hoverZone === "original"
+                ? "border-accent bg-accent/10 text-text"
+                : "border-border bg-panel/60 text-muted",
+            )}
+          >
+            <FileIcon className="h-10 w-10" />
+            <p className="text-base font-semibold text-text">Original quality</p>
+            <p className="text-xs text-muted">Sends as a file attachment for any type</p>
+          </div>
+          <div
+            onDragEnter={() => setHoverZone("image")}
+            onDragOver={(e) => { e.preventDefault(); if (hoverZone !== "image") setHoverZone("image"); }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              const files = Array.from(e.dataTransfer.files);
+              dragCounter.current = 0;
+              setDragActive(false);
+              setHoverZone(null);
+              if (files.length > 0) await uploadAndAttach(files, "image");
+            }}
+            className={cn(
+              "flex-1 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition",
+              hoverZone === "image"
+                ? "border-accent bg-accent/10 text-text"
+                : "border-border bg-panel/60 text-muted",
+            )}
+          >
+            <ImageIcon className="h-10 w-10" />
+            <p className="text-base font-semibold text-text">Compressed image</p>
+            <p className="text-xs text-muted">Strips metadata and resizes (images only; non-images use Original)</p>
+          </div>
+        </div>
+      )}
       {showTopicInfo && (
         <TopicInfoModal
           topic={{
@@ -1756,13 +1884,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               <div className="flex items-center gap-2">
                 {canAttach && (
                   <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-                    className="text-muted hover:text-text disabled:opacity-50" title="Attach image">
+                    className="text-muted hover:text-text disabled:opacity-50" title="Attach image (compressed)">
                     <ImagePlus className="h-4 w-4" />
                   </button>
                 )}
                 {canAttach && (
                   <button type="button" onClick={() => fileUploadRef.current?.click()} disabled={uploading}
-                    className="text-muted hover:text-text disabled:opacity-50" title="Attach file">
+                    className="text-muted hover:text-text disabled:opacity-50" title="Attach file (original quality)">
                     <Paperclip className="h-4 w-4" />
                   </button>
                 )}
@@ -1803,21 +1931,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               </div>
             </div>
 
-            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
+            <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
               onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
+                const files = Array.from(e.target.files ?? []);
                 e.target.value = "";
-                const att = await uploadFile(file, "uploads");
-                if (att) setPendingAttachments((prev) => [...prev, att]);
+                if (files.length === 0) return;
+                await uploadAndAttach(files, "image");
               }} />
-            <input ref={fileUploadRef} type="file" className="hidden"
+            <input ref={fileUploadRef} type="file" multiple className="hidden"
               onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
+                const files = Array.from(e.target.files ?? []);
                 e.target.value = "";
-                const att = await uploadFile(file, "files");
-                if (att) setPendingAttachments((prev) => [...prev, att]);
+                if (files.length === 0) return;
+                await uploadAndAttach(files, "original");
               }} />
           </div>
         </div>

@@ -2,7 +2,9 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useEffect, useState } from "react";
+import { Palette, Shield, MessageSquare, Upload, Radio } from "lucide-react";
 import { ImageUrlField } from "@/components/ImageUrlField";
+import { SettingsTabs } from "@/components/SettingsTabs";
 
 interface Topic { id: string; title: string; slug: string }
 
@@ -87,6 +89,13 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [turnUrl, setTurnUrl] = useState(settings.turn_url ?? "");
   const [turnUsername, setTurnUsername] = useState(settings.turn_username ?? "");
   const [turnCredential, setTurnCredential] = useState(settings.turn_credential ?? "");
+  const [uploadResizeCap, setUploadResizeCap] = useState(settings.upload_resize_cap ?? "2560");
+  const [uploadJpegQuality, setUploadJpegQuality] = useState(settings.upload_jpeg_quality ?? "85");
+  const [uploadMaxSizeImageMb, setUploadMaxSizeImageMb] = useState(settings.upload_max_size_image_mb ?? "10");
+  const [uploadMaxSizeFileMb, setUploadMaxSizeFileMb] = useState(settings.upload_max_size_file_mb ?? "50");
+  const [uploadAllowOriginal, setUploadAllowOriginal] = useState((settings.upload_allow_original ?? "true") === "true");
+  const [uploadOriginalPerHour, setUploadOriginalPerHour] = useState(settings.upload_original_per_hour ?? "10");
+  const [uploadOriginalPerDay, setUploadOriginalPerDay] = useState(settings.upload_original_per_day ?? "50");
 
   const community = useSectionSave([], () => ({
     community_name: communityName.trim() || null,
@@ -130,10 +139,31 @@ export function AdminSettingsForm({ settings, topics }: Props) {
     turn_credential: turnCredential.trim() || null,
   }));
 
+  const uploads = useSectionSave([], () => ({
+    upload_resize_cap: uploadResizeCap || "2560",
+    upload_jpeg_quality: uploadJpegQuality || "85",
+    upload_max_size_image_mb: uploadMaxSizeImageMb || "10",
+    upload_max_size_file_mb: uploadMaxSizeFileMb || "50",
+    upload_allow_original: String(uploadAllowOriginal),
+    upload_original_per_hour: uploadOriginalPerHour || "10",
+    upload_original_per_day: uploadOriginalPerDay || "50",
+  }));
+
   return (
     <div className="space-y-6">
-      {/* Community identity */}
-      <Section title="Community">
+      <SettingsTabs
+        tabs={[
+          { key: "branding", label: "Branding", icon: Palette },
+          { key: "access", label: "Access", icon: Shield },
+          { key: "content", label: "Content", icon: MessageSquare },
+          { key: "media", label: "Media", icon: Upload },
+          { key: "realtime", label: "Realtime", icon: Radio },
+        ]}
+        panels={{
+          branding: (
+            <>
+              {/* Community identity */}
+              <Section title="Community">
         <Field label="Community name">
           <input
             value={communityName}
@@ -213,9 +243,12 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         </Field>
         <SaveBar {...community} onSave={community.save} />
       </Section>
-
-      {/* Registration */}
-      <Section title="Registration">
+            </>
+          ),
+          access: (
+            <>
+              {/* Registration */}
+              <Section title="Registration">
         <Field label="Registration mode">
           <select value={registrationMode} onChange={(e) => setRegistrationMode(e.target.value)} className={inputCls}>
             <option value="closed">Closed — no new registrations</option>
@@ -226,9 +259,19 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         </Field>
         <SaveBar {...registration} onSave={registration.save} />
       </Section>
-
-      {/* Welcome flow */}
-      <Section title="Welcome flow">
+              <InviteConfigSection />
+              <SecuritySection
+                requirePasskey={requirePasskey}
+                setRequirePasskey={setRequirePasskey}
+                magicLinkDisabled={magicLinkDisabled}
+                setMagicLinkDisabled={setMagicLinkDisabled}
+              />
+            </>
+          ),
+          content: (
+            <>
+              {/* Welcome flow */}
+              <Section title="Welcome flow">
         <Field label="Default channel">
           <select value={defaultTopicId} onChange={(e) => setDefaultTopicId(e.target.value)} className={inputCls}>
             <option value="">— none —</option>
@@ -273,9 +316,12 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         </Field>
         <SaveBar {...sidebar} onSave={sidebar.save} />
       </Section>
-
-      {/* P2P */}
-      <Section title="P2P channels">
+            </>
+          ),
+          realtime: (
+            <>
+              {/* P2P */}
+              <Section title="P2P channels">
         <Field label="Default max participants">
           <input type="number" min="2" max="100" value={p2pMaxParticipants} onChange={(e) => setP2pMaxParticipants(e.target.value)} className={inputCls} />
           <p className="mt-1 text-xs text-muted">Max simultaneous peers in a P2P channel (2–100). Per-topic overrides take precedence.</p>
@@ -296,14 +342,42 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         </Field>
         <SaveBar {...p2p} onSave={p2p.save} />
       </Section>
-
-      <InviteConfigSection />
-
-      <SecuritySection
-        requirePasskey={requirePasskey}
-        setRequirePasskey={setRequirePasskey}
-        magicLinkDisabled={magicLinkDisabled}
-        setMagicLinkDisabled={setMagicLinkDisabled}
+            </>
+          ),
+          media: (
+            <>
+              {/* Uploads */}
+              <Section title="Uploads">
+        <Field label="Resize cap (px)">
+          <input type="number" min="0" max="8192" value={uploadResizeCap} onChange={(e) => setUploadResizeCap(e.target.value)} className={inputCls} />
+          <p className="mt-1 text-xs text-muted">Longest-edge px for client re-encode. 0 disables resize.</p>
+        </Field>
+        <Field label="JPEG quality (1–100)">
+          <input type="number" min="1" max="100" value={uploadJpegQuality} onChange={(e) => setUploadJpegQuality(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Max image size (MB)">
+          <input type="number" min="1" max="200" value={uploadMaxSizeImageMb} onChange={(e) => setUploadMaxSizeImageMb(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Max file size (MB)">
+          <input type="number" min="1" max="2000" value={uploadMaxSizeFileMb} onChange={(e) => setUploadMaxSizeFileMb(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Allow native-resolution uploads">
+          <label className="flex cursor-pointer items-center gap-3">
+            <Toggle value={uploadAllowOriginal} onChange={setUploadAllowOriginal} />
+            <span className="text-sm">{uploadAllowOriginal ? "Users may opt to keep originals (rate-limited)" : "All uploads stripped and resized"}</span>
+          </label>
+        </Field>
+        <Field label="Originals per hour">
+          <input type="number" min="0" max="1000" value={uploadOriginalPerHour} onChange={(e) => setUploadOriginalPerHour(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Originals per day">
+          <input type="number" min="0" max="10000" value={uploadOriginalPerDay} onChange={(e) => setUploadOriginalPerDay(e.target.value)} className={inputCls} />
+        </Field>
+        <SaveBar {...uploads} onSave={uploads.save} />
+      </Section>
+            </>
+          ),
+        }}
       />
     </div>
   );

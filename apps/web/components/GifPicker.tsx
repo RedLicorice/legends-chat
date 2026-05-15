@@ -1,5 +1,6 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
+import { stripImageMetadata } from "@/lib/upload";
 
 import { useEffect, useRef, useState } from "react";
 import { Search, X, Upload, Plus, Check, ArrowLeft } from "lucide-react";
@@ -262,8 +263,9 @@ function UploadForm({
     setUploading(true);
     setError(null);
     try {
+      const safeFile = await stripImageMetadata(file);
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", safeFile);
       const upRes = await apiFetch("/api/upload?bucket=gifs", { method: "POST", body: fd });
       const upData = await upRes.json() as { url?: string; error?: string };
       if (!upRes.ok) throw new Error(upData.error ?? "upload failed");
