@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 
 export interface RichTextEditorHandle {
   insertText: (text: string) => void;
+  setContent: (markdown: string) => void;
   focus: () => void;
 }
 
@@ -401,6 +402,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
   useImperativeHandle(ref, () => ({
     insertText(text: string) {
       editor?.chain().focus().insertContent(text).run();
+    },
+    setContent(markdown: string) {
+      editor?.commands.setContent(markdown);
     },
     focus() {
       editor?.commands.focus();

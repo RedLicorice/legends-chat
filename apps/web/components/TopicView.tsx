@@ -850,6 +850,32 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     return uploadFile(file, isImage ? "uploads" : "files", true);
   }
 
+  function isMarkdownFile(file: File): boolean {
+    if (file.type === "text/markdown" || file.type === "text/x-markdown") return true;
+    return /\.(md|markdown|mdown|mkd|mkdn|mdx)$/i.test(file.name);
+  }
+
+  async function loadMarkdownIntoDraft(file: File): Promise<void> {
+    const text = await file.text();
+    setDraft(text);
+    editorRef.current?.setContent(text);
+    editorRef.current?.focus();
+  }
+
+  async function handleDroppedFiles(files: File[], mode: "image" | "original") {
+    // Pull .md/.markdown out of the batch and load the first one into the
+    // compose editor as draft; the rest (if any) go through the upload path.
+    // Multiple .md files: only the first is loaded; extras are ignored to
+    // avoid silently clobbering. Could prompt later if needed.
+    const mdFiles = files.filter(isMarkdownFile);
+    const rest = files.filter((f) => !isMarkdownFile(f));
+    if (mdFiles[0]) {
+      try { await loadMarkdownIntoDraft(mdFiles[0]); }
+      catch (err) { showUploadError(`Failed to read markdown file: ${(err as Error).message}`); }
+    }
+    if (rest.length > 0) await uploadAndAttach(rest, mode);
+  }
+
   async function uploadAndAttach(files: File[], mode: "image" | "original") {
     for (const file of files) {
       const att = mode === "image"
@@ -857,6 +883,22 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         : await uploadAsOriginal(file);
       if (att) setPendingAttachments((prev) => [...prev, att]);
     }
+  }
+
+  function exportDraftAsMarkdown(): void {
+    const content = draft.trim();
+    if (!content) return;
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const filename = `${topic.slug}-${stamp}.md`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function addGif(gif: { url: string; thumbnailUrl: string; width?: number; height?: number }) {
@@ -1085,7 +1127,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               dragCounter.current = 0;
               setDragActive(false);
               setHoverZone(null);
-              if (files.length > 0) await uploadAndAttach(files, "original");
+              if (files.length > 0) await handleDroppedFiles(files, "original");
             }}
             className={cn(
               "flex-1 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition",
@@ -1107,7 +1149,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               dragCounter.current = 0;
               setDragActive(false);
               setHoverZone(null);
-              if (files.length > 0) await uploadAndAttach(files, "image");
+              if (files.length > 0) await handleDroppedFiles(files, "image");
             }}
             className={cn(
               "flex-1 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition",
@@ -1982,6 +2024,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     className={cn("text-muted hover:text-text", showPollCreator && "text-accent")} title="Create poll">
                     <BarChart2 className="h-4 w-4" />
                   </button>
+                )}
+                {topic.isFeed && (
+                  <Tooltip label="Export draft as Markdown">
+                    <button
+                      type="button"
+                      onClick={exportDraftAsMarkdown}
+                      disabled={!draft.trim()}
+                      aria-label="Export draft as Markdown"
+                      className="text-muted hover:text-text disabled:opacity-40"
+                    >
+                      <FileText className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
                 )}
                 <div className="flex-1" />
                 {!topic.isFeed && (
