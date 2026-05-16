@@ -27,12 +27,13 @@ export async function notifyTopicMembers(args: NotifyArgs): Promise<void> {
   if (!ensureConfigured()) return;
 
   const [topicRow] = await db
-    .select({ title: topics.title, isE2ee: topics.isE2ee })
+    .select({ title: topics.title, isE2ee: topics.isE2ee, slug: topics.slug })
     .from(topics)
     .where(eq(topics.id, args.topicId))
     .limit(1);
   if (!topicRow) return;
   const topicTitle = topicRow.title;
+  const topicSlug = topicRow.slug;
 
   let senderName = "Bot";
   if (args.senderUserId) {
@@ -68,7 +69,7 @@ export async function notifyTopicMembers(args: NotifyArgs): Promise<void> {
   const payload = JSON.stringify({
     title: topicTitle,
     body: `${senderName}: ${previewText}`,
-    topicId: args.topicId,
+    topicSlug,
     messageId: args.messageId,
   });
 

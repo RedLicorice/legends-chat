@@ -1,139 +1,24 @@
-"use client";
-import { apiFetch } from "@/lib/fetch";
-import { clearSessionId } from "@/lib/e2ee-session";
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/auth";
+import { LoginClient } from "./LoginClient";
 
-import { useState, useEffect, FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { PasskeyAuthButton } from "@/components/PasskeyAuthButton";
+export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
-  const router = useRouter();
-  const [tab, setTab] = useState<"passkey" | "email" | "telegram">("passkey");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [emailEnabled, setEmailEnabled] = useState(false);
-
-  useEffect(() => {
-    apiFetch("/api/register-config")
-      .then((r) => r.json())
-      .then((d: { registrationMode: string }) => setEmailEnabled(d.registrationMode === "open"))
-      .catch(() => {});
-  }, []);
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await apiFetch("/api/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Login failed.");
-        return;
-      }
-      clearSessionId();
-      router.push("/");
-    } catch {
-      setError("Network error. Try again.");
-    } finally {
-      setLoading(false);
-    }
+// PWA cold-open lands here (manifest start_url = /login due to CF root
+// challenge). If the user already has a valid session, redirect to / so they
+// don't see the sign-in form and assume re-login is required.
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = (await (searchParams ?? Promise.resolve({}))) as Record<string, string | string[] | undefined>;
+  // Don't redirect if landing here from an explicit error link (so the user
+  // can read the error message rendered by LoginClient).
+  const hasError = typeof sp.error === "string" && sp.error.length > 0;
+  if (!hasError) {
+    const user = await getCurrentUser();
+    if (user) redirect("/");
   }
-
-  return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-sm">
-        <h1 className="mb-1 text-2xl font-semibold tracking-tight">Sign in</h1>
-        <p className="mb-6 text-sm text-muted">Welcome back.</p>
-
-        {/* Tab switcher */}
-        <div className="mb-6 flex rounded-lg border border-border bg-panel p-1">
-          <TabBtn active={tab === "passkey"} onClick={() => setTab("passkey")}>Passkey</TabBtn>
-          {emailEnabled && <TabBtn active={tab === "email"} onClick={() => setTab("email")}>Email</TabBtn>}
-          <TabBtn active={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</TabBtn>
-        </div>
-
-        {tab === "telegram" ? (
-          <div className="rounded-xl border border-border bg-panel p-5 text-sm text-muted space-y-2">
-            <p>Open Telegram and message the community bot.</p>
-            <p>Send <code className="rounded bg-panel2 px-1 text-accent">/start</code> and tap the link it sends back.</p>
-            <p className="text-xs">No invite code yet? Ask a member to generate one for you.</p>
-          </div>
-        ) : tab === "passkey" ? (
-          <div className="space-y-3">
-            <PasskeyAuthButton onSuccess={() => { clearSessionId(); router.push("/"); }} />
-            <p className="text-center text-xs text-muted">
-              Use a registered passkey to sign in instantly.
-            </p>
-          </div>
-        ) : emailEnabled ? (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Email</label>
-              <input
-                required
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full rounded-xl border border-border bg-panel px-4 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Password</label>
-              <input
-                required
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full rounded-xl border border-border bg-panel px-4 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted"
-              />
-            </div>
-            {error && <p className="text-sm text-danger">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-xl bg-accent py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
-        ) : null}
-
-        {emailEnabled && (
-          <p className="mt-4 text-center text-sm text-muted">
-            No account?{" "}
-            <Link href="/register" className="text-accent hover:underline">Create one</Link>
-          </p>
-        )}
-        <p className="mt-6 text-center text-xs text-muted/60">
-          <Link href="/docs/whitepaper" className="hover:text-muted underline underline-offset-2">
-            Privacy &amp; Security Whitepaper
-          </Link>
-        </p>
-      </div>
-    </main>
-  );
-}
-
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
-        active ? "bg-accent text-white" : "text-muted hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  );
+  return <LoginClient />;
 }

@@ -33,7 +33,14 @@ self.addEventListener("push", (event) => {
   }
   const title = data.title || "Legends Chat";
   const body = data.body || "";
-  const url = data.topicId ? `/t/${data.topicId}` : "/";
+  // Route uses /t/[slug]; legacy payloads sent UUID under `topicId` which
+  // produced 404s. Prefer the slug field; deep-link to the specific message
+  // via ?msg=<id> so the topic view scrolls + highlights it.
+  let url = "/";
+  if (data.topicSlug) {
+    url = `/t/${data.topicSlug}`;
+    if (data.messageId) url += `?msg=${encodeURIComponent(data.messageId)}`;
+  }
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
