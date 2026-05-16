@@ -32,6 +32,23 @@ export async function findUserByTelegramId(telegramUserId: bigint) {
   return rows[0] ?? null;
 }
 
+export async function touchTelegramUsername(
+  userId: string,
+  currentUsername: string | null,
+): Promise<void> {
+  const [row] = await db
+    .select({ telegramUsername: users.telegramUsername })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) return;
+  if (row.telegramUsername === currentUsername) return;
+  await db
+    .update(users)
+    .set({ telegramUsername: currentUsername })
+    .where(eq(users.id, userId));
+}
+
 export async function createUser(identity: TelegramIdentity) {
   const [row] = await db
     .insert(users)

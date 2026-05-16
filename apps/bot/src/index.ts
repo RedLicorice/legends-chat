@@ -6,7 +6,7 @@ import { createLogger } from "@legends/shared";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
 import { appPublicUrl, attachTelegramMessage, issueLoginToken, issuePendingToken, loginUrl } from "./login";
-import { createAnonUser, findUserByTelegramId, getRegistrationPolicy } from "./registration";
+import { createAnonUser, findUserByTelegramId, getRegistrationPolicy, touchTelegramUsername } from "./registration";
 import {
   rescheduleOnStartup,
   scheduleExpiryCheck,
@@ -30,26 +30,52 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-async function sendLoginLink(ctx: Ctx, userId: string): Promise<void> {
-  const issued = await issueLoginToken(userId);
+// Send a token-bearing message race-free. We can't include the URL/button in
+// the initial reply: the user could click it (or Telegram's WebView could
+// prefetch it) before `attachTelegramMessage` commits the chat/msg refs,
+// causing the web callback to consume the token with null refs and skip the
+// Redis publish that asks the bot to burn this message.
+//
+// Pattern: send a non-actionable placeholder → persist refs → edit the
+// message to add the URL/button. Once the button exists, the refs are
+// already committed, so any consume reliably triggers the bot edit.
+async function sendTokenMessage(
+  ctx: Ctx,
+  issued: { id: string; token: string; expiresAt: Date },
+  buildText: (url: string, isHttps: boolean) => string,
+  buttonLabel: string,
+): Promise<void> {
   const url = loginUrl(issued.token);
   // Telegram only accepts https:// in inline keyboard buttons.
   // Fall back to plain text for localhost dev sessions.
   const isHttps = url.startsWith("https://");
-  const sent = await ctx.reply(
-    isHttps
-      ? `<i>Link valid for 5 minutes.</i>`
-      : `🔑 <b>Log in to Legends Chat</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes.</i>`,
-    {
-      parse_mode: "HTML",
-      ...(isHttps && {
-        reply_markup: { inline_keyboard: [[{ text: "🔑 Log in to Legends Chat", url }]] },
-      }),
-    },
-  );
+
+  const sent = await ctx.reply("⏳ <i>Preparing your link…</i>", { parse_mode: "HTML" });
   const chatId = BigInt(sent.chat.id);
+
   await attachTelegramMessage(issued.id, chatId, sent.message_id);
+
+  await bot.api.editMessageText(Number(chatId), sent.message_id, buildText(url, isHttps), {
+    parse_mode: "HTML",
+    ...(isHttps && {
+      reply_markup: { inline_keyboard: [[{ text: buttonLabel, url }]] },
+    }),
+  });
+
   scheduleExpiryCheck(bot.api, issued.id, chatId, sent.message_id, issued.expiresAt);
+}
+
+async function sendLoginLink(ctx: Ctx, userId: string): Promise<void> {
+  const issued = await issueLoginToken(userId);
+  await sendTokenMessage(
+    ctx,
+    issued,
+    (url, isHttps) =>
+      isHttps
+        ? `<i>Link valid for 5 minutes.</i>`
+        : `🔑 <b>Log in to Legends Chat</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes.</i>`,
+    "🔑 Log in to Legends Chat",
+  );
 }
 
 async function sendPendingLink(
@@ -59,22 +85,15 @@ async function sendPendingLink(
   inviteCode: string | null,
 ): Promise<void> {
   const issued = await issuePendingToken(telegramUserId, telegramUsername, inviteCode);
-  const url = loginUrl(issued.token);
-  const isHttps = url.startsWith("https://");
-  const sent = await ctx.reply(
-    isHttps
-      ? `<i>Link valid for 5 minutes. Tap to continue registration.</i>`
-      : `📝 <b>Continue registration on the web</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes.</i>`,
-    {
-      parse_mode: "HTML",
-      ...(isHttps && {
-        reply_markup: { inline_keyboard: [[{ text: "📝 Continue on the web", url }]] },
-      }),
-    },
+  await sendTokenMessage(
+    ctx,
+    issued,
+    (url, isHttps) =>
+      isHttps
+        ? `<i>Link valid for 5 minutes. Tap to continue registration.</i>`
+        : `📝 <b>Continue registration on the web</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes.</i>`,
+    "📝 Continue on the web",
   );
-  const chatId = BigInt(sent.chat.id);
-  await attachTelegramMessage(issued.id, chatId, sent.message_id);
-  scheduleExpiryCheck(bot.api, issued.id, chatId, sent.message_id, issued.expiresAt);
 }
 
 bot.command("start", async (ctx) => {
@@ -84,6 +103,7 @@ bot.command("start", async (ctx) => {
   const existing = await findUserByTelegramId(BigInt(tgUser.id));
 
   if (existing) {
+    await touchTelegramUsername(existing.id, tgUser.username ?? null);
     const ban = await getActiveBan(existing.id);
     if (ban) {
       await ctx.reply(formatBanMessage(ban));
@@ -124,6 +144,7 @@ bot.on("message:text", async (ctx) => {
 
   const existing = await findUserByTelegramId(BigInt(tgUser.id));
   if (existing) {
+    await touchTelegramUsername(existing.id, tgUser.username ?? null);
     ctx.session.awaitingInvite = false;
     await sendLoginLink(ctx, existing.id);
     return;
@@ -172,25 +193,16 @@ bot.command("anon", async (ctx) => {
     await ctx.reply("This command is only available to admins.");
     return;
   }
+  await touchTelegramUsername(caller.id, tgUser.username ?? null);
 
   const anon = await createAnonUser();
   const issued = await issueLoginToken(anon.id);
-  const url = loginUrl(issued.token);
-  const isHttps = url.startsWith("https://");
-  const sent = await ctx.reply(
-    `🎭 <b>${escapeHtml(anon.displayName)}</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes. Identity expires 48 h after last use.</i>`,
-    {
-      parse_mode: "HTML",
-      ...(isHttps && {
-        reply_markup: {
-          inline_keyboard: [[{ text: `🎭 Log in as ${anon.displayName}`, url }]],
-        },
-      }),
-    },
+  await sendTokenMessage(
+    ctx,
+    issued,
+    (url) => `🎭 <b>${escapeHtml(anon.displayName)}</b>\n<code>${url}</code>\n<i>Link valid for 5 minutes. Identity expires 48 h after last use.</i>`,
+    `🎭 Log in as ${anon.displayName}`,
   );
-  const chatId = BigInt(sent.chat.id);
-  await attachTelegramMessage(issued.id, chatId, sent.message_id);
-  scheduleExpiryCheck(bot.api, issued.id, chatId, sent.message_id, issued.expiresAt);
 });
 
 bot.catch((err) => {
