@@ -587,3 +587,76 @@ export const symbols = pgTable("symbols", {
   linkedUserId: uuid("linked_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Direct messages (1:1) ─────────────────────────────────────────────────────
+export const dmPrincipalType = pgEnum("dm_principal_type", ["user", "bot"]);
+export const dmState = pgEnum("dm_state", ["pending", "accepted", "blocked"]);
+
+export const dmConversations = pgTable(
+  "dm_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dmKey: text("dm_key").notNull(),
+    isE2ee: boolean("is_e2ee").notNull().default(false),
+    state: dmState("state").notNull().default("pending"),
+    initiatorType: dmPrincipalType("initiator_type").notNull(),
+    initiatorId: text("initiator_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+  },
+  (t) => ({
+    dmKeyIdx: uniqueIndex("dm_conversations_dm_key_idx").on(t.dmKey),
+  }),
+);
+
+export const dmParticipants = pgTable(
+  "dm_participants",
+  {
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => dmConversations.id, { onDelete: "cascade" }),
+    principalType: dmPrincipalType("principal_type").notNull(),
+    principalId: text("principal_id").notNull(),
+    lastReadMessageId: bigint("last_read_message_id", { mode: "bigint" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.conversationId, t.principalType, t.principalId] }),
+    principalIdx: index("dm_participants_principal_idx").on(t.principalType, t.principalId),
+  }),
+);
+
+export const dmMessages = pgTable(
+  "dm_messages",
+  {
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => dmConversations.id, { onDelete: "cascade" }),
+    senderType: dmPrincipalType("sender_type").notNull(),
+    senderId: text("sender_id").notNull(),
+    contentCiphertext: bytea("content_ciphertext").notNull(),
+    contentNonce: bytea("content_nonce").notNull(),
+    keyId: uuid("key_id")
+      .notNull()
+      .references(() => encryptionKeys.id),
+    replyToMessageId: bigint("reply_to_message_id", { mode: "bigint" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    convCreatedIdx: index("dm_messages_conv_created_idx").on(t.conversationId, t.id),
+  }),
+);
+
+export const dmBlocks = pgTable(
+  "dm_blocks",
+  {
+    blockerUserId: uuid("blocker_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    blockedUserId: uuid("blocked_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.blockerUserId, t.blockedUserId] }),
+  }),
+);
