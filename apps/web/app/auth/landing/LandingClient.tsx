@@ -40,6 +40,7 @@ export function LandingClient() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [iosInstructions, setIosInstructions] = useState(false);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     apiFetch(`/api/auth/landing-info?token=${encodeURIComponent(token)}`)
@@ -98,6 +99,8 @@ export function LandingClient() {
   }
 
   function openApp() {
+    if (opening) return;
+    setOpening(true);
     const target = buildOpenPath();
     const result = openInBrowser(target);
     if (result.kind === "android") {
@@ -164,11 +167,15 @@ export function LandingClient() {
   }
 
   if (state === "invalid") {
+    const headline = token ? "Link expired" : "Invalid link";
+    const body = token
+      ? "This sign-in link is invalid or has expired."
+      : "This page needs a sign-in link from the bot.";
     return (
       <Center>
         <div className="max-w-sm space-y-2 text-center">
-          <h1 className="text-lg font-semibold">Link expired</h1>
-          <p className="text-sm text-muted">Request a new one from the bot by sending <code className="rounded bg-panel2 px-1 text-accent">/start</code>.</p>
+          <h1 className="text-lg font-semibold">{headline}</h1>
+          <p className="text-sm text-muted">{body} Send <code className="rounded bg-panel2 px-1 text-accent">/start</code> to the bot to get a new one.</p>
         </div>
       </Center>
     );
@@ -192,8 +199,9 @@ export function LandingClient() {
     return (
       <ProfileCard
         user={user}
-        buttonLabel="Open app"
+        buttonLabel={opening ? "Opening…" : "Open app"}
         onAction={openApp}
+        disabled={opening}
         error={error}
       />
     );
@@ -283,11 +291,13 @@ function ProfileCard({
   user,
   buttonLabel,
   onAction,
+  disabled,
   error,
 }: {
   user: UserView | null;
   buttonLabel: string;
   onAction: () => void;
+  disabled?: boolean;
   error: string | null;
 }) {
   const initials = (user?.displayName ?? "?").slice(0, 1).toUpperCase();
@@ -311,7 +321,8 @@ function ProfileCard({
           <button
             type="button"
             onClick={onAction}
-            className="mt-2 w-full rounded-xl bg-accent py-2.5 text-sm font-medium text-white hover:opacity-90"
+            disabled={disabled}
+            className="mt-2 w-full rounded-xl bg-accent py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {buttonLabel}
           </button>

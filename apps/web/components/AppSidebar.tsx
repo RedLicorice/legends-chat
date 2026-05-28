@@ -108,7 +108,7 @@ export function AppSidebar({
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [showAndroidInstall, setShowAndroidInstall] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(() =>
-    typeof localStorage !== "undefined" && localStorage.getItem("install-dismissed") === "true"
+    typeof window !== "undefined" && window.localStorage?.getItem("install-dismissed") === "true"
   );
 
   const installState = useInstallPrompt();

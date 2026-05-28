@@ -8,8 +8,7 @@ import { ThemeSelector } from "@/components/ThemeSelector";
 import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
 import { EmailLinkPanel } from "@/components/EmailLinkPanel";
 import { PasskeyPanel } from "@/components/PasskeyPanel";
-import { SettingsTabs } from "@/components/SettingsTabs";
-import { Palette, Shield, User } from "lucide-react";
+import { SettingsClient } from "@/components/SettingsClient";
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 
@@ -45,35 +44,28 @@ export default async function SettingsPage() {
           <p className="mt-1 text-sm text-muted">Manage your security and appearance preferences.</p>
         </div>
 
-        <SettingsTabs
-          tabs={[
-            { key: "appearance", label: "Appearance", icon: Palette },
-            { key: "security", label: "Security", icon: Shield },
-            { key: "account", label: "Account", icon: User },
-          ]}
-          panels={{
-            appearance: (
-              <div className="rounded-xl border border-border bg-panel p-5 space-y-4">
-                <ThemeSelector defaultTheme={currentTheme} />
-                <SidebarCompactSelector defaultValue={currentCompact} />
-              </div>
-            ),
-            security: (
-              <>
-                <div className="rounded-xl border border-border bg-panel p-5">
-                  <TotpPanel />
-                </div>
-                <div className="rounded-xl border border-border bg-panel p-5">
-                  <PasskeyPanel />
-                </div>
-              </>
-            ),
-            account: (
+        <SettingsClient
+          appearance={
+            <div className="rounded-xl border border-border bg-panel p-5 space-y-4">
+              <ThemeSelector defaultTheme={currentTheme} />
+              <SidebarCompactSelector defaultValue={currentCompact} />
+            </div>
+          }
+          security={
+            <>
               <div className="rounded-xl border border-border bg-panel p-5">
-                <EmailLinkPanel />
+                <TotpPanel />
               </div>
-            ),
-          }}
+              <div className="rounded-xl border border-border bg-panel p-5">
+                <PasskeyPanel />
+              </div>
+            </>
+          }
+          account={
+            <div className="rounded-xl border border-border bg-panel p-5">
+              <EmailLinkPanel />
+            </div>
+          }
         />
       </div>
     </main>

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Make pnpm/node available under non-interactive shells (e.g. when invoked
+# by automation that doesn't source ~/.bashrc). Adjust paths if your install
+# differs.
+export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "error: pnpm not found in PATH after init. PATH=$PATH" >&2
+  exit 127
+fi
+
 REMOTE="stonr.club"
 REMOTE_DIR="/home/mrl/chat"
 

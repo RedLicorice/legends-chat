@@ -5,7 +5,15 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    // Disable navigation preload — we don't consume preloadResponse, and
+    // leaving it enabled spams "navigation preload request was cancelled"
+    // warnings on every navigation.
+    if (self.registration.navigationPreload) {
+      try { await self.registration.navigationPreload.disable(); } catch {}
+    }
+    await self.clients.claim();
+  })());
 });
 
 // Required by Android Chrome for PWA install eligibility.
@@ -20,7 +28,9 @@ self.addEventListener("fetch", (event) => {
     event.request.headers.has("Next-Router-State-Tree") ||
     event.request.headers.has("Next-Router-Prefetch")
   ) return;
-  event.respondWith(fetch(event.request).catch(() => new Response(null, { status: 503 })));
+  // Let network errors propagate as real failures instead of synthesising a
+  // 503 — the synthetic 503 confused callers (showed up as "server responded
+  // with 503" when the actual cause was offline / DNS / TLS).
 });
 
 self.addEventListener("push", (event) => {

@@ -2,6 +2,9 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
+
+const AUTH_PATHS = ["/login", "/register", "/auth/"];
 
 function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -14,9 +17,11 @@ function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
 }
 
 export function PushSetup() {
+  const pathname = usePathname();
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if (pathname && AUTH_PATHS.some((p) => pathname.startsWith(p))) return;
 
     let cancelled = false;
     (async () => {
@@ -54,7 +59,7 @@ export function PushSetup() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname]);
 
   return null;
 }

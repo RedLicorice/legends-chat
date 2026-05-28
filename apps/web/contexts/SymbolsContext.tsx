@@ -1,6 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+
+const AUTH_PATHS = ["/login", "/register", "/auth/"];
 
 export interface AppSymbol {
   id: number;
@@ -27,6 +30,7 @@ const SymbolsContext = createContext<SymbolsContextValue>({
 });
 
 export function SymbolsProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [symbols, setSymbols] = useState<AppSymbol[]>([]);
 
   const load = useCallback(() => {
@@ -37,11 +41,12 @@ export function SymbolsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (pathname && AUTH_PATHS.some((p) => pathname.startsWith(p))) return;
     load();
     const onFocus = () => load();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [load]);
+  }, [load, pathname]);
 
   const isKnownSymbol = useCallback(
     (sym: string) => symbols.some((s) => s.symbol === sym.toLowerCase()),

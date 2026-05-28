@@ -22,6 +22,8 @@ const PUBLIC_PATHS = [
   "/api/user/email-link/verify",
   "/manifest.webmanifest",
   "/sw.js",
+  "/icon-192.png",
+  "/icon-512.png",
   "/docs/whitepaper",
 ];
 

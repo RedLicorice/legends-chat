@@ -11,6 +11,8 @@ logs
 *.log
 .env
 .env.*
+**/.env
+**/.env.*
 dist
 **/*.tsbuildinfo
 start.bat

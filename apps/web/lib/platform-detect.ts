@@ -13,10 +13,14 @@ export function openInBrowser(targetPath: string): PlatformOpenResult {
 
   if (isAndroid) {
     const fallback = encodeURIComponent(`https://${host}${targetPath}`);
-    const intent = `intent://${host}${targetPath}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${fallback};end`;
+    const intent = `intent://${host}${targetPath}#Intent;scheme=https;S.browser_fallback_url=${fallback};end`;
     return { kind: "android", intentUrl: intent };
   }
   if (isIos && !isRealSafari) {
+    // x-safari-https:// scheme attempted previously, but Telegram's iOS WebView
+    // both stripped the prefix (navigating internally) AND handed off to Safari,
+    // causing the token to be consumed twice — the second hit landed at
+    // /login?error=invalid-token. Reverted to manual instructions only.
     return { kind: "ios-instructions" };
   }
   return { kind: "redirect" };

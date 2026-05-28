@@ -310,7 +310,13 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ codeBlock: { languageClassPrefix: "language-" } }),
+      StarterKit.configure({
+        codeBlock: { languageClassPrefix: "language-" },
+        // StarterKit v3 bundles Link — disable so our explicit Link.configure
+        // below wins (autolink + target=_blank). Otherwise tiptap warns
+        // "Duplicate extension names found: ['link']".
+        link: false,
+      }),
       Placeholder.configure({ placeholder: placeholder ?? "Write a message…" }),
       Markdown.configure({ html: false, tightLists: true }),
       Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" } }),

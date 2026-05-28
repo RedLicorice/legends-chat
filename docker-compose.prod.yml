@@ -42,6 +42,7 @@ services:
 
       # ── Telegram bot (optional) ───────────────────────────────────────────
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-}"
 
       # ── Email / SMTP (optional) ───────────────────────────────────────────
       SMTP_HOST: "${SMTP_HOST:-}"

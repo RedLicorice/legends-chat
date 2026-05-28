@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { normalizeHost } from "@/lib/external-links";
 
 interface ExternalLinkConfig {
   interstitialEnabled: boolean;
@@ -17,9 +18,6 @@ interface ExternalLinkContextValue {
 
 const Ctx = createContext<ExternalLinkContextValue | null>(null);
 
-function normalizeHost(h: string): string {
-  return h.trim().toLowerCase().replace(/^www\./, "");
-}
 
 function hostMatches(host: string, entry: string): boolean {
   if (!entry) return false;
@@ -115,10 +113,3 @@ export function useExternalLink(): ExternalLinkContextValue {
   return v;
 }
 
-export function parseWhitelist(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(/[\n,]+/)
-    .map((s) => normalizeHost(s))
-    .filter(Boolean);
-}

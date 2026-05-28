@@ -9,7 +9,8 @@ import { asc } from "drizzle-orm";
 import { PushSetup } from "@/components/PushSetup";
 import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
-import { ExternalLinkProvider, parseWhitelist } from "@/contexts/ExternalLinkContext";
+import { ExternalLinkProvider } from "@/contexts/ExternalLinkContext";
+import { parseWhitelist } from "@/lib/external-links";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
 
 export const dynamic = "force-dynamic";

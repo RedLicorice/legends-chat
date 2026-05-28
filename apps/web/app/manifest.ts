@@ -58,7 +58,7 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     name: name ?? "Legends Chat",
     short_name: name ? name.split(" ")[0] : "Legends",
     description: "Community chat",
-    start_url: "/",
+    start_url: "/login",
     display: "standalone",
     orientation: "portrait",
     background_color: "#0b0d12",

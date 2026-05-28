@@ -12,7 +12,13 @@ function safeRedirectTarget(to: string | null): string {
 export async function GET(req: NextRequest) {
   const to = safeRedirectTarget(req.nextUrl.searchParams.get("to"));
   const ok = await refreshAccessCookie();
-  const origin = publicOriginServer(req);
+  // If the request host doesn't match the configured public origin (e.g. user
+  // reached us via localhost while APP_PUBLIC_URL points at LAN IP), redirect
+  // to the same origin the user is on so the cookies we just set still apply.
+  const publicOrigin = publicOriginServer(req);
+  const reqHost = req.headers.get("host");
+  const publicHost = (() => { try { return new URL(publicOrigin).host; } catch { return null; } })();
+  const origin = publicHost && reqHost && publicHost !== reqHost ? req.nextUrl.origin : publicOrigin;
   if (!ok) return NextResponse.redirect(new URL("/login", origin));
   return NextResponse.redirect(new URL(to, origin));
 }
