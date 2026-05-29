@@ -20,6 +20,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim();
   if (!q || q.length < 2) return NextResponse.json([]);
+  if (q.length > 64) return NextResponse.json([]);
 
   const rows = await db
     .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl })
