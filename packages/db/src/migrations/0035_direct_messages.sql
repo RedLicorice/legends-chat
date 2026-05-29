@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS "dm_messages" (
   "edited_at" timestamp with time zone,
   "deleted_at" timestamp with time zone
 );
-CREATE INDEX IF NOT EXISTS "dm_messages_conv_created_idx" ON "dm_messages" ("conversation_id", "id");
+CREATE INDEX IF NOT EXISTS "dm_messages_conv_id_idx" ON "dm_messages" ("conversation_id", "id");
 
 CREATE TABLE IF NOT EXISTS "dm_blocks" (
   "blocker_user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,

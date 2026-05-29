@@ -645,10 +645,11 @@ export const dmMessages = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => ({
-    convCreatedIdx: index("dm_messages_conv_created_idx").on(t.conversationId, t.id),
+    convIdIdx: index("dm_messages_conv_id_idx").on(t.conversationId, t.id),
   }),
 );
 
+// Plan A: user↔user blocks only (bot DMs are a later plan).
 export const dmBlocks = pgTable(
   "dm_blocks",
   {
