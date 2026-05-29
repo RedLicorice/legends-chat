@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
-  BookOpen, ChevronDown, Hash,
+  BookOpen, ChevronDown, Hash, MessageCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -288,6 +288,12 @@ export function AppSidebar({
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
                 >
                   <Home className="h-4 w-4" /> Home
+                </Link>
+                <Link
+                  href="/dm"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+                >
+                  <MessageCircle className="h-4 w-4" /> Direct Messages
                 </Link>
                 {isStaff && (
                   <Link
