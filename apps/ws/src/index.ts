@@ -464,6 +464,7 @@ subClient.subscribe(
   REDIS_CHANNELS.BOT_NEW_MEMBER,
   REDIS_CHANNELS.NOTIFICATION_BROADCAST,
   REDIS_CHANNELS.SYMBOLS_UPDATE,
+  REDIS_CHANNELS.DM_MESSAGE_NEW,
   (err) => { if (err) console.error("redis subscribe failed", err); },
 );
 
@@ -513,6 +514,15 @@ subClient.on("message", (channel, message) => {
           readAt: null,
           createdAt: n.createdAt,
         });
+      }
+    } else if (channel === REDIS_CHANNELS.DM_MESSAGE_NEW) {
+      const { message: msg, userIds } = JSON.parse(message) as {
+        conversationId: string;
+        message: { id: string; conversationId: string; senderId: string; text: string; createdAt: string; senderType: string };
+        userIds: string[];
+      };
+      for (const uid of userIds) {
+        io.to(`user:${uid}`).emit(WS_EVENTS.DM_NEW, msg);
       }
     } else if (channel === REDIS_CHANNELS.SYMBOLS_UPDATE) {
       io.emit(WS_EVENTS.SYMBOLS_UPDATE, {});
