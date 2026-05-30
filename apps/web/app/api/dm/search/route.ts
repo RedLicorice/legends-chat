@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { and, ilike, ne, eq } from "drizzle-orm";
-import { users } from "@legends/db/schema";
+import { and, eq, ilike, ne } from "drizzle-orm";
+import { users, bots } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
@@ -22,10 +22,21 @@ export async function GET(req: Request) {
   if (!q || q.length < 2) return NextResponse.json([]);
   if (q.length > 64) return NextResponse.json([]);
 
-  const rows = await db
-    .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl })
-    .from(users)
-    .where(and(ilike(users.displayName, `%${q}%`), ne(users.id, user.id), eq(users.isAnon, false)))
-    .limit(8);
-  return NextResponse.json(rows);
+  const [userRows, botRows] = await Promise.all([
+    db
+      .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl })
+      .from(users)
+      .where(and(ilike(users.displayName, `%${q}%`), ne(users.id, user.id), eq(users.isAnon, false)))
+      .limit(6),
+    db
+      .select({ id: bots.id, displayName: bots.name, avatarUrl: bots.avatarUrl })
+      .from(bots)
+      .where(and(ilike(bots.name, `%${q}%`), eq(bots.dmEnabled, true), eq(bots.isActive, true)))
+      .limit(4),
+  ]);
+  const out = [
+    ...userRows.map((u) => ({ type: "user" as const, ...u })),
+    ...botRows.map((b) => ({ type: "bot" as const, ...b })),
+  ];
+  return NextResponse.json(out);
 }

@@ -295,6 +295,12 @@ export function AppSidebar({
                 >
                   <MessageCircle className="h-4 w-4" /> Direct Messages
                 </Link>
+                <Link
+                  href="/dm?tab=bots"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
+                >
+                  <Bot className="h-4 w-4" /> Bots
+                </Link>
                 {isStaff && (
                   <Link
                     href="/admin"

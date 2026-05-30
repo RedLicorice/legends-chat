@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { assertParticipant, listMessages, insertDmMessage, recipientUserIds, isBlockedBetween } from "@/lib/dm";
+import { deliverDmToBots } from "@/lib/dm-bot-delivery";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -56,5 +57,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // fan out via the ws relay: emit to each participant's user room
   const allParticipants = [user.id, ...peers];
   await redis.publish(REDIS_CHANNELS.DM_MESSAGE_NEW, JSON.stringify({ conversationId: id, message: msg, userIds: allParticipants }));
+
+  // Also dispatch to any bot participants of this conversation (Plan C).
+  // Sender display name is the current user's name; bots receive plaintext.
+  void deliverDmToBots(id, {
+    id: msg.id,
+    senderType: "user",
+    senderId: user.id,
+    senderDisplayName: user.displayName,
+    text: parsed.data.text,
+    replyToMessageId: parsed.data.replyToMessageId ?? null,
+    createdAt: msg.createdAt,
+  }).catch((e) => console.error("[dm-bot-delivery] failed", e));
+
   return NextResponse.json({ message: msg }, { status: 201 });
 }

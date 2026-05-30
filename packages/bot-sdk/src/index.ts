@@ -1,5 +1,5 @@
 export { LegendsBotClient } from "./client.js";
-export { LegendsBot, MessageContext, NewMemberContext, CallbackQueryContext } from "./bot.js";
+export { LegendsBot, MessageContext, NewMemberContext, CallbackQueryContext, DmMessageContext } from "./bot.js";
 export type {
   BotInfo,
   Update,
@@ -8,4 +8,6 @@ export type {
   CallbackQueryUpdate,
   InlineKeyboardButton,
   SendMessageParams,
+  DmMessageUpdate,
+  SendDmMessageParams,
 } from "./types.js";

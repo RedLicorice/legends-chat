@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { openUserConversation, listConversations } from "@/lib/dm";
+import { openConversation, listConversations } from "@/lib/dm";
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -11,7 +11,7 @@ export async function GET() {
 }
 
 const openSchema = z.object({
-  peerType: z.literal("user"), // Plan A: user↔user only. Plan C adds "bot".
+  peerType: z.enum(["user", "bot"]),
   peerId: z.string().uuid(),
 });
 
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   const parsed = openSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   try {
-    const { id, created } = await openUserConversation(user.id, parsed.data.peerId);
+    const { id, created } = await openConversation(user.id, { type: parsed.data.peerType, id: parsed.data.peerId });
     return NextResponse.json({ id, created }, { status: created ? 201 : 200 });
   } catch (e) {
     const code = (e as { code?: string }).code;

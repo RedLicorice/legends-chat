@@ -1,4 +1,4 @@
-import type { BotInfo, SendMessageParams, Update } from "./types.js";
+import type { BotInfo, SendDmMessageParams, SendMessageParams, Update } from "./types.js";
 
 export class LegendsBotClient {
   private readonly token: string;
@@ -30,6 +30,10 @@ export class LegendsBotClient {
   }
 
   async sendMessage(params: SendMessageParams): Promise<{ messageId: string }> {
+    return this.call<{ messageId: string }>("sendMessage", params);
+  }
+
+  async sendDmMessage(params: SendDmMessageParams): Promise<{ messageId: string }> {
     return this.call<{ messageId: string }>("sendMessage", params);
   }
 

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
-import { dmConversations, dmParticipants, dmMessages, dmBlocks, encryptionKeys, users } from "@legends/db/schema";
+import { dmConversations, dmParticipants, dmMessages, dmBlocks, encryptionKeys, users, bots } from "@legends/db/schema";
 import { generateDataKey, wrapKey, unwrapKey, encryptMessage, decryptMessage } from "@legends/crypto";
-import { buildDmKey, type DmPrincipal } from "@legends/db/dm-key";
+import { buildDmKey } from "@legends/db/dm-key";
 import { db } from "@/lib/db";
 import { encodeDmContent, decodeDmContent } from "@/lib/dm.codec";
 
@@ -46,14 +46,11 @@ export type DmConversationView = {
   id: string;
   state: "pending" | "accepted" | "blocked";
   isE2ee: boolean;
-  peer: { id: string; displayName: string; avatarUrl: string | null } | null;
+  peer: { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null } | null;
   lastMessageAt: string | null;
   incoming: boolean; // true if the current user is the recipient of a pending request
 };
 
-function userPrincipal(userId: string): DmPrincipal {
-  return { type: "user", id: userId };
-}
 
 export async function isBlockedBetween(a: string, b: string): Promise<boolean> {
   const rows = await db
@@ -72,33 +69,48 @@ export async function assertParticipant(conversationId: string, userId: string):
   if (rows.length === 0) throw Object.assign(new Error("not a participant"), { code: "FORBIDDEN" });
 }
 
-// Open (or fetch) a user↔user conversation idempotently.
-export async function openUserConversation(initiatorId: string, peerId: string): Promise<{ id: string; created: boolean }> {
-  if (initiatorId === peerId) throw Object.assign(new Error("cannot DM yourself"), { code: "BAD" });
-  if (await isBlockedBetween(initiatorId, peerId)) throw Object.assign(new Error("blocked"), { code: "BLOCKED" });
-  const dmKey = buildDmKey(userPrincipal(initiatorId), userPrincipal(peerId));
+export async function openConversation(
+  initiatorUserId: string,
+  peer: { type: "user" | "bot"; id: string },
+): Promise<{ id: string; created: boolean }> {
+  if (peer.type === "user" && initiatorUserId === peer.id) {
+    throw Object.assign(new Error("cannot DM yourself"), { code: "BAD" });
+  }
+  if (peer.type === "user" && (await isBlockedBetween(initiatorUserId, peer.id))) {
+    throw Object.assign(new Error("blocked"), { code: "BLOCKED" });
+  }
+  if (peer.type === "bot") {
+    const [b] = await db.select({ id: bots.id, dmEnabled: bots.dmEnabled, isActive: bots.isActive }).from(bots).where(eq(bots.id, peer.id)).limit(1);
+    if (!b || !b.isActive || !b.dmEnabled) throw Object.assign(new Error("bot not dm-able"), { code: "BAD" });
+  }
+
+  const dmKey = buildDmKey({ type: "user", id: initiatorUserId }, peer);
   const existing = await db.select({ id: dmConversations.id }).from(dmConversations).where(eq(dmConversations.dmKey, dmKey)).limit(1);
   if (existing[0]) return { id: existing[0].id, created: false };
 
+  const state = peer.type === "bot" ? "accepted" : "pending";
   const [conv] = await db
     .insert(dmConversations)
-    .values({ dmKey, isE2ee: false, state: "pending", initiatorType: "user", initiatorId })
+    .values({ dmKey, isE2ee: false, state, initiatorType: "user", initiatorId: initiatorUserId })
     .onConflictDoNothing({ target: dmConversations.dmKey })
     .returning({ id: dmConversations.id });
   if (!conv) {
-    // race: someone created it between SELECT and INSERT — fetch it
     const [row] = await db.select({ id: dmConversations.id }).from(dmConversations).where(eq(dmConversations.dmKey, dmKey)).limit(1);
     return { id: row!.id, created: false };
   }
   await db.insert(dmParticipants).values([
-    { conversationId: conv.id, principalType: "user", principalId: initiatorId },
-    { conversationId: conv.id, principalType: "user", principalId: peerId },
+    { conversationId: conv.id, principalType: "user", principalId: initiatorUserId },
+    { conversationId: conv.id, principalType: peer.type, principalId: peer.id },
   ]).onConflictDoNothing();
   return { id: conv.id, created: true };
 }
 
+// Keep a thin compat alias so the existing /api/dm POST keeps working until Task 3 lands:
+export async function openUserConversation(initiatorId: string, peerUserId: string) {
+  return openConversation(initiatorId, { type: "user", id: peerUserId });
+}
+
 export async function listConversations(userId: string): Promise<DmConversationView[]> {
-  // conversations where the user participates
   const myConvs = await db
     .select({ conversationId: dmParticipants.conversationId })
     .from(dmParticipants)
@@ -108,20 +120,34 @@ export async function listConversations(userId: string): Promise<DmConversationV
 
   const convs = await db.select().from(dmConversations).where(inArray(dmConversations.id, ids));
   const parts = await db.select().from(dmParticipants).where(inArray(dmParticipants.conversationId, ids));
-  const peerIds = parts.filter((p) => p.principalType === "user" && p.principalId !== userId).map((p) => p.principalId);
-  const peerRows = peerIds.length
-    ? await db.select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(inArray(users.id, peerIds))
+
+  const userPeerIds = parts.filter((p) => p.principalType === "user" && p.principalId !== userId).map((p) => p.principalId);
+  const botPeerIds = parts.filter((p) => p.principalType === "bot").map((p) => p.principalId);
+
+  const userRows = userPeerIds.length
+    ? await db.select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(inArray(users.id, userPeerIds))
     : [];
-  const peerById = new Map(peerRows.map((u) => [u.id, u]));
+  const botRows = botPeerIds.length
+    ? await db.select({ id: bots.id, name: bots.name, avatarUrl: bots.avatarUrl }).from(bots).where(inArray(bots.id, botPeerIds))
+    : [];
+  const userById = new Map(userRows.map((u) => [u.id, u]));
+  const botById = new Map(botRows.map((b) => [b.id, b]));
 
   return convs.map((c) => {
-    const peerPart = parts.find((p) => p.conversationId === c.id && p.principalType === "user" && p.principalId !== userId);
-    const peer = peerPart ? peerById.get(peerPart.principalId) ?? null : null;
+    const peerPart = parts.find((p) => p.conversationId === c.id && !(p.principalType === "user" && p.principalId === userId));
+    let peer: DmConversationView["peer"] = null;
+    if (peerPart?.principalType === "user") {
+      const u = userById.get(peerPart.principalId);
+      if (u) peer = { type: "user", id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl };
+    } else if (peerPart?.principalType === "bot") {
+      const b = botById.get(peerPart.principalId);
+      if (b) peer = { type: "bot", id: b.id, displayName: b.name, avatarUrl: b.avatarUrl };
+    }
     return {
       id: c.id,
       state: c.state,
       isE2ee: c.isE2ee,
-      peer: peer ? { id: peer.id, displayName: peer.displayName, avatarUrl: peer.avatarUrl } : null,
+      peer,
       lastMessageAt: c.lastMessageAt ? c.lastMessageAt.toISOString() : null,
       incoming: c.state === "pending" && c.initiatorId !== userId,
     };

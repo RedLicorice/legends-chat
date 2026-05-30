@@ -1,8 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type {
   CallbackQueryUpdate,
+  DmMessageUpdate,
   MessageUpdate,
   NewMemberUpdate,
+  SendDmMessageParams,
   SendMessageParams,
   Update,
 } from "./types.js";
@@ -64,11 +66,26 @@ export class CallbackQueryContext {
   }
 }
 
+export class DmMessageContext {
+  constructor(
+    public readonly bot: LegendsBot,
+    public readonly update: Update,
+    public readonly dm_message: DmMessageUpdate,
+  ) {}
+
+  get conversationId(): string { return this.dm_message.conversation_id; }
+
+  async reply(text: string, options?: Omit<SendDmMessageParams, "conversationId" | "text">): Promise<{ messageId: string }> {
+    return this.bot.api.sendDmMessage({ conversationId: this.conversationId, text, ...options });
+  }
+}
+
 // ─── Handler types ────────────────────────────────────────────────────────────
 
 type MsgHandler = (ctx: MessageContext) => Promise<void> | void;
 type MemberHandler = (ctx: NewMemberContext) => Promise<void> | void;
 type CallbackHandler = (ctx: CallbackQueryContext) => Promise<void> | void;
+type DmMsgHandler = (ctx: DmMessageContext) => Promise<void> | void;
 type ErrorHandler = (err: unknown, update: Update) => void;
 
 // ─── Main bot class ───────────────────────────────────────────────────────────
@@ -80,6 +97,7 @@ export class LegendsBot {
     message: [] as MsgHandler[],
     new_member: [] as MemberHandler[],
     callback_query: [] as CallbackHandler[],
+    dm_message: [] as DmMsgHandler[],
   };
 
   private _onError: ErrorHandler = (err) => console.error("[bot] unhandled error:", err);
@@ -92,7 +110,8 @@ export class LegendsBot {
   on(event: "message", handler: MsgHandler): this;
   on(event: "new_member", handler: MemberHandler): this;
   on(event: "callback_query", handler: CallbackHandler): this;
-  on(event: "message" | "new_member" | "callback_query", handler: MsgHandler | MemberHandler | CallbackHandler): this {
+  on(event: "dm_message", handler: DmMsgHandler): this;
+  on(event: "message" | "new_member" | "callback_query" | "dm_message", handler: MsgHandler | MemberHandler | CallbackHandler | DmMsgHandler): this {
     (this._handlers[event] as (typeof handler)[]).push(handler);
     return this;
   }
@@ -113,6 +132,9 @@ export class LegendsBot {
       } else if (update.type === "callback_query" && update.callback_query) {
         const ctx = new CallbackQueryContext(this, update, update.callback_query);
         for (const h of this._handlers.callback_query) await h(ctx);
+      } else if (update.type === "dm_message" && update.dm_message) {
+        const ctx = new DmMessageContext(this, update, update.dm_message);
+        for (const h of this._handlers.dm_message) await h(ctx);
       }
     } catch (err) {
       this._onError(err, update);

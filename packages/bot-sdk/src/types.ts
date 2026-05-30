@@ -29,12 +29,28 @@ export interface NewMemberUpdate {
   topic_title: string;
 }
 
+export interface DmMessageUpdate {
+  message_id: string;
+  conversation_id: string;
+  from: { id: string; display_name: string | null };
+  text: string;
+  reply_to_message_id?: string;
+  date: number;
+}
+
+export interface SendDmMessageParams {
+  conversationId: string;
+  text: string;
+  replyToMessageId?: string;
+}
+
 export interface Update {
   update_id: string;
-  type: "message" | "callback_query" | "new_member" | string;
+  type: "message" | "callback_query" | "new_member" | "dm_message" | string;
   message?: MessageUpdate;
   callback_query?: CallbackQueryUpdate;
   new_member?: NewMemberUpdate;
+  dm_message?: DmMessageUpdate;
 }
 
 export interface InlineKeyboardButton {

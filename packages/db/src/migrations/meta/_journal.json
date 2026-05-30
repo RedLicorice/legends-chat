@@ -253,6 +253,13 @@
       "when": 1779600000000,
       "tag": "0035_direct_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1779700000000,
+      "tag": "0036_bots_dm_enabled",
+      "breakpoints": true
     }
   ]
 }

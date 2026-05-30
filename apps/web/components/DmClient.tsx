@@ -8,12 +8,12 @@ type Conversation = {
   id: string;
   state: "pending" | "accepted" | "blocked";
   isE2ee: boolean;
-  peer: { id: string; displayName: string; avatarUrl: string | null } | null;
+  peer: { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null } | null;
   lastMessageAt: string | null;
   incoming: boolean;
 };
 type Message = { id: string; conversationId: string; senderType: string; senderId: string; text: string; createdAt: string };
-type SearchHit = { id: string; displayName: string; avatarUrl: string | null };
+type SearchHit = { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null };
 
 export function DmClient({ initialConversations, currentUserId }: { initialConversations: Conversation[]; currentUserId: string }) {
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
@@ -22,10 +22,15 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [tab, setTab] = useState<"all" | "bots">(() => {
+    if (typeof window === "undefined") return "all";
+    return new URLSearchParams(window.location.search).get("tab") === "bots" ? "bots" : "all";
+  });
   const endRef = useRef<HTMLDivElement>(null);
 
   const accepted = conversations.filter((c) => c.state === "accepted");
   const requests = conversations.filter((c) => c.state === "pending" && c.incoming);
+  const visibleAccepted = tab === "bots" ? accepted.filter((c) => c.peer?.type === "bot") : accepted;
 
   const refreshList = useCallback(async () => {
     const r = await apiFetch("/api/dm");
@@ -55,8 +60,8 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
     return () => clearTimeout(t);
   }, [query]);
 
-  async function startDm(peerId: string) {
-    const r = await apiFetch("/api/dm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ peerType: "user", peerId }) });
+  async function startDm(peer: SearchHit) {
+    const r = await apiFetch("/api/dm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ peerType: peer.type, peerId: peer.id }) });
     if (!r.ok) return;
     const d = (await r.json()) as { id: string };
     setQuery(""); setHits([]);
@@ -90,8 +95,9 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
         {hits.length > 0 && (
           <div className="rounded-lg border border-border bg-panel2">
             {hits.map((h) => (
-              <button key={h.id} onClick={() => startDm(h.id)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-panel">
+              <button key={`${h.type}:${h.id}`} onClick={() => startDm(h)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-panel">
                 {h.displayName}
+                {h.type === "bot" && <span className="ml-auto rounded bg-accent2/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent2">bot</span>}
               </button>
             ))}
           </div>
@@ -109,12 +115,13 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
         )}
         <div>
           <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-widest text-muted">Direct Messages</p>
-          {accepted.map((c) => (
+          {visibleAccepted.map((c) => (
             <button key={c.id} onClick={() => openThread(c.id)} className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-panel2", activeId === c.id && "bg-panel2")}>
-              {c.peer?.displayName ?? "Unknown"}
+              <span className="truncate">{c.peer?.displayName ?? "Unknown"}</span>
+              {c.peer?.type === "bot" && <span className="ml-auto rounded bg-accent2/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent2">bot</span>}
             </button>
           ))}
-          {accepted.length === 0 && <p className="px-3 py-2 text-xs text-muted">No conversations yet.</p>}
+          {visibleAccepted.length === 0 && <p className="px-3 py-2 text-xs text-muted">No conversations yet.</p>}
         </div>
       </aside>
 

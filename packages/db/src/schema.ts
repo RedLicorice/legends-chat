@@ -302,6 +302,7 @@ export const bots = pgTable("bots", {
   description: text("description"),
   webhookUrl: text("webhook_url"),
   isActive: boolean("is_active").notNull().default(true),
+  dmEnabled: boolean("dm_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   role: text("role").notNull().default("bot"),
   roleExpiresAt: timestamp("role_expires_at", { withTimezone: true }),
