@@ -85,7 +85,7 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
 
   return (
     <div className="flex h-full">
-      <aside className="w-72 shrink-0 border-r border-border bg-panel p-3 space-y-3 overflow-y-auto">
+      <aside className={cn("shrink-0 border-r border-border bg-panel p-3 space-y-3 overflow-y-auto md:w-72", activeId ? "hidden md:block" : "block w-full")}>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -125,9 +125,16 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className={cn("min-w-0 flex-col md:flex md:flex-1", activeId ? "flex flex-1" : "hidden md:flex")}>
         {activeId ? (
           <>
+            <button
+              type="button"
+              onClick={() => setActiveId(null)}
+              className="md:hidden flex items-center gap-2 border-b border-border px-3 py-2 text-sm text-muted hover:bg-panel2"
+            >
+              <span aria-hidden>←</span> Back
+            </button>
             <div className="flex-1 space-y-2 overflow-y-auto p-4">
               {messages.map((m) => (
                 <div key={m.id} className={cn("max-w-[70%] rounded-xl px-3 py-2 text-sm", m.senderId === currentUserId ? "ml-auto bg-accent text-white" : "bg-panel2 text-text")}>

@@ -20,6 +20,7 @@ const PUBLIC_PATHS = [
   "/api/register-config",
   "/api/invite-check",
   "/api/user/email-link/verify",
+  "/api/bot/",
   "/manifest.webmanifest",
   "/sw.js",
   "/icon-192.png",
