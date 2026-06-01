@@ -512,7 +512,30 @@ export const userKeyBundles = pgTable("user_key_bundles", {
   keyBundle: jsonb("key_bundle").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // Olm Curve25519 signed prekey (base64), its id, and Ed25519 signature
+  // produced by the identity key. Plan B / Olm X3DH.
+  signedPrekeyId: text("signed_prekey_id"),
+  signedPrekey: text("signed_prekey"),
+  signedPrekeySig: text("signed_prekey_sig"),
+  signedPrekeyUpdatedAt: timestamp("signed_prekey_updated_at", { withTimezone: true }),
 });
+
+export const userOneTimePrekeys = pgTable(
+  "user_one_time_prekeys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    prekeyId: text("prekey_id").notNull(),
+    prekey: text("prekey").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    consumedByUserId: uuid("consumed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    userIdx: index("user_one_time_prekeys_user_idx").on(t.userId, t.consumedAt),
+    pkPerUser: uniqueIndex("user_one_time_prekeys_pk_idx").on(t.userId, t.prekeyId),
+  }),
+);
 
 export const notifications = pgTable("notifications", {
   id: uuid("id").primaryKey().defaultRandom(),

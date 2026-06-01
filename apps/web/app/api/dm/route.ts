@@ -13,6 +13,7 @@ export async function GET() {
 const openSchema = z.object({
   peerType: z.enum(["user", "bot"]),
   peerId: z.string().uuid(),
+  e2ee: z.boolean().optional().default(false),
 });
 
 export async function POST(req: Request) {
@@ -22,7 +23,11 @@ export async function POST(req: Request) {
   const parsed = openSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   try {
-    const { id, created } = await openConversation(user.id, { type: parsed.data.peerType, id: parsed.data.peerId });
+    const { id, created } = await openConversation(
+      user.id,
+      { type: parsed.data.peerType, id: parsed.data.peerId },
+      { e2ee: parsed.data.e2ee },
+    );
     return NextResponse.json({ id, created }, { status: created ? 201 : 200 });
   } catch (e) {
     const code = (e as { code?: string }).code;

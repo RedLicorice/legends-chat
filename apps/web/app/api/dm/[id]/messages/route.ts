@@ -44,7 +44,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const [conv] = await db.select().from(dmConversations).where(eq(dmConversations.id, id)).limit(1);
   if (!conv) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (conv.state === "blocked") return NextResponse.json({ error: "blocked" }, { status: 403 });
-  if (conv.isE2ee) return NextResponse.json({ error: "e2ee send not supported in Plan A" }, { status: 400 });
 
   // double-check live block state between the two users
   const peers = await recipientUserIds(id, user.id);

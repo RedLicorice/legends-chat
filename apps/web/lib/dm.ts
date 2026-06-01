@@ -72,9 +72,13 @@ export async function assertParticipant(conversationId: string, userId: string):
 export async function openConversation(
   initiatorUserId: string,
   peer: { type: "user" | "bot"; id: string },
+  options?: { e2ee?: boolean },
 ): Promise<{ id: string; created: boolean }> {
   if (peer.type === "user" && initiatorUserId === peer.id) {
     throw Object.assign(new Error("cannot DM yourself"), { code: "BAD" });
+  }
+  if (peer.type === "bot" && options?.e2ee) {
+    throw Object.assign(new Error("e2ee bot DMs are not supported yet"), { code: "BAD" });
   }
   if (peer.type === "user" && (await isBlockedBetween(initiatorUserId, peer.id))) {
     throw Object.assign(new Error("blocked"), { code: "BLOCKED" });
@@ -84,18 +88,38 @@ export async function openConversation(
     if (!b || !b.isActive || !b.dmEnabled) throw Object.assign(new Error("bot not dm-able"), { code: "BAD" });
   }
 
+  const isE2ee = peer.type === "user" && !!options?.e2ee;
+
   const dmKey = buildDmKey({ type: "user", id: initiatorUserId }, peer);
-  const existing = await db.select({ id: dmConversations.id }).from(dmConversations).where(eq(dmConversations.dmKey, dmKey)).limit(1);
-  if (existing[0]) return { id: existing[0].id, created: false };
+  const existing = await db
+    .select({ id: dmConversations.id, isE2ee: dmConversations.isE2ee })
+    .from(dmConversations)
+    .where(eq(dmConversations.dmKey, dmKey))
+    .limit(1);
+  if (existing[0]) {
+    if (isE2ee !== existing[0].isE2ee) {
+      throw Object.assign(
+        new Error(
+          `existing DM is ${existing[0].isE2ee ? "encrypted" : "plaintext"}; re-use that thread`,
+        ),
+        { code: "BAD" },
+      );
+    }
+    return { id: existing[0].id, created: false };
+  }
 
   const state = peer.type === "bot" ? "accepted" : "pending";
   const [conv] = await db
     .insert(dmConversations)
-    .values({ dmKey, isE2ee: false, state, initiatorType: "user", initiatorId: initiatorUserId })
+    .values({ dmKey, isE2ee, state, initiatorType: "user", initiatorId: initiatorUserId })
     .onConflictDoNothing({ target: dmConversations.dmKey })
     .returning({ id: dmConversations.id });
   if (!conv) {
-    const [row] = await db.select({ id: dmConversations.id }).from(dmConversations).where(eq(dmConversations.dmKey, dmKey)).limit(1);
+    const [row] = await db
+      .select({ id: dmConversations.id })
+      .from(dmConversations)
+      .where(eq(dmConversations.dmKey, dmKey))
+      .limit(1);
     return { id: row!.id, created: false };
   }
   await db.insert(dmParticipants).values([

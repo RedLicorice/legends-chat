@@ -518,12 +518,17 @@ subClient.on("message", (channel, message) => {
     } else if (channel === REDIS_CHANNELS.DM_MESSAGE_NEW) {
       const { message: msg, userIds } = JSON.parse(message) as {
         conversationId: string;
+        isE2ee?: boolean;
         message: { id: string; conversationId: string; senderId: string; text: string; createdAt: string; senderType: string };
         userIds: string[];
       };
       for (const uid of userIds) {
         io.to(`user:${uid}`).emit(WS_EVENTS.DM_NEW, msg);
       }
+      // TODO Plan B: when DM web-push is added, use a generic preview when isE2ee:
+      //   const previewText = isE2ee ? "New message" : truncate(msg.text, 80);
+      // Mirror the notifyTopicMembers() call above but for DM participants.
+      // Analogue of notifyTopicMembers() (topic push, ~line 272 above) but for DMs.
     } else if (channel === REDIS_CHANNELS.SYMBOLS_UPDATE) {
       io.emit(WS_EVENTS.SYMBOLS_UPDATE, {});
     }

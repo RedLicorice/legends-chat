@@ -104,6 +104,9 @@ importers:
       '@legends/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@matrix-org/olm':
+        specifier: ^3.2.15
+        version: 3.2.15
       '@simplewebauthn/browser':
         specifier: ^13.3.0
         version: 13.3.0
@@ -1086,6 +1089,9 @@ packages:
 
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
+
+  '@matrix-org/olm@3.2.15':
+    resolution: {integrity: sha512-S7lOrndAK9/8qOtaTq/WhttJC/o4GAzdfK0MUPpo8ApzsJEC0QjtwrkC3KBXdFP1cD1MXi/mlKR7aaoVMKgs6Q==}
 
   '@next/env@15.5.15':
     resolution: {integrity: sha512-vcmyu5/MyFzN7CdqRHO3uHO44p/QPCZkuTUXroeUmhNP8bL5PHFEhik22JUazt+CDDoD6EpBYRCaS2pISL+/hg==}
@@ -3293,6 +3299,8 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@levischuck/tiny-cbor@0.2.11': {}
+
+  '@matrix-org/olm@3.2.15': {}
 
   '@next/env@15.5.15': {}
 
