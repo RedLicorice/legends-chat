@@ -21,13 +21,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const beforeRaw = req.nextUrl.searchParams.get("before");
   const before = beforeRaw && /^\d+$/.test(beforeRaw) ? beforeRaw : undefined;
   const messages = await listMessages(id, before);
-  return NextResponse.json({ messages });
+  const [conv] = await db
+    .select({ isE2ee: dmConversations.isE2ee, e2eeRoomId: dmConversations.e2eeRoomId })
+    .from(dmConversations)
+    .where(eq(dmConversations.id, id))
+    .limit(1);
+  return NextResponse.json({
+    messages,
+    isE2ee: conv?.isE2ee ?? false,
+    e2eeRoomId: conv?.e2eeRoomId ?? null,
+  });
 }
 
-const sendSchema = z.object({
-  text: z.string().min(1).max(8000),
-  replyToMessageId: z.string().regex(/^\d+$/).optional().nullable(),
-});
+// Accept either plaintext (`text`) or an E2EE envelope (`ciphertext`), but not
+// both. Convo.is_e2ee decides which is required; the per-row CHECK constraint
+// enforces mutual exclusion at the DB level.
+const sendSchema = z
+  .object({
+    text: z.string().min(1).max(8000).optional(),
+    ciphertext: z.record(z.unknown()).optional(),
+    replyToMessageId: z.string().regex(/^\d+$/).optional().nullable(),
+  })
+  .refine((d) => (d.text != null) !== (d.ciphertext != null), {
+    message: "provide exactly one of `text` or `ciphertext`",
+  });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -45,29 +62,50 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!conv) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (conv.state === "blocked") return NextResponse.json({ error: "blocked" }, { status: 403 });
 
+  // E2EE-vs-plaintext payload must match the conversation mode.
+  if (conv.isE2ee && parsed.data.ciphertext == null) {
+    return NextResponse.json({ error: "E2EE conversation; send ciphertext" }, { status: 400 });
+  }
+  if (!conv.isE2ee && parsed.data.text == null) {
+    return NextResponse.json({ error: "plaintext conversation; send text" }, { status: 400 });
+  }
+
   // double-check live block state between the two users
   const peers = await recipientUserIds(id, user.id);
   for (const p of peers) {
     if (await isBlockedBetween(user.id, p)) return NextResponse.json({ error: "blocked" }, { status: 403 });
   }
 
-  const msg = await insertDmMessage({ conversationId: id, senderType: "user", senderId: user.id, text: parsed.data.text, replyToMessageId: parsed.data.replyToMessageId ?? null });
+  const msg = await insertDmMessage({
+    conversationId: id,
+    senderType: "user",
+    senderId: user.id,
+    text: parsed.data.text,
+    ciphertext: parsed.data.ciphertext,
+    replyToMessageId: parsed.data.replyToMessageId ?? null,
+  });
 
   // fan out via the ws relay: emit to each participant's user room
   const allParticipants = [user.id, ...peers];
-  await redis.publish(REDIS_CHANNELS.DM_MESSAGE_NEW, JSON.stringify({ conversationId: id, message: msg, userIds: allParticipants }));
+  await redis.publish(
+    REDIS_CHANNELS.DM_MESSAGE_NEW,
+    JSON.stringify({ conversationId: id, message: msg, userIds: allParticipants, isE2ee: conv.isE2ee }),
+  );
 
   // Also dispatch to any bot participants of this conversation (Plan C).
-  // Sender display name is the current user's name; bots receive plaintext.
-  void deliverDmToBots(id, {
-    id: msg.id,
-    senderType: "user",
-    senderId: user.id,
-    senderDisplayName: user.displayName,
-    text: parsed.data.text,
-    replyToMessageId: parsed.data.replyToMessageId ?? null,
-    createdAt: msg.createdAt,
-  }).catch((e) => console.error("[dm-bot-delivery] failed", e));
+  // Bot DMs are not E2EE (openConversation rejects bot + e2ee), so it's safe to
+  // forward plaintext here. Skip if this row is E2EE just in case.
+  if (!conv.isE2ee && parsed.data.text != null) {
+    void deliverDmToBots(id, {
+      id: msg.id,
+      senderType: "user",
+      senderId: user.id,
+      senderDisplayName: user.displayName,
+      text: parsed.data.text,
+      replyToMessageId: parsed.data.replyToMessageId ?? null,
+      createdAt: msg.createdAt,
+    }).catch((e) => console.error("[dm-bot-delivery] failed", e));
+  }
 
   return NextResponse.json({ message: msg }, { status: 201 });
 }

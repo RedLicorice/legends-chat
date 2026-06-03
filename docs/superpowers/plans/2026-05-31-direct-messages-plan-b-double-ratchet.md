@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [`2026-06-03-direct-messages-plan-b-matrix-crypto.md`](./2026-06-03-direct-messages-plan-b-matrix-crypto.md) — Olm package bundler-hostile in Next 15 Turbopack; switched to matrix-sdk-crypto-wasm.
+
 # Direct Messages — Plan B: Signal Double Ratchet E2EE (user↔user, via Olm)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

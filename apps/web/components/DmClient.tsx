@@ -3,26 +3,66 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/fetch";
 import { cn } from "@/lib/cn";
 import { useDmSocket, type DmIncoming } from "@/hooks/useDmSocket";
+import type { EncryptedEnvelope, IncomingEnvelope } from "@/lib/dm-crypto";
 
 type Conversation = {
   id: string;
   state: "pending" | "accepted" | "blocked";
   isE2ee: boolean;
+  e2eeRoomId: string | null;
   peer: { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null } | null;
   lastMessageAt: string | null;
   incoming: boolean;
 };
-type Message = { id: string; conversationId: string; senderType: string; senderId: string; text: string; createdAt: string };
+// Server stores the Matrix m.room.encrypted content as opaque JSON. We trust
+// the OlmMachine to validate the shape when it deserialises it; locally we
+// treat it as an EncryptedEnvelope for `decryptDm`.
+type Envelope = EncryptedEnvelope;
+type Message = {
+  id: string;
+  conversationId: string;
+  senderType: string;
+  senderId: string;
+  text: string;
+  // Server returns the persisted m.room.encrypted content as JSON. We narrow
+  // to EncryptedEnvelope when handing off to the OlmMachine.
+  ciphertext: Record<string, unknown> | null;
+  createdAt: string;
+};
 type SearchHit = { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null };
 
 // ---------------------------------------------------------------------------
 // Helpers (defined outside component to avoid re-creation on every render)
 // ---------------------------------------------------------------------------
-function isEnvelope(s: string): boolean {
-  return typeof s === "string" && s.startsWith('{"r":1') && s.endsWith("}");
-}
 function peerOf(c: Conversation): { type: "user" | "bot"; id: string } | null {
   return c.peer ? { type: c.peer.type, id: c.peer.id } : null;
+}
+
+// localStorage key — once a user has successfully bootstrapped the crypto
+// session at least once, suppress the setup-gate banner on subsequent visits.
+function bootstrappedKey(userId: string): string {
+  return `legends-crypto-bootstrapped:${userId}`;
+}
+
+// Build an IncomingEnvelope-shaped object for `decryptDm`. Matrix's OlmMachine
+// requires a full m.room.encrypted event, so we synthesize one from the
+// persisted DM row.
+function toIncomingEnvelope(args: {
+  envelope: Record<string, unknown>;
+  matrixPeerUserId: string;
+  messageId: string;
+  createdAt: string;
+}): IncomingEnvelope {
+  return {
+    type: "m.room.encrypted",
+    sender: args.matrixPeerUserId,
+    // The server-stored envelope was produced by `encryptDm`, which returns
+    // an EncryptedEnvelope. The DB layer cast it to Record<string, unknown>
+    // for storage; we trust it round-trips back to the same shape.
+    content: args.envelope as unknown as Envelope,
+    event_id: `$${args.messageId}`,
+    origin_server_ts: Date.parse(args.createdAt) || Date.now(),
+  };
 }
 
 export function DmClient({ initialConversations, currentUserId }: { initialConversations: Conversation[]; currentUserId: string }) {
@@ -44,8 +84,25 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
   const [myFingerprint, setMyFingerprint] = useState<string | null>(null);
   const [peerFingerprint, setPeerFingerprint] = useState<string | null>(null);
   const [showSafety, setShowSafety] = useState(false);
+  // Decrypted plaintext cache keyed by message id. Survives re-renders but is
+  // wiped on unmount; live decryption is idempotent so re-fetching is cheap.
+  const [decryptedById, setDecryptedById] = useState<Record<string, string>>({});
+  // Ref mirror for closures that need the latest cache without re-binding.
+  const decryptedRef = useRef(decryptedById);
+  useEffect(() => { decryptedRef.current = decryptedById; }, [decryptedById]);
+
   const endRef = useRef<HTMLDivElement>(null);
   const conversationsRef = useRef(initialConversations);
+  // Singleton across the component lifetime — set lazily on first need.
+  const cryptoRef = useRef<typeof import("@/lib/dm-crypto") | null>(null);
+  const sessionInitPromise = useRef<Promise<void> | null>(null);
+  // Mirrors of state used inside the periodic-poll timer; updated via
+  // separate effects below so the closure always sees the current values
+  // without re-binding the interval every render.
+  const messagesRef = useRef<Message[]>([]);
+  const activeIdRef = useRef<string | null>(null);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
   const accepted = conversations.filter((c) => c.state === "accepted");
   const requests = conversations.filter((c) => c.state === "pending" && c.incoming);
@@ -58,10 +115,117 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
 
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
 
+  // ---------------------------------------------------------------------------
+  // Crypto session bootstrap (idempotent; safe to call repeatedly)
+  // ---------------------------------------------------------------------------
+  const ensureCrypto = useCallback(async (): Promise<typeof import("@/lib/dm-crypto") | null> => {
+    if (cryptoRef.current && e2eeReady) return cryptoRef.current;
+    if (sessionInitPromise.current) {
+      await sessionInitPromise.current;
+      return cryptoRef.current;
+    }
+    sessionInitPromise.current = (async () => {
+      try {
+        const mod = await import("@/lib/dm-crypto");
+        cryptoRef.current = mod;
+        const session = await mod.initCrypto(currentUserId);
+        setMyFingerprint(session.fingerprint);
+        await mod.bootstrap();
+        setE2eeReady(true);
+        setE2eeSetupNeeded(false);
+        try { localStorage.setItem(bootstrappedKey(currentUserId), "1"); } catch {}
+      } catch (e) {
+        setE2eeError((e as Error).message);
+        setE2eeSetupNeeded(true);
+        throw e;
+      } finally {
+        sessionInitPromise.current = null;
+      }
+    })();
+    try { await sessionInitPromise.current; } catch { return null; }
+    return cryptoRef.current;
+  }, [currentUserId, e2eeReady]);
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle: poll /api/crypto/sync while visible, drain on socket event,
+  // and release the OlmMachine on unmount.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      if (interval) return;
+      interval = setInterval(async () => {
+        const mod = cryptoRef.current;
+        if (!mod || !e2eeReady) return;
+        try {
+          await mod.pollSync();
+        } catch {
+          return; // next tick retries
+        }
+        // After sync, retry decryption of any currently-locked messages in the
+        // active thread. A freshly-arrived megolm room key turns a "🔒 ⚠️
+        // Unable to decrypt" row into the plaintext on the next paint.
+        const aId = activeIdRef.current;
+        if (!aId) return;
+        const conv = conversationsRef.current.find((c) => c.id === aId);
+        const peer = conv ? peerOf(conv) : null;
+        if (!conv?.isE2ee || !conv.e2eeRoomId || !peer || peer.type !== "user") return;
+        const matrixPeer = `@${peer.id}:legends.local`;
+        const newly: Record<string, string> = {};
+        for (const m of messagesRef.current) {
+          if (!m.ciphertext) continue;
+          if (decryptedRef.current[m.id] != null) continue;
+          try {
+            const env = toIncomingEnvelope({
+              envelope: m.ciphertext,
+              matrixPeerUserId: m.senderId === currentUserId
+                ? `@${currentUserId}:legends.local`
+                : matrixPeer,
+              messageId: m.id,
+              createdAt: m.createdAt,
+            });
+            const text = await mod.decryptDm(conv.e2eeRoomId, env);
+            newly[m.id] = text;
+          } catch { /* still missing key */ }
+        }
+        if (Object.keys(newly).length > 0) {
+          setDecryptedById((prev) => ({ ...prev, ...newly }));
+        }
+      }, 5000);
+    };
+    const stopPolling = () => {
+      if (interval) { clearInterval(interval); interval = null; }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") startPolling(); else stopPolling();
+    };
+    if (typeof document !== "undefined") {
+      onVisibility();
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      stopPolling();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+    };
+  }, [e2eeReady, currentUserId]);
+
+  // Release the OlmMachine ONLY on real unmount. This effect has an empty
+  // dependency list so the cleanup never runs in response to state changes
+  // like `e2eeReady` flipping — otherwise we'd tear down the machine we just
+  // initialised and the next send would hit "OlmMachine not initialized".
+  useEffect(() => {
+    return () => {
+      cryptoRef.current?.freeResources().catch(() => {});
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Open thread: load history + decrypt E2EE messages.
+  // ---------------------------------------------------------------------------
   const openThread = useCallback(async (id: string) => {
     setActiveId(id);
-    // Reset E2EE state for the new thread
-    setE2eeReady(false);
     setE2eeError(null);
     setPeerFingerprint(null);
 
@@ -70,107 +234,110 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
     const convSnapshot = conversationsRef.current;
     const conv = convSnapshot.find((c) => c.id === id);
     const peer = conv ? peerOf(conv) : null;
+    const isE2ee = Boolean(conv?.isE2ee && peer && peer.type === "user" && conv.e2eeRoomId);
 
-    // -----------------------------------------------------------------------
-    // Step 2: E2EE setup gate
-    // -----------------------------------------------------------------------
-    if (conv?.isE2ee && peer && peer.type === "user") {
-      const olm = await import("@/lib/dm-olm");
-      const { created, identityKeys } = await olm.getOrCreateAccount();
-      setMyFingerprint(identityKeys.ed25519);
-      if (created) {
-        setE2eeSetupNeeded(true);
-        try {
-          await olm.generateAndPublishKeys();
-        } catch (e) {
-          setE2eeError("could not publish encryption keys: " + (e as Error).message);
-          setE2eeSetupNeeded(false);
-          return;
-        }
-        setE2eeSetupNeeded(false);
+    if (isE2ee) {
+      const mod = await ensureCrypto();
+      if (!mod) return; // setup gate will surface; user will retry.
+      // Track peer + ensure megolm session is ready (best-effort on open).
+      try {
+        await mod.ensurePeerTracked(peer!.id);
+        await mod.ensureSessionWithPeer(peer!.id);
+        const fp = await mod.getPeerFingerprint(peer!.id);
+        setPeerFingerprint(fp);
+      } catch (e) {
+        // Peer may not have published keys yet — non-fatal; sends will retry.
+        setE2eeError((e as Error).message);
       }
-      setE2eeReady(true);
-
-      // -----------------------------------------------------------------------
-      // Step 3: Establish outbound session if needed
-      // -----------------------------------------------------------------------
-      if (!(await olm.hasSession(id, peer.id))) {
-        const bundleRes = await apiFetch(`/api/user/keys/bundle?userId=${peer.id}`);
-        if (!bundleRes.ok) {
-          const err = (await bundleRes.json().catch(() => ({}))) as { error?: string };
-          setE2eeError(err.error ?? "peer has not set up encryption yet");
-          // Allow the thread to open; sends will fail until peer publishes.
-        } else {
-          const bundle = (await bundleRes.json()) as {
-            olmIdentityCurve25519: string;
-            olmIdentityEd25519: string;
-            oneTimePrekey: { id: string; key: string } | null;
-          };
-          setPeerFingerprint(bundle.olmIdentityEd25519);
-          try {
-            await olm.openOutboundSession(id, peer.id, {
-              olmIdentityCurve25519: bundle.olmIdentityCurve25519,
-              olmIdentityEd25519: bundle.olmIdentityEd25519,
-              oneTimePrekey: bundle.oneTimePrekey,
-            });
-          } catch (e) {
-            setE2eeError((e as Error).message);
-          }
-        }
-      }
-
-      // Populate peerFingerprint on re-open of an existing session (fix #4).
-      const peerEd = await olm.getPeerEd25519(id, peer.id);
-      if (peerEd) setPeerFingerprint(peerEd);
     }
 
-    // -----------------------------------------------------------------------
-    // Fetch messages + decrypt history (Step 3 continued)
-    // -----------------------------------------------------------------------
     const r = await apiFetch(`/api/dm/${id}/messages`);
     if (!r.ok) return;
-    const d = (await r.json()) as { messages: Message[] };
+    const d = (await r.json()) as { messages: Message[]; e2eeRoomId: string | null; isE2ee: boolean };
+    setMessages(d.messages);
 
-    if (conv?.isE2ee && peer && peer.type === "user") {
-      const olm = await import("@/lib/dm-olm");
-      const decrypted = await Promise.all(
+    if (isE2ee && d.e2eeRoomId && cryptoRef.current) {
+      // Decrypt history in parallel; each successful decrypt updates the cache.
+      const mod = cryptoRef.current;
+      const matrixPeer = `@${peer!.id}:legends.local`;
+      const newly: Record<string, string> = {};
+      await Promise.all(
         d.messages.map(async (m) => {
-          if (!isEnvelope(m.text)) return m;
+          if (!m.ciphertext) return;
           try {
-            const text = await olm.decrypt(id, peer.id, m.text);
-            return { ...m, text };
+            const env = toIncomingEnvelope({
+              envelope: m.ciphertext,
+              matrixPeerUserId: m.senderId === currentUserId
+                ? `@${currentUserId}:legends.local`
+                : matrixPeer,
+              messageId: m.id,
+              createdAt: m.createdAt,
+            });
+            const text = await mod.decryptDm(d.e2eeRoomId!, env);
+            newly[m.id] = text;
           } catch {
-            return { ...m, text: "(decryption failed)" };
+            // leave undecrypted — UI shows the locked banner; pollSync will
+            // pick up the missing room key and we'll retry on next render.
           }
         }),
       );
-      setMessages(decrypted);
-    } else {
-      setMessages(d.messages);
+      if (Object.keys(newly).length > 0) {
+        setDecryptedById((prev) => ({ ...prev, ...newly }));
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentUserId, ensureCrypto]);
 
-  // -------------------------------------------------------------------------
-  // Step 5: Decrypt incoming WS messages
-  // -------------------------------------------------------------------------
-  useDmSocket(useCallback(async (m: DmIncoming) => {
+  // ---------------------------------------------------------------------------
+  // Live incoming over socket.io
+  // ---------------------------------------------------------------------------
+  useDmSocket(useCallback(async (m: DmIncoming & { ciphertext?: Envelope | null }) => {
     if (m.conversationId !== activeId) { refreshList(); return; }
     const conv = conversationsRef.current.find((c) => c.id === activeId);
     const peer = conv ? peerOf(conv) : null;
-    let text = m.text;
-    if (conv?.isE2ee && peer && peer.type === "user" && isEnvelope(text) && m.senderId !== currentUserId) {
-      try {
-        const olm = await import("@/lib/dm-olm");
-        text = await olm.decrypt(activeId, peer.id, text);
-      } catch { text = "(decryption failed)"; }
-    }
-    setMessages((prev) => prev.some((x) => x.id === m.id) ? prev : [...prev, { ...m, text }]);
+    const incomingMsg: Message = {
+      id: m.id,
+      conversationId: m.conversationId,
+      senderType: m.senderType,
+      senderId: m.senderId,
+      text: m.text ?? "",
+      ciphertext: m.ciphertext ?? null,
+      createdAt: m.createdAt,
+    };
+    setMessages((prev) => prev.some((x) => x.id === incomingMsg.id) ? prev : [...prev, incomingMsg]);
     refreshList();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, refreshList, currentUserId]));
 
-  useEffect(() => { endRef.current?.scrollIntoView(); }, [messages]);
+    // If this is an E2EE row not sent by us, decrypt asynchronously.
+    if (conv?.isE2ee && conv.e2eeRoomId && peer && peer.type === "user" && incomingMsg.ciphertext && m.senderId !== currentUserId) {
+      const mod = cryptoRef.current ?? (await ensureCrypto());
+      if (!mod) return;
+      try {
+        const env = toIncomingEnvelope({
+          envelope: incomingMsg.ciphertext,
+          matrixPeerUserId: `@${peer.id}:legends.local`,
+          messageId: incomingMsg.id,
+          createdAt: incomingMsg.createdAt,
+        });
+        const text = await mod.decryptDm(conv.e2eeRoomId, env);
+        setDecryptedById((prev) => ({ ...prev, [incomingMsg.id]: text }));
+      } catch {
+        // Likely missing room key — pollSync will eventually deliver it.
+        await mod.pollSync().catch(() => {});
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, refreshList, currentUserId, ensureCrypto]));
+
+  // Best-effort: subscribe to a `crypto:to_device` push if the server emits one.
+  // The server may not emit this yet — that's fine, the interval poll covers
+  // the gap. Kept as a hot-path optimization for when it lands.
+  useEffect(() => {
+    // We piggyback on the socket created by useDmSocket; there's no direct
+    // handle to it here, so we open a thin secondary listener via dynamic
+    // import. Scaffolded for future use; opt-in via window flag for now.
+    // Intentionally left as a stub — see Plan B doc.
+  }, []);
+
+  useEffect(() => { endRef.current?.scrollIntoView(); }, [messages, decryptedById]);
 
   // debounce search
   useEffect(() => {
@@ -182,11 +349,17 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
     return () => clearTimeout(t);
   }, [query]);
 
-  // -------------------------------------------------------------------------
-  // Step 6: startDm with E2EE toggle
-  // -------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Start DM (with E2EE toggle)
+  // ---------------------------------------------------------------------------
   async function startDm(peer: SearchHit) {
     const wantE2EE = requestE2EE && peer.type === "user";
+    // If the user just toggled encryption on for the first time, eagerly init
+    // so the setup gate runs before the new convo opens (better UX than
+    // surfacing the gate banner immediately after the thread is open).
+    if (wantE2EE) {
+      await ensureCrypto();
+    }
     const r = await apiFetch("/api/dm", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -203,35 +376,64 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
     await openThread(d.id);
   }
 
-  // -------------------------------------------------------------------------
-  // Step 4: send() with E2EE encrypt branch
-  // -------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Send (E2EE or plaintext)
+  // ---------------------------------------------------------------------------
   async function send() {
     if (!activeId || !draft.trim()) return;
     const text = draft.trim();
     setDraft("");
     const conv = conversations.find((c) => c.id === activeId);
     const peer = conv ? peerOf(conv) : null;
-    let body: string;
-    if (conv?.isE2ee && peer && peer.type === "user") {
-      try {
-        const olm = await import("@/lib/dm-olm");
-        body = await olm.encrypt(activeId, peer.id, text);
-      } catch (e) {
-        setE2eeError("encrypt failed: " + (e as Error).message);
+    const isE2ee = Boolean(conv?.isE2ee && peer && peer.type === "user" && conv.e2eeRoomId);
+
+    if (isE2ee) {
+      const mod = cryptoRef.current ?? (await ensureCrypto());
+      if (!mod) {
+        setE2eeError("encryption not initialized");
         return;
       }
-    } else {
-      body = text;
+      let envelope: Awaited<ReturnType<typeof mod.encryptDm>> | null = null;
+      try {
+        await mod.ensurePeerTracked(peer!.id);
+        await mod.ensureSessionWithPeer(peer!.id);
+        await mod.pumpOutgoing();
+        envelope = await mod.encryptDm(conv!.e2eeRoomId!, text);
+      } catch (e) {
+        // One retry after a fresh pump — handles the "OTKs just landed" race.
+        try {
+          await mod.pumpOutgoing();
+          envelope = await mod.encryptDm(conv!.e2eeRoomId!, text);
+        } catch (e2) {
+          setE2eeError("Encryption setup with peer in progress, try again in a moment. (" + (e2 as Error).message + ")");
+          return;
+        }
+        if (!envelope) {
+          setE2eeError("encrypt failed: " + (e as Error).message);
+          return;
+        }
+      }
+      const r = await apiFetch(`/api/dm/${activeId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ciphertext: envelope }),
+      });
+      if (!r.ok) return;
+      const d = (await r.json()) as { message: Message };
+      // Cache plaintext locally so we render it on echo without re-decrypting.
+      setDecryptedById((prev) => ({ ...prev, [d.message.id]: text }));
+      setMessages((prev) => prev.some((x) => x.id === d.message.id) ? prev : [...prev, d.message]);
+      return;
     }
+
+    // Plaintext path
     const r = await apiFetch(`/api/dm/${activeId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: body }),
+      body: JSON.stringify({ text }),
     });
     if (!r.ok) return;
     const d = (await r.json()) as { message: Message };
-    // Store plaintext optimistically (we just sent it). Dedup by id.
     setMessages((prev) => prev.some((x) => x.id === d.message.id) ? prev : [...prev, { ...d.message, text }]);
   }
 
@@ -248,7 +450,7 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
     <>
       <div className="flex h-full">
         <aside className={cn("shrink-0 border-r border-border bg-panel p-3 space-y-3 overflow-y-auto md:w-72", activeId ? "hidden md:block" : "block w-full")}>
-          {/* Step 6: Encrypted toggle */}
+          {/* Encrypted toggle (Olm/Megolm) */}
           <label className="flex items-center gap-2 px-1 text-xs text-muted">
             <input
               type="checkbox"
@@ -256,7 +458,7 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
               onChange={(e) => setRequestE2EE(e.target.checked)}
               className="accent-accent"
             />
-            Encrypted (user-to-user)
+            Encrypted (Olm/Megolm)
           </label>
           <input
             value={query}
@@ -315,7 +517,7 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
                   if (!activeConv?.isE2ee) return null;
                   return (
                     <>
-                      {e2eeSetupNeeded && <span className="px-2 text-xs text-muted">Setting up encryption…</span>}
+                      {!e2eeReady && <span className="px-2 text-xs text-muted">Setting up encryption…</span>}
                       <button
                         type="button"
                         onClick={() => setShowSafety(true)}
@@ -329,14 +531,19 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
               {activeConv?.isE2ee && (
                 <div className="hidden md:flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted">
                   <span className="text-accent2">🔒</span> end-to-end encrypted
-                  {e2eeSetupNeeded && <span className="text-muted">Setting up encryption…</span>}
+                  {!e2eeReady && <span className="text-muted">Setting up encryption…</span>}
                   <button type="button" onClick={() => setShowSafety(true)} className="ml-auto rounded bg-panel2 px-2 py-1 text-xs hover:bg-panel">Verify identity</button>
                 </div>
               )}
-              {/* Setup gate banner */}
-              {e2eeSetupNeeded && (
-                <div className="border-b border-border bg-panel2 px-4 py-2 text-xs text-muted">
-                  Setting up encryption…
+              {/* Setup gate banner: user hasn't opted in yet */}
+              {activeConv?.isE2ee && e2eeSetupNeeded && !e2eeReady && (
+                <div className="border-b border-border bg-panel2 px-4 py-3 text-xs text-muted flex items-center gap-2">
+                  <span>Enable encryption to read and send messages in this thread.</span>
+                  <button
+                    type="button"
+                    onClick={() => { ensureCrypto().catch(() => {}); }}
+                    className="ml-auto rounded bg-accent2 px-3 py-1 text-xs text-white"
+                  >Initialize</button>
                 </div>
               )}
               {/* E2EE error banner */}
@@ -347,11 +554,25 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
                 </div>
               )}
               <div className="flex-1 space-y-2 overflow-y-auto p-4">
-                {messages.map((m) => (
-                  <div key={m.id} className={cn("max-w-[70%] rounded-xl px-3 py-2 text-sm", m.senderId === currentUserId ? "ml-auto bg-accent text-white" : "bg-panel2 text-text")}>
-                    {m.text}
-                  </div>
-                ))}
+                {messages.map((m) => {
+                  // E2EE rendering: cached plaintext > placeholder
+                  const isE2eeRow = activeConv?.isE2ee && m.ciphertext;
+                  const plaintext = isE2eeRow ? decryptedById[m.id] : m.text;
+                  const showLock = activeConv?.isE2ee;
+                  if (isE2eeRow && plaintext == null) {
+                    return (
+                      <div key={m.id} className={cn("max-w-[70%] rounded-xl px-3 py-2 text-sm italic text-muted", m.senderId === currentUserId ? "ml-auto bg-accent/40" : "bg-panel2")}>
+                        🔒 ⚠️ Unable to decrypt (waiting for sender&apos;s key)
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={m.id} className={cn("max-w-[70%] rounded-xl px-3 py-2 text-sm", m.senderId === currentUserId ? "ml-auto bg-accent text-white" : "bg-panel2 text-text")}>
+                      {showLock && <span className="mr-1 text-[10px] opacity-70" title="encrypted">🔒</span>}
+                      {plaintext}
+                    </div>
+                  );
+                })}
                 <div ref={endRef} />
               </div>
               <div className="border-t border-border p-3">
@@ -371,7 +592,9 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
       {showSafety && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowSafety(false)}>
           <div className="rounded-2xl border border-border bg-panel p-5 max-w-md w-full space-y-3" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold">Verify identity</h2>
+            <h2 className="text-lg font-semibold">
+              Verify identity{activeConv?.peer ? ` with ${activeConv.peer.displayName}` : ""}
+            </h2>
             <p className="text-xs text-muted">Compare these fingerprints with your peer out-of-band (in person or over a trusted channel). If they match, the encryption is established correctly.</p>
             <div className="space-y-2">
               <div>
@@ -380,10 +603,15 @@ export function DmClient({ initialConversations, currentUserId }: { initialConve
               </div>
               <div>
                 <p className="text-[10px] uppercase tracking-widest text-muted">Peer</p>
-                <code className="block break-all rounded bg-panel2 p-2 text-xs">{peerFingerprint ?? "(unknown — open the thread to fetch)"}</code>
+                <code className="block break-all rounded bg-panel2 p-2 text-xs">
+                  {peerFingerprint ?? "Peer has not enabled encryption yet."}
+                </code>
               </div>
             </div>
-            <button type="button" onClick={() => setShowSafety(false)} className="rounded-lg bg-accent2 px-3 py-2 text-sm text-white">Close</button>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowSafety(false)} className="rounded-lg bg-accent2 px-3 py-2 text-sm text-white">Verify</button>
+              <button type="button" onClick={() => setShowSafety(false)} className="rounded-lg bg-panel2 px-3 py-2 text-sm">Close</button>
+            </div>
           </div>
         </div>
       )}

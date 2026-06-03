@@ -23,12 +23,12 @@ export async function POST(req: Request) {
   const parsed = openSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   try {
-    const { id, created } = await openConversation(
+    const { id, created, e2eeRoomId } = await openConversation(
       user.id,
       { type: parsed.data.peerType, id: parsed.data.peerId },
       { e2ee: parsed.data.e2ee },
     );
-    return NextResponse.json({ id, created }, { status: created ? 201 : 200 });
+    return NextResponse.json({ id, created, e2eeRoomId }, { status: created ? 201 : 200 });
   } catch (e) {
     const code = (e as { code?: string }).code;
     if (code === "BLOCKED") return NextResponse.json({ error: "blocked" }, { status: 403 });

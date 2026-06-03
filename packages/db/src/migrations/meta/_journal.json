@@ -267,6 +267,20 @@
       "when": 1779800000000,
       "tag": "0037_dm_double_ratchet_prekeys",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1779900000000,
+      "tag": "0038_dm_matrix_crypto",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1779950000000,
+      "tag": "0039_crypto_sent_txns",
+      "breakpoints": true
     }
   ]
 }

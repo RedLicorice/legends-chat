@@ -504,36 +504,109 @@ export const pollVotes = pgTable(
   }),
 );
 
-export const userKeyBundles = pgTable("user_key_bundles", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  identityPublicKey: text("identity_public_key").notNull(),
-  keyBundle: jsonb("key_bundle").$type<Record<string, unknown>>().notNull().default({}),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  // Olm Curve25519 signed prekey (base64), its id, and Ed25519 signature
-  // produced by the identity key. Plan B / Olm X3DH.
-  signedPrekeyId: text("signed_prekey_id"),
-  signedPrekey: text("signed_prekey"),
-  signedPrekeySig: text("signed_prekey_sig"),
-  signedPrekeyUpdatedAt: timestamp("signed_prekey_updated_at", { withTimezone: true }),
-});
+// Matrix-shaped device key bundle. One row per (user, device).
+// `keys_json` is the canonical Matrix device key map (ed25519 + curve25519);
+// `algorithms_json` advertises supported algos; `signatures_json` carries the
+// self-signature from the device's ed25519 key. `fallback_key_json` holds a
+// single signed_curve25519 fallback used when the OTK pool is exhausted.
+export const userKeyBundles = pgTable(
+  "user_key_bundles",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    identityPublicKey: text("identity_public_key").notNull(),
+    keyBundle: jsonb("key_bundle").$type<Record<string, unknown>>().notNull().default({}),
+    algorithmsJson: jsonb("algorithms_json").$type<string[]>().notNull(),
+    keysJson: jsonb("keys_json").$type<Record<string, string>>().notNull(),
+    signaturesJson: jsonb("signatures_json")
+      .$type<Record<string, Record<string, string>>>()
+      .notNull(),
+    fallbackKeyJson: jsonb("fallback_key_json").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.deviceId] }),
+  }),
+);
 
+// Matrix-shaped one-time prekey pool, per (user, device).
+// `key_id` is the Matrix key id (e.g., "signed_curve25519:AAAA").
+// `key_json` is `{ "key": "<base64>", "signatures": { ... } }`.
 export const userOneTimePrekeys = pgTable(
   "user_one_time_prekeys",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    prekeyId: text("prekey_id").notNull(),
-    prekey: text("prekey").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    keyId: text("key_id").notNull(),
+    algorithm: text("algorithm").notNull().default("signed_curve25519"),
+    keyJson: jsonb("key_json").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    consumedAt: timestamp("consumed_at", { withTimezone: true }),
-    consumedByUserId: uuid("consumed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    usedAt: timestamp("used_at", { withTimezone: true }),
   },
   (t) => ({
-    userIdx: index("user_one_time_prekeys_user_idx").on(t.userId, t.consumedAt),
-    pkPerUser: uniqueIndex("user_one_time_prekeys_pk_idx").on(t.userId, t.prekeyId),
+    pk: primaryKey({ columns: [t.userId, t.deviceId, t.keyId] }),
+    unusedIdx: index("user_one_time_prekeys_unused_idx")
+      .on(t.userId, t.deviceId, t.algorithm)
+      .where(sql`${t.usedAt} IS NULL`),
+  }),
+);
+
+// Matrix-style to-device event queue. recipient_device_id may be "*" to
+// broadcast to all of the recipient user's devices; the FK is therefore on
+// the user only, not on (user, device).
+export const userToDeviceQueue = pgTable(
+  "user_to_device_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    recipientUserId: uuid("recipient_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientDeviceId: text("recipient_device_id").notNull(),
+    senderUserId: uuid("sender_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    senderDeviceId: text("sender_device_id").notNull(),
+    eventType: text("event_type").notNull(),
+    contentJson: jsonb("content_json").$type<Record<string, unknown>>().notNull(),
+    txnId: text("txn_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  },
+  (t) => ({
+    recipientIdx: index("user_to_device_queue_recipient_idx")
+      .on(t.recipientUserId, t.recipientDeviceId, t.createdAt)
+      .where(sql`${t.deliveredAt} IS NULL`),
+    txnIdx: uniqueIndex("user_to_device_queue_txn_idx").on(
+      t.senderUserId,
+      t.senderDeviceId,
+      t.txnId,
+    ),
+  }),
+);
+
+// Per-request idempotency for `PUT /api/crypto/sendToDevice/:event/:txn_id`.
+// A single Matrix sendToDevice request can fan out to N (recipient, device)
+// rows in user_to_device_queue, so per-row dedup on txn_id doesn't fit the
+// shape we need ("did we already apply this whole request?"). One row per
+// (sender_user, sender_device, txn_id) lets us answer that in a single
+// look-up without thrashing the queue's per-row uniqueness.
+export const cryptoSentTxns = pgTable(
+  "crypto_sent_txns",
+  {
+    senderUserId: uuid("sender_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    senderDeviceId: text("sender_device_id").notNull(),
+    txnId: text("txn_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.senderUserId, t.senderDeviceId, t.txnId] }),
   }),
 );
 
@@ -627,9 +700,15 @@ export const dmConversations = pgTable(
     initiatorId: text("initiator_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    // Synthetic Matrix room id used by OlmMachine, set only when is_e2ee=true.
+    // Format: "!<conversationId>:legends.local".
+    e2eeRoomId: text("e2ee_room_id"),
   },
   (t) => ({
     dmKeyIdx: uniqueIndex("dm_conversations_dm_key_idx").on(t.dmKey),
+    e2eeRoomIdIdx: uniqueIndex("dm_conversations_e2ee_room_id_idx")
+      .on(t.e2eeRoomId)
+      .where(sql`${t.e2eeRoomId} IS NOT NULL`),
   }),
 );
 
@@ -667,6 +746,10 @@ export const dmMessages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // Matrix m.room.encrypted envelope; populated only on E2EE rows.
+    // Mutually exclusive with non-empty content_ciphertext (enforced by
+    // dm_messages_payload_chk in 0038).
+    ciphertextJson: jsonb("ciphertext_json").$type<Record<string, unknown>>(),
   },
   (t) => ({
     convIdIdx: index("dm_messages_conv_id_idx").on(t.conversationId, t.id),

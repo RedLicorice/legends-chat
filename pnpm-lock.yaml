@@ -104,9 +104,9 @@ importers:
       '@legends/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@matrix-org/olm':
-        specifier: ^3.2.15
-        version: 3.2.15
+      '@matrix-org/matrix-sdk-crypto-wasm':
+        specifier: ^18.3.0
+        version: 18.3.0
       '@simplewebauthn/browser':
         specifier: ^13.3.0
         version: 13.3.0
@@ -1090,8 +1090,9 @@ packages:
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
 
-  '@matrix-org/olm@3.2.15':
-    resolution: {integrity: sha512-S7lOrndAK9/8qOtaTq/WhttJC/o4GAzdfK0MUPpo8ApzsJEC0QjtwrkC3KBXdFP1cD1MXi/mlKR7aaoVMKgs6Q==}
+  '@matrix-org/matrix-sdk-crypto-wasm@18.3.0':
+    resolution: {integrity: sha512-9a4feyt8QLysARu7PHKaRWT+wcCd+IYH074LXp9QK5WqfN4zUXueRhiSSMNT18Bm+8q3sBR/4zxDxOSDR0M8Kg==}
+    engines: {node: '>= 18'}
 
   '@next/env@15.5.15':
     resolution: {integrity: sha512-vcmyu5/MyFzN7CdqRHO3uHO44p/QPCZkuTUXroeUmhNP8bL5PHFEhik22JUazt+CDDoD6EpBYRCaS2pISL+/hg==}
@@ -3300,7 +3301,7 @@ snapshots:
 
   '@levischuck/tiny-cbor@0.2.11': {}
 
-  '@matrix-org/olm@3.2.15': {}
+  '@matrix-org/matrix-sdk-crypto-wasm@18.3.0': {}
 
   '@next/env@15.5.15': {}
 

@@ -16,7 +16,7 @@
     "@legends/crypto": "workspace:*",
     "@legends/db": "workspace:*",
     "@legends/shared": "workspace:*",
-    "@matrix-org/olm": "^3.2.15",
+    "@matrix-org/matrix-sdk-crypto-wasm": "^18.3.0",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.0",
     "@tiptap/extension-link": "^3.22.4",
