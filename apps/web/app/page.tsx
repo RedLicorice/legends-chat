@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listTopicsForUser } from "@/lib/topics";
+import { listChatItems } from "@/lib/chat-list";
 import { HomeLayout } from "@/components/HomeLayout";
 import { db } from "@/lib/db";
 import { getAllSettings } from "@legends/db/system-settings";
@@ -15,7 +16,10 @@ async function HomeContent() {
   const homeTopic = topics.find((t) => t.isHomeTopic);
   if (homeTopic) redirect(`/t/${homeTopic.slug}`);
 
-  const settings = await getAllSettings(db);
+  const [chatItems, settings] = await Promise.all([
+    listChatItems(user.id, user.role, user.permissions),
+    getAllSettings(db),
+  ]);
   const communityName = settings.community_name ?? "Topics";
   const communityBannerUrl = settings.community_banner_url ?? null;
 
@@ -41,7 +45,7 @@ async function HomeContent() {
         permissions: [...user.permissions],
         presenceOptOut: user.presenceOptOut,
       }}
-      topics={topics}
+      chatItems={chatItems}
     />
   );
 }

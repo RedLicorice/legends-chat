@@ -1,17 +1,19 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
-import { listConversations } from "@/lib/dm";
-import { DmClient } from "@/components/DmClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function DmPage() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
-  const conversations = await listConversations(user.id);
-  return (
-    <main className="h-[100dvh]">
-      <DmClient initialConversations={conversations} currentUserId={user.id} />
-    </main>
-  );
+/**
+ * Legacy `/dm` route. The DM list now lives in the unified left sidebar on
+ * `/`, so we redirect to the home page with the `dms` filter chip preselected.
+ * The legacy `?tab=bots` query param maps to `?filter=bots` for parity.
+ */
+export default async function DmPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = (await (searchParams ?? Promise.resolve({}))) as Record<string, string | string[] | undefined>;
+  const tab = typeof sp.tab === "string" ? sp.tab : null;
+  if (tab === "bots") redirect("/?filter=bots");
+  redirect("/?filter=dms");
 }

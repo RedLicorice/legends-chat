@@ -3,7 +3,7 @@ import { and, eq, gt, count, isNull, or } from "drizzle-orm";
 import { topics, passkeyCredentials, topicPrincipalGrants } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser, getUserMute } from "@/lib/auth";
-import { listTopicsForUser } from "@/lib/topics";
+import { listChatItems } from "@/lib/chat-list";
 import { getSetting } from "@legends/db/system-settings";
 import { TopicLayout } from "@/components/TopicLayout";
 import { canPrincipal, type TopicGrant, type GrantEffect } from "@legends/shared";
@@ -16,9 +16,9 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const [topic, topicList, mute, giphySetting, passkeyCount, communityName, communityIconUrl] = await Promise.all([
+  const [topic, chatItems, mute, giphySetting, passkeyCount, communityName, communityIconUrl] = await Promise.all([
     db.select().from(topics).where(eq(topics.slug, slug)).limit(1).then((r) => r[0]),
-    listTopicsForUser(user.id, user.role, user.permissions),
+    listChatItems(user.id, user.role, user.permissions),
     getUserMute(user.id),
     getSetting(db, "giphy_enabled"),
     db.select({ n: count() }).from(passkeyCredentials).where(eq(passkeyCredentials.userId, user.id)).then((r) => r[0]?.n ?? 0),
@@ -54,7 +54,7 @@ export default async function TopicPage({ params, searchParams }: { params: Prom
   return (
     <TopicLayout
       user={{ id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, role: user.role, permissions: [...user.permissions], presenceOptOut: user.presenceOptOut }}
-      topics={topicList}
+      chatItems={chatItems}
       currentSlug={slug}
       topic={{ id: topic.id, slug: topic.slug, title: topic.title, isE2ee: topic.isE2ee, isP2p: topic.isP2p, p2pFallbackE2ee: topic.p2pFallbackE2ee, isFeed: topic.isFeed, postRoles: (topic.postRoles as string[] | null) ?? [], replyRoles: (topic.replyRoles as string[] | null) ?? [], iconUrl: topic.iconUrl ?? null, bannerUrl: topic.bannerUrl ?? null, description: topic.description ?? null, hasPassword: topic.passwordHash != null, passwordVersion: topic.passwordVersion, passwordReentryDays: topic.passwordReentryDays }}
       mute={mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null}

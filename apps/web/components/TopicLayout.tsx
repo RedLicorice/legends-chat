@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Hash } from "lucide-react";
 import { AppSidebar } from "@/components/AppSidebar";
-import { TopicListItem } from "@/components/TopicListItem";
+import { ChatListPane } from "@/components/ChatListPane";
 import { TopicView } from "@/components/TopicView";
 import { P2PView } from "@/components/P2PView";
 import { PasskeyBanner } from "@/components/PasskeyBanner";
 import { TopicPasswordGate } from "@/components/TopicPasswordGate";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
-import type { TopicListItem as TopicItem } from "@/lib/topics";
+import type { ChatItem } from "@/components/ChatListItem";
 
 interface Props {
   user: {
@@ -20,7 +22,8 @@ interface Props {
     permissions: string[];
     presenceOptOut?: boolean;
   };
-  topics: TopicItem[];
+  /** Unified topic + DM list for the left sidebar. */
+  chatItems: ChatItem[];
   currentSlug: string;
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isP2p: boolean; p2pFallbackE2ee: boolean; isFeed: boolean; postRoles: string[]; replyRoles: string[]; iconUrl: string | null; bannerUrl: string | null; description: string | null; hasPassword: boolean; passwordVersion: number; passwordReentryDays: number };
   mute: { reason: string; expiresAt: string | null } | null;
@@ -33,26 +36,10 @@ interface Props {
   canReply: boolean;
 }
 
-export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId, canPost, canReply }: Props) {
+export function TopicLayout({ user, chatItems, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId, canPost, canReply }: Props) {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [topicItems, setTopicItems] = useState<TopicItem[]>(initialTopics);
-
-  const handleSidebarUpdate = useCallback((update: { topicId: string; preview: string; senderName: string | null; at: string }) => {
-    setTopicItems((prev) => prev.map((t) => {
-      if (t.id !== update.topicId) return t;
-      return {
-        ...t,
-        lastMessage: {
-          id: t.lastMessage?.id ?? update.topicId,
-          preview: update.preview,
-          at: new Date(update.at),
-          senderId: null,
-        },
-        unreadCount: topic.id === update.topicId ? 0 : t.unreadCount + 1,
-      };
-    }));
-  }, [topic.id]);
+  const [, setConnected] = useState(false);
 
   const { collapsed: desktopCollapsed, toggle, expand } = useSidebarCollapse();
 
@@ -84,6 +71,15 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
     };
   }, []);
 
+  // ChatListPane requests a refresh when it can't fully update from socket data
+  // alone (e.g. a newly-accepted DM that isn't in the snapshot yet). The page
+  // re-runs server-side and ships an updated `chatItems` prop.
+  useEffect(() => {
+    const onRefresh = () => router.refresh();
+    window.addEventListener("chatlist:refresh", onRefresh);
+    return () => window.removeEventListener("chatlist:refresh", onRefresh);
+  }, [router]);
+
   const [compactMode] = useState<"minimal" | "strip">(() =>
     typeof document !== "undefined"
       ? ((document.documentElement.dataset.sidebarCompact as "minimal" | "strip") || "minimal")
@@ -92,20 +88,25 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
 
   const iconChildren = (
     <div className="flex flex-col items-center gap-1 py-1">
-      {topicItems.map((t) => (
-        <Link
-          key={t.id}
-          href={`/t/${t.slug}`}
-          title={t.title}
-          className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-panel2 hover:bg-panel text-sm font-bold transition"
-        >
-          {t.iconUrl ? (
-            <img src={t.iconUrl} alt="" className="h-full w-full object-cover rounded-lg" />
-          ) : (
-            t.title.slice(0, 1).toUpperCase()
-          )}
-        </Link>
-      ))}
+      {chatItems.map((it) => {
+        const url = it.avatar.url ?? it.avatar.iconUrl ?? null;
+        return (
+          <Link
+            key={`${it.kind}:${it.id}`}
+            href={it.href}
+            title={it.title}
+            className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-panel2 hover:bg-panel text-sm font-bold transition"
+          >
+            {url ? (
+              <img src={url} alt="" className="h-full w-full object-cover rounded-lg" />
+            ) : it.kind === "topic" ? (
+              <Hash className="h-4 w-4 text-muted" />
+            ) : (
+              it.title.slice(0, 1).toUpperCase()
+            )}
+          </Link>
+        );
+      })}
     </div>
   );
 
@@ -121,18 +122,11 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
         compactMode={compactMode}
         iconChildren={iconChildren}
       >
-        <div className="space-y-0.5">
-          {topicItems.map((t) => (
-            <div key={t.id} className={currentSlug === t.slug ? "opacity-100" : "opacity-90"}>
-              <TopicListItem
-                topic={t}
-                compact
-                connectionStatus={currentSlug === t.slug ? (connected ? "connected" : "connecting") : undefined}
-                canAdmin={user.permissions.includes("admin.config")}
-              />
-            </div>
-          ))}
-        </div>
+        <ChatListPane
+          initialItems={chatItems}
+          currentUserId={user.id}
+          activeHref={`/t/${currentSlug}`}
+        />
       </AppSidebar>
       <main className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
         {!hasPasskey && <PasskeyBanner />}
@@ -173,7 +167,6 @@ export function TopicLayout({ user, topics: initialTopics, currentSlug, topic, m
               onConnectionChange={setConnected}
               showExpandSidebar={desktopCollapsed && compactMode === "minimal"}
               onExpandSidebar={expand}
-              onSidebarUpdate={handleSidebarUpdate}
               canPost={canPost}
               canReply={canReply}
             />

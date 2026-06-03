@@ -281,6 +281,13 @@
       "when": 1779950000000,
       "tag": "0039_crypto_sent_txns",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0040_dm_request_notifications",
+      "breakpoints": true
     }
   ]
 }

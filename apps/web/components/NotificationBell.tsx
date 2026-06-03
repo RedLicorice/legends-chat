@@ -2,25 +2,40 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { io } from "socket.io-client";
-import { Bell, Megaphone } from "lucide-react";
+import { Bell, Megaphone, Lock } from "lucide-react";
 import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
+import type { DmRequestPayload } from "@/lib/dm-requests";
+
+// Mention/reply/broadcast share the same camelCase preview-style payload.
+// dm_request rides on the same row but ships a snake_case payload mirrored
+// from `lib/dm-requests.ts:DmRequestPayload`. We render-branch on `type`,
+// so the payload union is intentionally loose — see `renderItem`.
+type PreviewPayload = {
+  messageId?: string | null;
+  topicId?: string | null;
+  topicSlug?: string | null;
+  topicTitle?: string | null;
+  senderName?: string;
+  preview: string;
+};
 
 interface Notification {
   id: string;
-  type: "mention" | "reply" | "broadcast";
-  payload: {
-    messageId?: string | null;
-    topicId?: string | null;
-    topicSlug?: string | null;
-    topicTitle?: string | null;
-    senderName?: string;
-    preview: string;
-  };
+  type: "mention" | "reply" | "broadcast" | "dm_request";
+  payload: PreviewPayload | DmRequestPayload | Record<string, unknown>;
   readAt: string | null;
   createdAt: string;
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
 }
 
 function timeAgo(date: string): string {
@@ -34,11 +49,16 @@ function timeAgo(date: string): string {
 }
 
 export function NotificationBell({ align = "right" }: { align?: "left" | "right" }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  // Per-notification action state for dm_request rows. Keyed by notif.id so
+  // multiple pending requests can be acted on independently.
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState<Record<string, string>>({});
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -107,9 +127,170 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
     }
   }
 
+  // Mark a single notification as read locally and decrement the unread badge
+  // if it wasn't already read. The server-side PATCH /api/user/notifications
+  // is a "mark all read" bulk op fired on panel-open; accept/decline already
+  // mark the matching dm_request row read server-side, so we just sync UI.
+  function markLocalRead(id: string) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        if (it.readAt) return it;
+        setUnread((n) => Math.max(0, n - 1));
+        return { ...it, readAt: new Date().toISOString() };
+      }),
+    );
+  }
+
+  async function handleAccept(n: Notification, convId: string) {
+    if (busy[n.id]) return;
+    setBusy((b) => ({ ...b, [n.id]: true }));
+    setActionError((e) => {
+      const { [n.id]: _drop, ...rest } = e;
+      return rest;
+    });
+    try {
+      const res = await fetch(`/api/dm/${convId}/accept`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      markLocalRead(n.id);
+      window.dispatchEvent(new CustomEvent("chatlist:refresh"));
+      setOpen(false);
+      router.push(`/dm/${convId}`);
+    } catch {
+      setActionError((e) => ({ ...e, [n.id]: "Couldn't accept. Try again." }));
+    } finally {
+      setBusy((b) => {
+        const { [n.id]: _drop, ...rest } = b;
+        return rest;
+      });
+    }
+  }
+
+  async function handleDecline(n: Notification, convId: string) {
+    if (busy[n.id]) return;
+    setBusy((b) => ({ ...b, [n.id]: true }));
+    setActionError((e) => {
+      const { [n.id]: _drop, ...rest } = e;
+      return rest;
+    });
+    try {
+      const res = await fetch(`/api/dm/${convId}/decline`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      markLocalRead(n.id);
+      window.dispatchEvent(new CustomEvent("chatlist:refresh"));
+    } catch {
+      setActionError((e) => ({ ...e, [n.id]: "Couldn't decline. Try again." }));
+    } finally {
+      setBusy((b) => {
+        const { [n.id]: _drop, ...rest } = b;
+        return rest;
+      });
+    }
+  }
+
   function renderItem(n: Notification) {
     const isUnread = !n.readAt;
     const baseClass = cn("flex flex-col gap-0.5 px-4 py-3 text-sm", isUnread && "bg-panel2/40");
+
+    // dm_request gets its own branch — distinct payload shape and inline
+    // accept/decline actions instead of a passive click-through.
+    if (n.type === "dm_request") {
+      const p = n.payload as DmRequestPayload;
+      const convId = p.conversation_id;
+      const senderName = p.sender_display_name || "Someone";
+      const avatarUrl = p.sender_avatar_url;
+      const isE2ee = !!p.is_e2ee;
+      const isBusy = !!busy[n.id];
+      const err = actionError[n.id];
+
+      const onBodyClick = (e: React.MouseEvent) => {
+        // Ignore clicks that originated on the action buttons.
+        if ((e.target as HTMLElement).closest("[data-dm-action]")) return;
+        markLocalRead(n.id);
+        setOpen(false);
+        router.push(`/dm/${convId}`);
+      };
+
+      return (
+        <div
+          key={n.id}
+          className={cn(baseClass, "cursor-pointer transition hover:bg-panel2")}
+          onClick={onBodyClick}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-accent">
+              DM Request
+            </span>
+            <span className="ml-auto text-xs text-muted">{timeAgo(n.createdAt)}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={avatarUrl}
+                alt=""
+                className="h-7 w-7 flex-none rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-panel2 text-[11px] font-semibold text-muted">
+                {initialsOf(senderName)}
+              </div>
+            )}
+            <div className="min-w-0 flex-1 text-sm">
+              <strong className="font-semibold">{senderName}</strong>{" "}
+              <span className="text-muted">wants to message you</span>
+              {isE2ee && (
+                <span className="ml-1 inline-flex items-center gap-0.5 text-muted" title="End-to-end encrypted">
+                  <span aria-hidden>·</span>
+                  <Lock className="h-3 w-3" aria-label="End-to-end encrypted" />
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-2" data-dm-action>
+            <button
+              type="button"
+              data-dm-action
+              disabled={isBusy}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleAccept(n, convId);
+              }}
+              className={cn(
+                "rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white transition",
+                isBusy ? "opacity-60" : "hover:opacity-90",
+              )}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              data-dm-action
+              disabled={isBusy}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleDecline(n, convId);
+              }}
+              className={cn(
+                "rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted transition",
+                isBusy ? "opacity-60" : "hover:bg-panel2 hover:text-text",
+              )}
+            >
+              Decline
+            </button>
+            {err && <span className="ml-auto text-xs text-red-400">{err}</span>}
+          </div>
+        </div>
+      );
+    }
+
+    const p = n.payload as PreviewPayload;
     const typeLabel =
       n.type === "mention" ? "Mention" : n.type === "reply" ? "Reply" : "Broadcast";
     const typeColor =
@@ -124,16 +305,16 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
           </span>
           <span className="ml-auto text-xs text-muted">{timeAgo(n.createdAt)}</span>
         </div>
-        {n.payload.topicTitle && <div className="font-medium">{n.payload.topicTitle}</div>}
+        {p.topicTitle && <div className="font-medium">{p.topicTitle}</div>}
         <div className="truncate text-muted">
-          {n.payload.senderName ? `${n.payload.senderName}: ` : ""}{n.payload.preview}
+          {p.senderName ? `${p.senderName}: ` : ""}{p.preview}
         </div>
       </>
     );
 
     const href =
-      n.payload.topicSlug && n.payload.messageId
-        ? `/t/${n.payload.topicSlug}?msg=${n.payload.messageId}`
+      p.topicSlug && p.messageId
+        ? `/t/${p.topicSlug}?msg=${p.messageId}`
         : null;
 
     if (href) {

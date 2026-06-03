@@ -21,6 +21,7 @@ export const WS_EVENTS = {
   DM_DELETE: "dm:delete",
   DM_READ: "dm:read",
   DM_REQUEST: "dm:request",
+  DM_CONVERSATION_UPDATED: "dm:conversation:updated",
 
   // client -> server
   MESSAGE_SEND: "message:send",
@@ -71,6 +72,7 @@ export const REDIS_CHANNELS = {
   DM_MESSAGE_EDIT: "legends:dm:message:edit",
   DM_MESSAGE_DELETE: "legends:dm:message:delete",
   DM_REQUEST_NEW: "legends:dm:request:new",
+  DM_CONVERSATION_UPDATED: "legends:dm:conversation:updated",
 } as const;
 
 export const REDIS_KEYS = {

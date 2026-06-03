@@ -465,6 +465,7 @@ subClient.subscribe(
   REDIS_CHANNELS.NOTIFICATION_BROADCAST,
   REDIS_CHANNELS.SYMBOLS_UPDATE,
   REDIS_CHANNELS.DM_MESSAGE_NEW,
+  REDIS_CHANNELS.DM_CONVERSATION_UPDATED,
   (err) => { if (err) console.error("redis subscribe failed", err); },
 );
 
@@ -529,6 +530,20 @@ subClient.on("message", (channel, message) => {
       //   const previewText = isE2ee ? "New message" : truncate(msg.text, 80);
       // Mirror the notifyTopicMembers() call above but for DM participants.
       // Analogue of notifyTopicMembers() (topic push, ~line 272 above) but for DMs.
+    } else if (channel === REDIS_CHANNELS.DM_CONVERSATION_UPDATED) {
+      // accept/decline → fan a lightweight signal to each participant so their
+      // ChatListPane can refresh the server snapshot (incoming/state flip).
+      const { conversationId, state, userIds } = JSON.parse(message) as {
+        conversationId: string;
+        state: "pending" | "accepted" | "blocked";
+        userIds: string[];
+      };
+      for (const uid of userIds) {
+        io.to(`user:${uid}`).emit(WS_EVENTS.DM_CONVERSATION_UPDATED, {
+          conversationId,
+          state,
+        });
+      }
     } else if (channel === REDIS_CHANNELS.SYMBOLS_UPDATE) {
       io.emit(WS_EVENTS.SYMBOLS_UPDATE, {});
     }

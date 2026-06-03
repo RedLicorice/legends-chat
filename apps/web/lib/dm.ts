@@ -142,6 +142,19 @@ export async function openConversation(
     { conversationId: conv.id, principalType: "user", principalId: initiatorUserId },
     { conversationId: conv.id, principalType: peer.type, principalId: peer.id },
   ]).onConflictDoNothing();
+  // For user↔user DMs that land in `pending` state, notify the recipient via
+  // the notification bell. Bot DMs auto-accept (state='accepted' above) and
+  // bots have no notification bell, so skip them. Dynamic import keeps the
+  // notification helper from pulling redis into bot-only code paths.
+  if (peer.type === "user" && state === "pending") {
+    const { emitDmRequestNotification } = await import("@/lib/dm-requests");
+    await emitDmRequestNotification({
+      conversationId: conv.id,
+      recipientUserId: peer.id,
+      senderUserId: initiatorUserId,
+      isE2ee,
+    });
+  }
   return { id: conv.id, created: true, e2eeRoomId };
 }
 
@@ -150,7 +163,10 @@ export async function openUserConversation(initiatorId: string, peerUserId: stri
   return openConversation(initiatorId, { type: "user", id: peerUserId });
 }
 
-export async function listConversations(userId: string): Promise<DmConversationView[]> {
+export async function listConversations(
+  userId: string,
+  options?: { state?: "pending" | "accepted" | "blocked" },
+): Promise<DmConversationView[]> {
   const myConvs = await db
     .select({ conversationId: dmParticipants.conversationId })
     .from(dmParticipants)
@@ -158,7 +174,14 @@ export async function listConversations(userId: string): Promise<DmConversationV
   const ids = myConvs.map((c) => c.conversationId);
   if (ids.length === 0) return [];
 
-  const convs = await db.select().from(dmConversations).where(inArray(dmConversations.id, ids));
+  // Filter by state at the DB layer when requested — ChatListPane only wants
+  // "accepted" rows; the NotificationBell handles pending requests separately.
+  const convs = options?.state
+    ? await db
+        .select()
+        .from(dmConversations)
+        .where(and(inArray(dmConversations.id, ids), eq(dmConversations.state, options.state)))
+    : await db.select().from(dmConversations).where(inArray(dmConversations.id, ids));
   const parts = await db.select().from(dmParticipants).where(inArray(dmParticipants.conversationId, ids));
 
   const userPeerIds = parts.filter((p) => p.principalType === "user" && p.principalId !== userId).map((p) => p.principalId);
