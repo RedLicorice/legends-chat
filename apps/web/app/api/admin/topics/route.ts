@@ -27,6 +27,14 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
+  // Plan D constraint: E2EE topics cannot expose history to new joiners (we
+  // can't share past Megolm sessions with users who weren't members when
+  // they were created). The DB also enforces this via `topics_e2ee_history_chk`
+  // — coercing here avoids surfacing a confusing 23514 to the client.
+  const historyVisible = parsed.data.isE2ee
+    ? false
+    : parsed.data.historyVisibleToNewMembers;
+
   const [row] = await db
     .insert(topics)
     .values({
@@ -36,7 +44,7 @@ export async function POST(req: NextRequest) {
       isSticky: parsed.data.isSticky,
       sortOrder: parsed.data.sortOrder,
       isE2ee: parsed.data.isE2ee,
-      historyVisibleToNewMembers: parsed.data.historyVisibleToNewMembers,
+      historyVisibleToNewMembers: historyVisible,
       autoDeleteMode: parsed.data.autoDeleteMode,
       autoDeleteAgeSeconds: parsed.data.autoDeleteAgeSeconds ?? null,
       autoDeleteMaxMessages: parsed.data.autoDeleteMaxMessages ?? null,

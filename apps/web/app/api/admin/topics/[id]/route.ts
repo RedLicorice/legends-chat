@@ -78,6 +78,10 @@ export async function PATCH(
       await db.update(messages).set({ deletedAt: new Date() }).where(and(eq(messages.topicId, id), isNull(messages.deletedAt)));
     }
     patch.isE2ee = body.isE2ee;
+    // Plan D constraint: flipping the topic to E2EE requires
+    // historyVisibleToNewMembers=false (mirrors the create path + the DB
+    // CHECK `topics_e2ee_history_chk`).
+    if (body.isE2ee) patch.historyVisibleToNewMembers = false;
   }
   if (typeof body.isP2p === "boolean") patch.isP2p = body.isP2p;
   if (typeof body.p2pFallbackE2ee === "boolean") patch.p2pFallbackE2ee = body.p2pFallbackE2ee;

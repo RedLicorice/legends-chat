@@ -214,6 +214,18 @@ io.on("connection", async (socket: AuthedSocket) => {
         return;
       }
       const isE2ee = topic?.isE2ee ?? false;
+      const hasCipher = !!parsed.content.ciphertextJson;
+      // Branch-coherence checks: E2EE topics MUST carry ciphertextJson; plain
+      // topics must NOT. The zod schema already enforces text↔cipher XOR
+      // within the payload; here we just bind it to the topic's flag.
+      if (isE2ee && !hasCipher) {
+        ack?.({ ok: false, error: "E2EE topic; send ciphertext" });
+        return;
+      }
+      if (!isE2ee && hasCipher) {
+        ack?.({ ok: false, error: "topic is not E2EE; send plaintext" });
+        return;
+      }
       // Link processing (strip tracking / shlink wrap). Skipped for E2EE
       // topics — the client calls /api/links/process before encrypting. Server
       // can't read ciphertext.
@@ -232,6 +244,7 @@ io.on("connection", async (socket: AuthedSocket) => {
         replyToMessageId: parsed.content.replyToMessageId ?? null,
         searchText: isE2ee ? undefined : processedText,
         hashtags: validHashtags,
+        ciphertextJson: parsed.content.ciphertextJson ?? null,
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });

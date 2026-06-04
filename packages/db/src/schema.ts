@@ -204,9 +204,15 @@ export const topics = pgTable(
     passwordVersion: integer("password_version").notNull().default(0),
     passwordReentryDays: integer("password_reentry_days").notNull().default(7),
     replyRoles: jsonb("reply_roles").$type<string[]>().notNull().default([]),
+    // Synthetic Matrix room id used by OlmMachine, set only when is_e2ee=true.
+    // Format: "!<topicId>:legends.local" (mirrors dm_conversations.e2ee_room_id).
+    e2eeRoomId: text("e2ee_room_id"),
   },
   (t) => ({
     slugIdx: uniqueIndex("topics_slug_idx").on(t.slug),
+    e2eeRoomIdIdx: uniqueIndex("topics_e2ee_room_id_idx")
+      .on(t.e2eeRoomId)
+      .where(sql`${t.e2eeRoomId} IS NOT NULL`),
   }),
 );
 
@@ -249,6 +255,10 @@ export const messages = pgTable(
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     hashtags: text("hashtags").array().default(sql`'{}'::text[]`),
+    // Matrix m.room.encrypted envelope; populated only on E2EE (Megolm) rows.
+    // Mutually exclusive with non-empty content_ciphertext (enforced by
+    // messages_payload_chk in 0041, mirroring dm_messages_payload_chk).
+    ciphertextJson: jsonb("ciphertext_json").$type<Record<string, unknown> | null>(),
   },
   (t) => ({
     topicCreatedIdx: index("messages_topic_created_idx").on(t.topicId, t.createdAt),
@@ -581,11 +591,10 @@ export const userToDeviceQueue = pgTable(
     recipientIdx: index("user_to_device_queue_recipient_idx")
       .on(t.recipientUserId, t.recipientDeviceId, t.createdAt)
       .where(sql`${t.deliveredAt} IS NULL`),
-    txnIdx: uniqueIndex("user_to_device_queue_txn_idx").on(
-      t.senderUserId,
-      t.senderDeviceId,
-      t.txnId,
-    ),
+    // NOTE: a unique index on (sender_user_id, sender_device_id, txn_id) used
+    // to live here. It collided with multi-recipient fan-out (one txn → N
+    // rows). Per-request idempotency is handled by `cryptoSentTxns` instead.
+    // See migration 0042_user_to_device_queue_drop_txn_idx.sql.
   }),
 );
 
@@ -626,25 +635,25 @@ export const totpSecrets = pgTable("totp_secrets", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const e2eeSenderKeys = pgTable(
-  "e2ee_sender_keys",
+// Append-only audit of crypto-relevant device changes per user. Drives
+// OlmMachine.receive_sync_changes invalidation: every time a user's device
+// list materially changes (keys upload, topic join/leave, admin grant/revoke),
+// we append a row here; clients tail this log via /sync's device_lists.
+// `reason` is plain text (not an enum) for forward-compat; current values:
+// 'keys_upload' | 'topic_join' | 'topic_leave' | 'admin_grant' | 'admin_revoke'.
+export const userDeviceChangeLog = pgTable(
+  "user_device_change_log",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    topicId: uuid("topic_id")
-      .notNull()
-      .references(() => topics.id, { onDelete: "cascade" }),
-    distributorUserId: uuid("distributor_user_id")
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+    userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    recipientUserId: uuid("recipient_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    encryptedKey: text("encrypted_key").notNull(),
-    keyVersion: integer("key_version").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    reason: text("reason").notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    uniqIdx: uniqueIndex("e2ee_sender_keys_uniq_idx").on(t.topicId, t.distributorUserId, t.recipientUserId),
+    userIdx: index("user_device_change_log_user_idx").on(t.userId, t.changedAt),
+    cursorIdx: index("user_device_change_log_cursor_idx").on(t.changedAt),
   }),
 );
 

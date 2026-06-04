@@ -9,6 +9,7 @@ import {
   pollVotes,
   topicMembers,
   topics,
+  userDeviceChangeLog,
   userMutes,
   users,
 } from "@legends/db/schema";
@@ -100,6 +101,8 @@ export interface InsertedMessage {
   createdAt: Date;
   editedAt: Date | null;
   poll?: PollData;
+  /** Megolm envelope for E2EE topic rows; null otherwise. */
+  ciphertextJson?: Record<string, unknown> | null;
 }
 
 function encodeContent(text: string, attachments?: MessageAttachment[]): string {
@@ -132,16 +135,39 @@ export async function insertMessage(args: {
   topicId: string;
   senderUserId: string | null;
   botId?: string | null;
+  /** Plaintext body (mutually exclusive with `ciphertextJson`). */
   text: string;
   attachments?: MessageAttachment[];
   replyToMessageId?: string | null;
   searchText?: string;
   hashtags?: string[];
+  /**
+   * Megolm envelope for E2EE topics. When provided, `text`/`attachments` are
+   * ignored on the storage side: content_ciphertext is written as empty bytes
+   * and ciphertext_json carries the payload. The CHECK constraint
+   * `messages_payload_chk` enforces the XOR at the DB level.
+   */
+  ciphertextJson?: Record<string, unknown> | null;
 }): Promise<InsertedMessage> {
   const key = await currentDataKey();
-  const aad = new TextEncoder().encode(args.topicId);
-  const encoded = encodeContent(args.text, args.attachments);
-  const { ciphertext, nonce } = encryptMessage(key.data, encoded, aad);
+  const isE2ee = !!args.ciphertextJson;
+
+  let contentCiphertext: Uint8Array;
+  let contentNonce: Uint8Array;
+  if (isE2ee) {
+    // E2EE row: leave content_ciphertext empty; ciphertext_json carries the
+    // Megolm envelope. CHECK constraint requires
+    //   (octet_length(content_ciphertext) > 0) XOR (ciphertext_json IS NOT NULL).
+    contentCiphertext = new Uint8Array(0);
+    contentNonce = new Uint8Array(0);
+  } else {
+    const aad = new TextEncoder().encode(args.topicId);
+    const encoded = encodeContent(args.text, args.attachments);
+    const enc = encryptMessage(key.data, encoded, aad);
+    contentCiphertext = enc.ciphertext;
+    contentNonce = enc.nonce;
+  }
+
   const [row] = await db
     .insert(messages)
     .values({
@@ -149,14 +175,16 @@ export async function insertMessage(args: {
       senderUserId: args.senderUserId,
       botId: args.botId ?? null,
       replyToMessageId: args.replyToMessageId ? BigInt(args.replyToMessageId) : null,
-      contentCiphertext: ciphertext,
-      contentNonce: nonce,
+      contentCiphertext,
+      contentNonce,
       keyId: key.id,
+      ciphertextJson: args.ciphertextJson ?? null,
       hashtags: args.hashtags && args.hashtags.length > 0 ? args.hashtags : [],
     })
     .returning();
 
-  if (args.searchText !== undefined && args.searchText.trim().length > 0) {
+  // Search vector skipped for E2EE rows — there is no plaintext to index.
+  if (!isE2ee && args.searchText !== undefined && args.searchText.trim().length > 0) {
     await db.execute(
       sql`UPDATE messages SET search_vector = to_tsvector('english', ${args.searchText}) WHERE id = ${row!.id}`,
     );
@@ -185,11 +213,15 @@ export async function insertMessage(args: {
     senderRole,
     botId: row!.botId,
     replyToMessageId: row!.replyToMessageId?.toString() ?? null,
-    text: args.text,
-    attachments: args.attachments ?? [],
+    // For E2EE rows the server has no plaintext to surface — pass through the
+    // envelope so the originating socket round-trip carries the same shape
+    // recipients will see via MESSAGE_NEW.
+    text: isE2ee ? "" : args.text,
+    attachments: isE2ee ? [] : (args.attachments ?? []),
     inlineKeyboard: null,
     createdAt: row!.createdAt,
     editedAt: row!.editedAt,
+    ciphertextJson: args.ciphertextJson ?? null,
   };
 }
 
@@ -225,6 +257,7 @@ export async function listRecentMessages(topicId: string, limit = 50, viewerId?:
       replyToMessageId: messages.replyToMessageId,
       contentCiphertext: messages.contentCiphertext,
       contentNonce: messages.contentNonce,
+      ciphertextJson: messages.ciphertextJson,
       keyId: messages.keyId,
       inlineKeyboard: messages.inlineKeyboard,
       createdAt: messages.createdAt,
@@ -243,9 +276,16 @@ export async function listRecentMessages(topicId: string, limit = 50, viewerId?:
   const aad = new TextEncoder().encode(topicId);
   const out: InsertedMessage[] = [];
   for (const r of rows) {
-    const key = await getKeyData(r.keyId);
-    const raw = decryptMessage(key, r.contentCiphertext, r.contentNonce, aad);
-    const { text, attachments } = decodeContent(raw);
+    let text = "";
+    let attachments: MessageAttachment[] = [];
+    const isE2eeRow = !!r.ciphertextJson;
+    if (!isE2eeRow) {
+      const key = await getKeyData(r.keyId);
+      const raw = decryptMessage(key, r.contentCiphertext, r.contentNonce, aad);
+      const decoded = decodeContent(raw);
+      text = decoded.text;
+      attachments = decoded.attachments;
+    }
     out.push({
       id: r.id.toString(),
       topicId: r.topicId,
@@ -261,6 +301,7 @@ export async function listRecentMessages(topicId: string, limit = 50, viewerId?:
       inlineKeyboard: r.inlineKeyboard as InlineKeyboardButton[][] | null | undefined,
       createdAt: r.createdAt,
       editedAt: r.editedAt,
+      ciphertextJson: r.ciphertextJson ?? null,
     });
   }
 
@@ -430,10 +471,24 @@ export async function isUserMuted(userId: string): Promise<{ reason: string; exp
 }
 
 export async function ensureTopicMembership(userId: string, topicId: string): Promise<void> {
-  await db
+  // `.returning()` returns the inserted row, or [] if the conflict suppressed
+  // the write. We use that to log a device_change ONLY on first join, so
+  // re-opening a topic doesn't spam the change log.
+  const inserted = await db
     .insert(topicMembers)
     .values({ topicId, userId })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ userId: topicMembers.userId });
+
+  if (inserted.length > 0) {
+    // Best-effort: a log miss only delays peers' device-list refresh on /sync.
+    // Don't fail the join over it.
+    try {
+      await db.insert(userDeviceChangeLog).values({ userId, reason: "topic_join" });
+    } catch (err) {
+      console.error("[device-change-log] topic_join insert failed", { userId, topicId, err });
+    }
+  }
 }
 
 export async function setLastReadMessage(userId: string, topicId: string, messageId: string): Promise<void> {

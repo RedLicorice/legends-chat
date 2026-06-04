@@ -19,14 +19,10 @@ import { PollMessage } from "@/components/PollMessage";
 import { UserViewModal } from "@/components/UserViewModal";
 import { SearchModal } from "@/components/SearchModal";
 import { ThreadPanel } from "@/components/ThreadPanel";
-import { E2EESetup } from "@/components/E2EESetup";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { TopicInfoModal } from "@/components/TopicInfoModal";
-import type { KeyChangedWarning } from "@/components/E2EEKeyWarning";
-import { E2EEKeyWarning } from "@/components/E2EEKeyWarning";
-import type {
-  E2EEPayload,
-} from "@/lib/e2ee";
+import { toMatrixRoomId, toMatrixUserId } from "@/lib/crypto-matrix";
+import type { EncryptedEnvelope, IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
 import { useTopicHashtags } from "@/hooks/useTopicHashtags";
@@ -77,6 +73,8 @@ interface Message {
   createdAt: string | Date;
   editedAt: string | Date | null;
   poll?: PollData;
+  /** Megolm envelope for E2EE topic rows. Plain rows: null. */
+  ciphertextJson?: Record<string, unknown> | null;
 }
 
 interface ReactionRow {
@@ -211,17 +209,25 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [threadFor, setThreadFor] = useState<Message | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
+  const [e2eeError, setE2eeError] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [showTopicInfo, setShowTopicInfo] = useState(false);
   const [hashtagFilter, setHashtagFilter] = useState<string | null>(null);
   const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
   const [filteredLoading, setFilteredLoading] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
-  const [e2eeBackup, setE2eeBackup] = useState<string | null>(null);
-  const [keyChangedWarnings, setKeyChangedWarnings] = useState<KeyChangedWarning[]>([]);
+  // Megolm room id ("!<topicId>:legends.local") + room member sets fetched from
+  // /api/crypto/rooms/[roomId]/members. Empty until first fetch resolves.
+  const e2eeRoomId = useMemo(() => topic.isE2ee ? toMatrixRoomId(topic.id) : null, [topic.id, topic.isE2ee]);
+  const [memberUserIds, setMemberUserIds] = useState<string[]>([]);
+  const [adminUserIds, setAdminUserIds] = useState<string[]>([]);
+  /** Display names for the admin recipient banner. Keyed by userId. */
+  const [adminDisplayNames, setAdminDisplayNames] = useState<Map<string, string>>(new Map());
+  const memberUserIdsRef = useRef<string[]>([]);
+  useEffect(() => { memberUserIdsRef.current = memberUserIds; }, [memberUserIds]);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const senderKeyCache = useRef<Map<string, Uint8Array<ArrayBuffer>>>(new Map());
-  const e2eeKeyPairRef = useRef<CryptoKeyPair | null>(null);
+  const cryptoRef = useRef<typeof import("@/lib/crypto") | null>(null);
+  const cryptoInitPromise = useRef<Promise<void> | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -388,29 +394,103 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     };
   }, []);
 
-  // E2EE initialization
-  useEffect(() => {
-    if (!topic.isE2ee) return;
-    void (async () => {
+  // ── Megolm crypto session bootstrap (idempotent) ──────────────────────────
+  // Initializes the OlmMachine singleton, drains the initial KeysUpload, and
+  // toggles `e2eeReady` on success. On bootstrap failure (e.g. no IndexedDB,
+  // no entropy, server rejects keys upload), surface the setup gate so the
+  // user can retry from the banner. Mirrors `DmThreadPane.ensureCrypto`.
+  const ensureCrypto = useCallback(async (): Promise<typeof import("@/lib/crypto") | null> => {
+    if (cryptoRef.current && e2eeReady) return cryptoRef.current;
+    if (cryptoInitPromise.current) {
+      await cryptoInitPromise.current;
+      return cryptoRef.current;
+    }
+    cryptoInitPromise.current = (async () => {
       try {
-        const { getOrCreateIdentityKeyPair, exportPublicKey } = await import("@/lib/e2ee");
-        const res = await apiFetch("/api/user/keys");
-        const data = await res.json() as { registered: boolean; identityPublicKey?: string; backup?: string | null };
-        if (!data.registered) { setE2eeSetupNeeded(true); return; }
-        const kp = await getOrCreateIdentityKeyPair();
-        e2eeKeyPairRef.current = kp;
-        const localPub = await exportPublicKey(kp.publicKey);
-        if (localPub !== data.identityPublicKey) {
-          setE2eeBackup(data.backup ?? null);
-          setE2eeSetupNeeded(true);
-          return;
-        }
+        const mod = await import("@/lib/crypto");
+        cryptoRef.current = mod;
+        await mod.initCrypto(currentUser.id);
+        await mod.bootstrap();
         setE2eeReady(true);
-      } catch {
-        setE2eeReady(false);
+        setE2eeSetupNeeded(false);
+        try { localStorage.setItem(`legends-crypto-bootstrapped:${currentUser.id}`, "1"); } catch {}
+      } catch (e) {
+        setE2eeError((e as Error).message);
+        setE2eeSetupNeeded(true);
+        throw e;
+      } finally {
+        cryptoInitPromise.current = null;
       }
     })();
-  }, [topic.isE2ee]);
+    try { await cryptoInitPromise.current; } catch { return null; }
+    return cryptoRef.current;
+  }, [currentUser.id, e2eeReady]);
+
+  // Auto-init on mount for E2EE topics.
+  useEffect(() => {
+    if (!topic.isE2ee) return;
+    ensureCrypto().catch(() => {});
+  }, [topic.isE2ee, ensureCrypto]);
+
+  // Fetch room member list (members ∪ admins) for E2EE topics. We also use
+  // /api/topics/<id>/members to resolve admin display names for the banner
+  // — admins may not be present in topic_members but they ARE auto-added to
+  // the Megolm room. If they're not in topic_members the banner falls back
+  // to the userId (we document this so cleanup task can revisit).
+  const refreshRoomMembers = useCallback(async () => {
+    if (!topic.isE2ee || !e2eeRoomId) return;
+    try {
+      const r = await apiFetch(`/api/crypto/rooms/${encodeURIComponent(e2eeRoomId)}/members`);
+      if (!r.ok) return;
+      const d = (await r.json()) as { user_ids: string[]; member_user_ids: string[]; admin_user_ids: string[] };
+      setMemberUserIds(d.user_ids);
+      setAdminUserIds(d.admin_user_ids);
+    } catch { /* network blip — retry on next member change */ }
+  }, [topic.isE2ee, e2eeRoomId]);
+
+  useEffect(() => {
+    refreshRoomMembers();
+  }, [refreshRoomMembers]);
+
+  // After topic members load, build the admin display-name map. For admins
+  // not in topic_members (server auto-adds them to the Megolm room only),
+  // resolve their display name via /api/users/<id>. Falls back to a sliced
+  // userId only while the fetch is in flight.
+  useEffect(() => {
+    if (adminUserIds.length === 0) return;
+    setAdminDisplayNames((prev) => {
+      const next = new Map(prev);
+      for (const aid of adminUserIds) {
+        const m = members.find((mm) => mm.id === aid);
+        if (m) next.set(aid, m.displayName);
+        else if (!next.has(aid)) next.set(aid, `${aid.slice(0, 8)}…`);
+      }
+      return next;
+    });
+    // For admins not in topic_members, fetch their real display name.
+    const missing = adminUserIds.filter((aid) => !members.find((mm) => mm.id === aid));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(missing.map(async (aid) => {
+        try {
+          const r = await apiFetch(`/api/users/${encodeURIComponent(aid)}`);
+          if (!r.ok) return null;
+          const d = (await r.json()) as { id: string; displayName: string };
+          return d;
+        } catch { return null; }
+      }));
+      if (cancelled) return;
+      setAdminDisplayNames((prev) => {
+        const next = new Map(prev);
+        for (const d of results) {
+          if (d && d.displayName) next.set(d.id, d.displayName);
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [adminUserIds, members]);
 
   // Close context menu on outside click / Escape
   useEffect(() => {
@@ -597,18 +677,6 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       .finally(() => setFilteredLoading(false));
   }, [hashtagFilter, topic.id]);
 
-  const handleTrustKey = useCallback((userId: string, newFingerprint: string) => {
-    void (async () => {
-      const { confirmPinUpdate } = await import("@/lib/e2ee");
-      await confirmPinUpdate(userId, newFingerprint);
-    })();
-    setKeyChangedWarnings((prev) => prev.filter((w) => w.userId !== userId));
-  }, []);
-
-  const handleDismissWarning = useCallback((userId: string) => {
-    setKeyChangedWarnings((prev) => prev.filter((w) => w.userId !== userId));
-  }, []);
-
   const toggleReaction = useCallback((messageId: string, emojiKey: string) => {
     socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
     setPickerFor(null);
@@ -681,31 +749,26 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     const text = editText.trim();
     if (!text) return;
 
-    const processed = await processLinks(text);
-
-    let finalText = processed;
-    if (topic.isE2ee && e2eeReady && e2eeKeyPairRef.current) {
-      try {
-        const { encryptE2EEMessage, getSenderKey } = await import("@/lib/e2ee");
-        const mySenderKey = await getSenderKey(topic.id, currentUser.id);
-        if (mySenderKey) {
-          finalText = await encryptE2EEMessage(processed, currentUser.id, mySenderKey);
-        }
-      } catch (err) {
-        console.error("[e2ee] edit encrypt failed", err);
-        return;
-      }
+    // E2EE topics: editing messages requires re-encrypting through the
+    // current Megolm session. The ws edit path also needs a ciphertextJson
+    // surface — Plan D leaves this to a follow-up. For now the row stays
+    // immutable on E2EE topics; UI gates "Edit" elsewhere.
+    if (topic.isE2ee) {
+      setE2eeError("Editing encrypted messages is not yet supported.");
+      return;
     }
+
+    const processed = await processLinks(text);
 
     socketRef.current?.emit(
       WS_EVENTS.MESSAGE_EDIT_REQ,
-      { messageId, topicId: topic.id, text: finalText },
+      { messageId, topicId: topic.id, text: processed },
       (res: { ok: boolean; error?: string }) => {
         if (res.ok) { setEditingId(null); setEditText(""); }
         else console.warn("edit failed", res.error);
       },
     );
-  }, [editText, topic.id, topic.isE2ee, e2eeReady, currentUser.id]);
+  }, [editText, topic.id, topic.isE2ee]);
 
   const replyCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -729,73 +792,127 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     return map;
   }, [reactions]);
 
-  // Async decrypt map — populated when keys load
+  // Decrypted plaintext cache keyed by message id. The Map mirrors the legacy
+  // shape so the existing `getDisplayText` accessor stays the same.
   const [decryptedTexts, setDecryptedTexts] = useState<Map<string, string>>(new Map());
+  const decryptedRef = useRef(decryptedTexts);
+  useEffect(() => { decryptedRef.current = decryptedTexts; }, [decryptedTexts]);
 
-  // Load sender keys then decrypt all E2EE messages in one pass
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Build an IncomingEnvelope for `decryptRoom`. Sender id is mapped through
+  // `toMatrixUserId` — `decryptRoomEvent` cross-references this with the
+  // device that signed the to-device room key.
+  const toIncomingTopicEnvelope = useCallback((args: {
+    envelope: Record<string, unknown>;
+    senderUserId: string | null;
+    messageId: string;
+    createdAt: string | Date;
+  }): IncomingEnvelope => ({
+    type: "m.room.encrypted",
+    sender: toMatrixUserId(args.senderUserId ?? currentUser.id),
+    content: args.envelope as unknown as EncryptedEnvelope,
+    event_id: `$${args.messageId}`,
+    origin_server_ts: typeof args.createdAt === "string"
+      ? (Date.parse(args.createdAt) || Date.now())
+      : args.createdAt.getTime(),
+  }), [currentUser.id]);
+
+  // Initial-batch decrypt: when messages change AND crypto is ready, decrypt
+  // every E2EE row that we don't have plaintext for yet.
   useEffect(() => {
-    if (!topic.isE2ee || !e2eeReady || !e2eeKeyPairRef.current) return;
+    if (!topic.isE2ee || !e2eeReady || !e2eeRoomId) return;
+    const mod = cryptoRef.current;
+    if (!mod) return;
+    let cancelled = false;
     void (async () => {
-      try {
-        const {
-          decryptSenderKey,
-          decryptE2EEMessage,
-          importPublicKey,
-          getSenderKey,
-          storeSenderKey,
-        } = await import("@/lib/e2ee");
-
-        // 1. Collect senders that need key loading
-        const e2eeMsgs = messages.filter((m) => {
-          if (!m.text.startsWith("{")) return false;
-          try { const p = JSON.parse(m.text) as { e?: number }; return p.e === 1; } catch { return false; }
+      const newly: Record<string, string> = {};
+      for (const m of messages) {
+        if (!m.ciphertextJson) continue;
+        if (decryptedRef.current.has(m.id)) continue;
+        try {
+          const env = toIncomingTopicEnvelope({
+            envelope: m.ciphertextJson,
+            senderUserId: m.senderUserId,
+            messageId: m.id,
+            createdAt: m.createdAt,
+          });
+          const plain = await mod.decryptRoom(e2eeRoomId, env);
+          newly[m.id] = plain;
+        } catch {
+          // Locked row — pollSync will fan in the missing room key later.
+        }
+      }
+      if (cancelled) return;
+      const keys = Object.keys(newly);
+      if (keys.length > 0) {
+        setDecryptedTexts((prev) => {
+          const next = new Map(prev);
+          for (const k of keys) next.set(k, newly[k]!);
+          return next;
         });
-        const senderIds = [...new Set(e2eeMsgs.map((m) => m.senderUserId).filter(Boolean) as string[])];
-        const missing = senderIds.filter((id) => !senderKeyCache.current.has(id));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [topic.isE2ee, e2eeReady, e2eeRoomId, messages, toIncomingTopicEnvelope]);
 
-        for (const sid of missing) {
-          const local = await getSenderKey(topic.id, sid);
-          if (local) { senderKeyCache.current.set(sid, local as Uint8Array<ArrayBuffer>); continue; }
-          const res = await apiFetch(`/api/topics/${topic.id}/e2ee?distributorId=${sid}`);
-          if (!res.ok) continue;
-          const dist = await res.json() as { encryptedKey: string; distributorPublicKey: string | null };
-          if (!dist.distributorPublicKey) continue;
-          const distPubKey = await importPublicKey(dist.distributorPublicKey);
-          const sk = await decryptSenderKey(dist.encryptedKey, e2eeKeyPairRef.current!.privateKey, distPubKey);
-          await storeSenderKey(topic.id, sid, sk);
-          senderKeyCache.current.set(sid, sk);
-        }
-
-        // 2. Decrypt all messages that now have keys
-        const updates = new Map<string, string>();
-        for (const m of e2eeMsgs) {
-          if (decryptedTexts.has(m.id)) continue;
+  // Periodic /api/crypto/sync poll while the tab is visible. Each tick we
+  // also retry decrypting any still-locked rows. Mirrors DmThreadPane.
+  useEffect(() => {
+    if (!topic.isE2ee || !e2eeReady || !e2eeRoomId) return;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      if (interval) return;
+      interval = setInterval(async () => {
+        const mod = cryptoRef.current;
+        if (!mod) return;
+        try { await mod.pollSync(); } catch { return; }
+        const newly: Record<string, string> = {};
+        for (const m of messagesRef.current) {
+          if (!m.ciphertextJson) continue;
+          if (decryptedRef.current.has(m.id)) continue;
           try {
-            const payload = JSON.parse(m.text) as E2EEPayload;
-            const senderKey = senderKeyCache.current.get(payload.kid);
-            if (!senderKey) continue;
-            const plain = await decryptE2EEMessage(m.text, senderKey);
-            updates.set(m.id, plain);
-          } catch {
-            updates.set(m.id, "(decryption failed)");
-          }
+            const env = toIncomingTopicEnvelope({
+              envelope: m.ciphertextJson,
+              senderUserId: m.senderUserId,
+              messageId: m.id,
+              createdAt: m.createdAt,
+            });
+            const plain = await mod.decryptRoom(e2eeRoomId, env);
+            newly[m.id] = plain;
+          } catch { /* still missing key */ }
         }
-        if (updates.size > 0) {
+        const keys = Object.keys(newly);
+        if (keys.length > 0) {
           setDecryptedTexts((prev) => {
             const next = new Map(prev);
-            for (const [k, v] of updates) next.set(k, v);
+            for (const k of keys) next.set(k, newly[k]!);
             return next;
           });
         }
-      } catch {
-        // silent
+      }, 5000);
+    };
+    const stopPolling = () => { if (interval) { clearInterval(interval); interval = null; } };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") startPolling();
+      else stopPolling();
+    };
+    if (typeof document !== "undefined") {
+      onVisibility();
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      stopPolling();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
       }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topic.isE2ee, topic.id, e2eeReady, messages]);
+    };
+  }, [topic.isE2ee, e2eeReady, e2eeRoomId, toIncomingTopicEnvelope]);
 
   function getDisplayText(msg: Message): string {
     if (!topic.isE2ee) return msg.text;
+    if (!msg.ciphertextJson) return msg.text; // legacy plaintext row in pre-Plan D
     return decryptedTexts.get(msg.id) ?? "(encrypted…)";
   }
 
@@ -937,99 +1054,44 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     // (optionally) encrypting. On endpoint failure we fall back to original.
     const processed = text ? await processLinks(text) : text;
 
+    // E2EE topics travel via `ciphertextJson` — the server enforces the
+    // text↔cipher XOR. We send empty text + the Megolm envelope. Plain
+    // topics send `finalText` as-is.
     let finalText = processed;
-    if (topic.isE2ee && e2eeReady && e2eeKeyPairRef.current) {
-      try {
-        const {
-          generateSenderKey,
-          getSenderKey,
-          getSenderKeySessionId,
-          storeSenderKey,
-          encryptE2EEMessage,
-          importPublicKey,
-          encryptSenderKeyForRecipient,
-          checkAndUpdatePin,
-        } = await import("@/lib/e2ee");
-        const { getOrCreateSessionId } = await import("@/lib/e2ee-session");
-
-        // Fetch current members + already-distributed list
-        const distRes = await apiFetch(`/api/topics/${topic.id}/e2ee/distribute`);
-        const distData = distRes.ok
-          ? await distRes.json() as { members: { userId: string; identityPublicKey: string }[]; alreadyDistributed: string[] }
-          : { members: [], alreadyDistributed: [] };
-
-        const memberIds = new Set(distData.members.map((m) => m.userId));
-        const distributed = new Set(distData.alreadyDistributed);
-
-        const currentSessionId = getOrCreateSessionId();
-        const storedSessionId = await getSenderKeySessionId(topic.id, currentUser.id);
-        const sessionRotationNeeded = !storedSessionId || storedSessionId !== currentSessionId;
-        const memberRotationNeeded = distData.members.some((m) => !distributed.has(m.userId));
-        const needsRotation = sessionRotationNeeded || memberRotationNeeded;
-
-        const existingSenderKey = await getSenderKey(topic.id, currentUser.id);
-        let mySenderKey: Uint8Array<ArrayBuffer>;
-
-        if (!existingSenderKey || needsRotation) {
-          // Generate fresh sender key (covers first-send, new-member rotation, and session rotation)
-          mySenderKey = generateSenderKey();
-          await storeSenderKey(topic.id, currentUser.id, mySenderKey, currentSessionId);
-          senderKeyCache.current.set(currentUser.id, mySenderKey);
-
-          const distributions: { recipientUserId: string; encryptedKey: string }[] = [];
-          const newWarnings: KeyChangedWarning[] = [];
-
-          for (const m of distData.members) {
-            try {
-              const recipPubKey = await importPublicKey(m.identityPublicKey);
-
-              // TOFU check — warn if key changed since last contact
-              const pinResult = await checkAndUpdatePin(m.userId, recipPubKey);
-              if (pinResult.changed && pinResult.oldFingerprint) {
-                const senderInfo = messages.find((msg) => msg.senderUserId === m.userId);
-                newWarnings.push({
-                  userId: m.userId,
-                  displayName: senderInfo?.senderDisplayName ?? m.userId.slice(0, 8),
-                  oldFingerprint: pinResult.oldFingerprint,
-                  newFingerprint: pinResult.newFingerprint,
-                });
-              }
-
-              const encryptedKey = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, recipPubKey);
-              distributions.push({ recipientUserId: m.userId, encryptedKey });
-            } catch { /* skip member if key import fails */ }
-          }
-
-          if (newWarnings.length > 0) {
-            setKeyChangedWarnings((prev) => {
-              const merged = [...prev];
-              for (const w of newWarnings) {
-                if (!merged.some((x) => x.userId === w.userId)) merged.push(w);
-              }
-              return merged;
-            });
-          }
-
-          // Encrypt for self if not already a member with a registered key
-          if (!memberIds.has(currentUser.id)) {
-            const encSelf = await encryptSenderKeyForRecipient(mySenderKey, e2eeKeyPairRef.current.privateKey, e2eeKeyPairRef.current.publicKey);
-            distributions.push({ recipientUserId: currentUser.id, encryptedKey: encSelf });
-          }
-          if (distributions.length > 0) {
-            await apiFetch(`/api/topics/${topic.id}/e2ee/distribute`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ distributions }),
-            });
-          }
-        } else {
-          mySenderKey = existingSenderKey;
-        }
-
-        finalText = await encryptE2EEMessage(processed, currentUser.id, mySenderKey);
-      } catch (err) {
-        console.error("[e2ee] encrypt failed", err);
+    let ciphertextEnvelope: Record<string, unknown> | null = null;
+    if (topic.isE2ee && e2eeRoomId) {
+      const mod = cryptoRef.current ?? (await ensureCrypto());
+      if (!mod) {
+        setE2eeError("encryption not initialized");
         return;
+      }
+      try {
+        // Always refresh the room key fan-out before encrypting — this is a
+        // no-op when the Megolm session already covers the current member
+        // set, and it heals any join we missed (no member-change socket
+        // event exists today; we lean on the send path as a safety net).
+        // ensureRoomMembers drains outgoing requests internally via the
+        // single-flight pump mutex; no extra pumpOutgoing needed here.
+        await refreshRoomMembers();
+        await mod.ensureRoomMembers(e2eeRoomId, memberUserIdsRef.current);
+        const envelope = await mod.encryptRoom(e2eeRoomId, processed);
+        ciphertextEnvelope = envelope as unknown as Record<string, unknown>;
+        finalText = "";
+      } catch (err) {
+        // One retry after pumping any queued requests. If a pump is already
+        // in flight (e.g. from pollSync), the mutex makes us await it; this
+        // gives the OlmMachine time to settle before we re-encrypt.
+        try {
+          if (!mod) throw err;
+          await mod.pumpOutgoing();
+          const envelope = await mod.encryptRoom(e2eeRoomId, processed);
+          ciphertextEnvelope = envelope as unknown as Record<string, unknown>;
+          finalText = "";
+        } catch (err2) {
+          console.error("[e2ee] encrypt failed", err2);
+          setE2eeError("Encryption setup with peers in progress, try again in a moment.");
+          return;
+        }
       }
     }
 
@@ -1049,21 +1111,40 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       }
     }
 
+    // E2EE rows don't carry hashtags (the server can't index ciphertext); the
+    // empty-text branch on the ws side will reject anything with hashtags too.
+    const isE2eeSend = topic.isE2ee && ciphertextEnvelope !== null;
     socketRef.current?.emit(
       WS_EVENTS.MESSAGE_SEND,
       {
         topicId: topic.id,
         content: {
           text: finalText,
-          attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
+          attachments: isE2eeSend
+            ? undefined
+            : (pendingAttachments.length > 0 ? pendingAttachments : undefined),
           replyToMessageId: replyingTo?.id,
-          hashtags: hashtags.length > 0 ? hashtags.slice(0, 20) : undefined,
+          hashtags: isE2eeSend
+            ? undefined
+            : (hashtags.length > 0 ? hashtags.slice(0, 20) : undefined),
+          ciphertextJson: ciphertextEnvelope ?? undefined,
         },
       },
       (res: { ok: boolean; error?: string }) => {
         if (!res.ok) console.warn("send failed", res.error);
       },
     );
+    // Optimistically cache the plaintext for the message we just sent so the
+    // local render uses our own copy instead of waiting for the round-trip
+    // through pollSync. The MESSAGE_NEW broadcast will still upsert the row.
+    if (isE2eeSend) {
+      // Plaintext is in `processed` (we cleared finalText for the wire). We
+      // can't key by message id yet — the server assigns it — so we stash by
+      // a synthetic id and remap when MESSAGE_NEW for this send arrives.
+      // Simpler approach: re-decrypt locally when MESSAGE_NEW arrives by
+      // using the round-trip envelope, which our pollSync-style decrypter
+      // covers automatically. No optimistic stash here.
+    }
     setDraft("");
     setPendingAttachments([]);
     setReplyingTo(null);
@@ -1095,22 +1176,18 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     return members.filter((m) => m.displayName.toLowerCase().includes(q));
   }, [members, membersSearch]);
 
+  // Render-ready admin recipient list for the banner. Falls back to "no admins"
+  // when no admin row resolved (shouldn't happen for E2EE topics in Plan D, but
+  // we explicitly distinguish the empty case so support can spot it).
+  const adminListLabel = adminUserIds.length === 0
+    ? "no admins"
+    : adminUserIds
+        .map((id) => adminDisplayNames.get(id) ?? `${id.slice(0, 8)}…`)
+        .join(", ");
+
   return (
     <HashtagClickContext.Provider value={{ onHashtagClick: setHashtagFilter }}>
     <>
-      {e2eeSetupNeeded && (
-        <E2EESetup
-          userId={currentUser.id}
-          hasPermanentAccount={!currentUser.role.includes("anon")}
-          existingBackup={e2eeBackup}
-          onReady={(kp) => {
-            e2eeKeyPairRef.current = kp;
-            setE2eeSetupNeeded(false);
-            setE2eeReady(true);
-          }}
-          onSkip={() => { setE2eeSetupNeeded(false); }}
-        />
-      )}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       {dragActive && (
@@ -1358,9 +1435,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                       </div>
                     )}
                     <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
-                      msg.text.trim() === "" && msg.attachments.length > 0 && "p-1")}>
+                      getDisplayText(msg).trim() === "" && msg.attachments.length > 0 && "p-1")}>
                       {msg.attachments.length > 0 && (
-                        <div className={cn("flex flex-col gap-1", msg.text.trim() && "mb-2")}>
+                        <div className={cn("flex flex-col gap-1", getDisplayText(msg).trim() && "mb-2")}>
                           {msg.attachments.map((att, ai) =>
                             att.type === "file" ? (
                               <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
@@ -1375,8 +1452,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                           )}
                         </div>
                       )}
-                      {msg.text.trim() && (
-                        <MarkdownContent content={msg.text} className={cn("text-sm break-words", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
+                      {getDisplayText(msg).trim() && (
+                        <MarkdownContent content={getDisplayText(msg)} className={cn("text-sm break-words", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
                       )}
                       <div suppressHydrationWarning className={cn("mt-1 flex items-center gap-1 text-[10px]", mine ? "text-white/70 justify-end" : "text-muted")}>
                         {msg.editedAt && <span className="italic opacity-70">edited</span>}
@@ -1405,12 +1482,29 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         </div>
       ) : (<>
       <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", topic.isFeed ? "space-y-4" : "space-y-1")}>
-        {keyChangedWarnings.length > 0 && (
-          <E2EEKeyWarning
-            warnings={keyChangedWarnings}
-            onTrust={handleTrustKey}
-            onDismiss={handleDismissWarning}
-          />
+        {topic.isE2ee && (
+          <div className="mb-3 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
+            <span aria-hidden="true">🔒</span>{" "}
+            <span className="font-medium text-text">End-to-end encrypted.</span>{" "}
+            Visible to admins: <span className="text-text">{adminListLabel}</span>.{" "}
+            New members will NOT see prior messages.
+          </div>
+        )}
+        {topic.isE2ee && e2eeSetupNeeded && !e2eeReady && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
+            <span>Enable encryption to read and send messages in this topic.</span>
+            <button
+              type="button"
+              onClick={() => { ensureCrypto().catch(() => {}); }}
+              className="ml-auto rounded bg-accent2 px-3 py-1 text-xs text-white"
+            >Initialize</button>
+          </div>
+        )}
+        {e2eeError && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <span className="flex-1">{e2eeError}</span>
+            <button type="button" onClick={() => setE2eeError(null)} className="text-danger/70 hover:text-danger underline">dismiss</button>
+          </div>
         )}
         {(() => {
           const topLevelMessages = topic.isFeed ? messages.filter((m) => !m.replyToMessageId) : messages;
@@ -1500,7 +1594,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     </div>
                   )}
 
-                  {m.text.trim() && (
+                  {getDisplayText(m).trim() && (
                     <MarkdownContent content={getDisplayText(m)} className="text-sm" />
                   )}
 
@@ -1744,7 +1838,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                   ) : (
                   <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
                     !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
-                    m.text.trim() === "" && m.attachments.length > 0 && "p-1")}>
+                    getDisplayText(m).trim() === "" && m.attachments.length > 0 && "p-1")}>
                     {/* Quick reaction button on bubble */}
                     <button
                       ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
@@ -1775,7 +1869,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                       <CornerDownLeft className="h-3.5 w-3.5 text-muted" />
                     </button>
                     {m.attachments.length > 0 && (
-                      <div className={cn("flex flex-col gap-1", m.text.trim() && "mb-2")}>
+                      <div className={cn("flex flex-col gap-1", getDisplayText(m).trim() && "mb-2")}>
                         {m.attachments.map((att, ai) =>
                           att.type === "file" ? (
                             <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
@@ -1790,7 +1884,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                         )}
                       </div>
                     )}
-                    {m.text.trim() && (
+                    {getDisplayText(m).trim() && (
                       <MarkdownContent content={getDisplayText(m)} className={cn("text-sm break-words", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
                     )}
                     {m.inlineKeyboard && m.inlineKeyboard.length > 0 && (

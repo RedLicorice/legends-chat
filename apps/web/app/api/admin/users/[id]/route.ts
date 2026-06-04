@@ -5,6 +5,7 @@ import { passkeyCredentials, userBans, userMutes, users } from "@legends/db/sche
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { logDeviceChange } from "@/lib/device-change-log";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
@@ -70,6 +71,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
+  // Look up the previous role BEFORE the update so we can tell whether the
+  // change crosses the admin boundary. E2EE topics auto-include admins in
+  // the member set (see /api/crypto/rooms/[roomId]/members), so any admin
+  // grant/revoke needs to invalidate device lists.
+  const [prior] = await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+
   const patch: Record<string, unknown> = {};
   if (parsed.data.role !== undefined) patch.role = parsed.data.role;
   if ("roleExpiresAt" in parsed.data) patch.roleExpiresAt = parsed.data.roleExpiresAt ? new Date(parsed.data.roleExpiresAt) : null;
@@ -88,6 +99,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .returning({ id: users.id });
 
   if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  if (parsed.data.role !== undefined && prior) {
+    const wasAdmin = prior.role === "admin";
+    const isAdmin = parsed.data.role === "admin";
+    if (wasAdmin !== isAdmin) {
+      await logDeviceChange(id, isAdmin ? "admin_grant" : "admin_revoke");
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -5,7 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { apiFetch } from "@/lib/fetch";
 import { cn } from "@/lib/cn";
 import { useDmSocket, type DmIncoming } from "@/hooks/useDmSocket";
-import type { EncryptedEnvelope, IncomingEnvelope } from "@/lib/dm-crypto";
+import type { EncryptedEnvelope, IncomingEnvelope } from "@/lib/crypto";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,7 +88,7 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
   useEffect(() => { decryptedRef.current = decryptedById; }, [decryptedById]);
 
   const endRef = useRef<HTMLDivElement>(null);
-  const cryptoRef = useRef<typeof import("@/lib/dm-crypto") | null>(null);
+  const cryptoRef = useRef<typeof import("@/lib/crypto") | null>(null);
   const sessionInitPromise = useRef<Promise<void> | null>(null);
   const messagesRef = useRef<Message[]>([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -101,7 +101,7 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
   // ---------------------------------------------------------------------------
   // Crypto session bootstrap (idempotent; safe to call repeatedly)
   // ---------------------------------------------------------------------------
-  const ensureCrypto = useCallback(async (): Promise<typeof import("@/lib/dm-crypto") | null> => {
+  const ensureCrypto = useCallback(async (): Promise<typeof import("@/lib/crypto") | null> => {
     if (cryptoRef.current && e2eeReady) return cryptoRef.current;
     if (sessionInitPromise.current) {
       await sessionInitPromise.current;
@@ -109,7 +109,7 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
     }
     sessionInitPromise.current = (async () => {
       try {
-        const mod = await import("@/lib/dm-crypto");
+        const mod = await import("@/lib/crypto");
         cryptoRef.current = mod;
         const session = await mod.initCrypto(currentUserId);
         setMyFingerprint(session.fingerprint);

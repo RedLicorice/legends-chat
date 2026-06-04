@@ -12,8 +12,19 @@ export const attachmentSchema = z.object({
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
 
+// Matrix m.room.encrypted envelope as serialised by the OlmMachine. We don't
+// validate the inner shape (algorithm, ciphertext, sender_key, …) here — the
+// client SDK is the source of truth; the server just needs SOMETHING object-y
+// to pin to ciphertext_json.
+export const ciphertextEnvelopeSchema = z.record(z.string(), z.unknown());
+export type CiphertextEnvelope = z.infer<typeof ciphertextEnvelopeSchema>;
+
 export const messageContentSchema = z.object({
   text: z.string().max(8000).default(""),
+  // E2EE topics send the Megolm envelope here instead of `text`. The two
+  // branches are mutually exclusive (XOR-enforced by the .refine below);
+  // the server further checks that ciphertext is present iff topic.isE2ee.
+  ciphertextJson: ciphertextEnvelopeSchema.optional(),
   replyToMessageId: z.string().optional(),
   attachments: z.array(attachmentSchema).max(10).optional(),
   inlineKeyboard: z
@@ -27,8 +38,24 @@ export const messageContentSchema = z.object({
       ),
     )
     .optional(),
-}).refine((v) => v.text.trim().length > 0 || (v.attachments && v.attachments.length > 0), {
-  message: "message must have text or at least one attachment",
+}).superRefine((v, ctx) => {
+  const hasCipher = !!v.ciphertextJson;
+  const hasText = v.text.trim().length > 0;
+  const hasAttach = !!v.attachments && v.attachments.length > 0;
+  if (hasCipher) {
+    // Ciphertext branch: clients should not also send plaintext / attachments.
+    if (hasText || hasAttach) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ciphertextJson is mutually exclusive with text/attachments",
+      });
+    }
+  } else if (!hasText && !hasAttach) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "message must have text or at least one attachment",
+    });
+  }
 });
 export type MessageContent = z.infer<typeof messageContentSchema>;
 

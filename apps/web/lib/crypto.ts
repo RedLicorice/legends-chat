@@ -1,41 +1,39 @@
 "use client";
-// Legends Chat DM crypto wrapper around @matrix-org/matrix-sdk-crypto-wasm
+// Legends Chat crypto wrapper around @matrix-org/matrix-sdk-crypto-wasm
 // (vodozemac, compiled to WASM via wasm-bindgen).
 //
-// This module replaces the older `dm-olm.ts` implementation, which depended on
-// `@matrix-org/olm` (bundler-hostile, ships its own legacy WASM init). The
-// matrix-sdk-crypto-wasm `OlmMachine` is the modern Rust-based crypto core used
-// by Element X and matrix-rust-sdk. It persists its state in IndexedDB.
+// This module is the single client-side surface for E2EE. It handles both:
+//   - 1:1 DM rooms (peer-set inferred from the caller passing the peer userId)
+//   - Group rooms (topics) where the caller passes the full member list
 //
 // Public API (see exported declarations at the bottom):
-//   - initCrypto(userId)            -> create/load OlmMachine, return CryptoSession
-//   - bootstrap()                   -> drain initial outgoing requests (/keys/upload etc.)
-//   - ensurePeerTracked(peerId)     -> updateTrackedUsers + queryKeys flush
-//   - ensureSessionWithPeer(peerId) -> getMissingSessions + claim, then drain
-//   - encryptDm(roomId, plaintext)  -> share room key + encryptRoomEvent
-//   - decryptDm(roomId, envelope)   -> decryptRoomEvent on a fake m.room.encrypted event
-//   - pumpOutgoing()                -> drain outgoingRequests until empty
-//   - pollSync()                    -> fetch /api/crypto/sync, feed receiveSyncChanges
-//   - getPeerFingerprint(peerId)    -> formatted ed25519 string for safety modal
-//   - freeResources()               -> close() the OlmMachine
+//   - initCrypto(userId)                        -> create/load OlmMachine
+//   - bootstrap()                               -> drain initial outgoing reqs
+//   - getMyFingerprint()                        -> formatted ed25519 of own device
+//   - pumpOutgoing()                            -> drain outgoingRequests
+//   - pollSync()                                -> fetch /api/crypto/sync, feed receiveSyncChanges
+//   - freeResources()                           -> close() the OlmMachine
 //
-// Server endpoint contract (implemented separately in task 36):
+//   DM ops (1:1):
+//     - ensurePeerTracked(peerUserId)           -> updateTrackedUsers + queryKeys flush
+//     - ensureSessionWithPeer(peerUserId)       -> ensureRoomMembers(roomId, [peer]) shortcut
+//     - encryptDm(roomId, plaintext)            -> delegates to encryptRoom
+//     - decryptDm(roomId, envelope)             -> delegates to decryptRoom
+//     - getPeerFingerprint(peerUserId)          -> formatted ed25519 for safety modal
+//
+//   Group room ops (topics, multi-recipient):
+//     - ensureRoomMembers(roomId, userIds)      -> track + claim + shareRoomKey
+//     - encryptRoom(roomId, plaintext)          -> encryptRoomEvent
+//     - decryptRoom(roomId, envelope)           -> decryptRoomEvent
+//     - onMembershipChange(roomId, action, ...) -> invalidateGroupSession + reshare
+//     - getRoomFingerprint(roomId, userIds)     -> SHA-256 hash of sorted ed25519 keys
+//
+// Server endpoint contract (unchanged from the DM-only version):
 //   POST /api/crypto/keys/upload                     body = KeysUploadRequest.body
-//        resp = { one_time_key_counts: { signed_curve25519: number } }
 //   POST /api/crypto/keys/query                      body = KeysQueryRequest.body
-//        resp = { device_keys, master_keys, self_signing_keys, user_signing_keys }
 //   POST /api/crypto/keys/claim                      body = KeysClaimRequest.body
-//        resp = { one_time_keys, failures: {} }
 //   PUT  /api/crypto/sendToDevice/:event_type/:txn_id  body = ToDeviceRequest.body
-//        resp = {}
-//   GET  /api/crypto/sync?since=<cursor>
-//        resp = {
-//          next_batch,
-//          to_device: { events: [...] },
-//          device_lists: { changed: [...], left: [...] },
-//          device_one_time_keys_count: { signed_curve25519: N },
-//          device_unused_fallback_key_types: [...]
-//        }
+//   GET  /api/crypto/sync?since=<cursor>&device_id=<id>
 
 import * as MatrixSdkCrypto from "@matrix-org/matrix-sdk-crypto-wasm";
 
@@ -74,7 +72,8 @@ export type CryptoSession = {
 
 export type EncryptedEnvelope = {
   // Shape returned by `OlmMachine.encryptRoomEvent`, ready to POST to
-  // /api/dm/[id]/messages. Megolm room events emit:
+  // /api/dm/[id]/messages (DM) or the topic message endpoint (group).
+  // Megolm room events emit:
   //   { algorithm, sender_key, ciphertext, session_id, device_id }
   algorithm: string;
   ciphertext: string;
@@ -88,7 +87,7 @@ export type IncomingEnvelope = {
   /** Matrix user id of the sender, e.g. "@<userId>:legends.local". */
   sender: string;
   content: EncryptedEnvelope;
-  /** Caller maps our DM message id → fake event_id (decryptRoomEvent requires one). */
+  /** Caller maps message id → fake event_id (decryptRoomEvent requires one). */
   event_id: string;
   origin_server_ts: number;
 };
@@ -100,6 +99,10 @@ const META_DB_NAME = "legends-crypto-meta";
 const META_STORE = "meta";
 const CRYPTO_STORE_PREFIX = "legends-crypto-store";
 const DEVICE_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // base32, no 0/1/O/I
+
+/** Megolm session rotation policy (also useful to surface server-side). */
+export const MEGOLM_ROTATION_PERIOD_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+export const MEGOLM_ROTATION_MESSAGES = 100;
 
 // ── IndexedDB helpers for our metadata store (separate from the OlmMachine's
 //    IndexedDB store which it manages internally) ─────────────────────────────
@@ -171,9 +174,10 @@ function toMatrixUserId(userId: string): string {
 
 function formatFingerprint(b64: string): string {
   // Group base64 in chunks of 4 (joined with spaces) for the safety modal.
-  // This is a placeholder — the eventual UX may instead show a hash of both
-  // peers' fingerprints (Signal-style). For now we expose the device's own
-  // ed25519 public key in a human-comparable form.
+  // For the DM case this is the device's own ed25519 public key. For group
+  // rooms we use SHA-256 over the sorted member ed25519 keys (see
+  // getRoomFingerprint) and pass that through this same formatter so the
+  // visual treatment is consistent across modals.
   const groups: string[] = [];
   for (let i = 0; i < b64.length; i += 4) {
     groups.push(b64.slice(i, i + 4));
@@ -184,7 +188,7 @@ function formatFingerprint(b64: string): string {
 async function getMachine(): Promise<OlmMachineT> {
   if (!machinePromise) {
     throw new Error(
-      "dm-crypto: OlmMachine not initialized; call initCrypto() first",
+      "crypto: OlmMachine not initialized; call initCrypto() first",
     );
   }
   return machinePromise;
@@ -202,8 +206,7 @@ export async function initCrypto(userId: string): Promise<CryptoSession> {
   const deviceId = await getOrCreateDeviceId(userId);
 
   // Per-user store name; passphrase is empty (we trust the same-origin
-  // IndexedDB sandbox). If at-rest encryption is desired later, derive a
-  // passphrase from the user's session and pass it here.
+  // IndexedDB sandbox).
   const storeName = `${CRYPTO_STORE_PREFIX}-${userId}`;
 
   machinePromise = OlmMachine.initialize(
@@ -228,6 +231,11 @@ export async function initCrypto(userId: string): Promise<CryptoSession> {
   return cachedSession;
 }
 
+export async function getMyFingerprint(): Promise<string> {
+  if (!cachedSession) throw new Error("crypto: not initialized");
+  return cachedSession.fingerprint;
+}
+
 // ── Request dispatch ──────────────────────────────────────────────────────────
 
 async function postJson<T>(path: string, body: string): Promise<T> {
@@ -239,7 +247,7 @@ async function postJson<T>(path: string, body: string): Promise<T> {
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`dm-crypto: POST ${path} failed: ${res.status} ${txt}`);
+    throw new Error(`crypto: POST ${path} failed: ${res.status} ${txt}`);
   }
   return (await res.json()) as T;
 }
@@ -247,9 +255,7 @@ async function postJson<T>(path: string, body: string): Promise<T> {
 async function putJson<T>(path: string, body: string): Promise<T> {
   // sendToDevice is the only PUT we issue today, and the server requires the
   // caller to identify which device is fanning out (so it can stamp the
-  // to-device row's sender_device_id). We pull the deviceId from the cached
-  // session — initCrypto must have run before any pumpOutgoing call reaches
-  // here, so cachedSession is always populated at this point.
+  // to-device row's sender_device_id).
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (cachedSession?.deviceId) {
     headers["x-legends-crypto-device-id"] = cachedSession.deviceId;
@@ -262,7 +268,7 @@ async function putJson<T>(path: string, body: string): Promise<T> {
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`dm-crypto: PUT ${path} failed: ${res.status} ${txt}`);
+    throw new Error(`crypto: PUT ${path} failed: ${res.status} ${txt}`);
   }
   return (await res.json()) as T;
 }
@@ -276,9 +282,6 @@ type AnyOutgoingRequest = Awaited<
 async function dispatchOne(
   req: AnyOutgoingRequest,
 ): Promise<{ requestId: string; requestType: MatrixSdkCrypto.RequestType; responseBody: string }> {
-  // Each branch handles the union narrowing via the `type` discriminant.
-  // `id` is `string | undefined` on SignatureUploadRequest only; everywhere
-  // else it's a plain string.
   switch (req.type) {
     case RequestType.KeysUpload: {
       const r = req as MatrixSdkCrypto.KeysUploadRequest;
@@ -304,16 +307,13 @@ async function dispatchOne(
       return { requestId: r.id, requestType: r.type, responseBody: JSON.stringify(resp) };
     }
     case RequestType.SignatureUpload: {
-      // Not used for DM (no cross-signing yet). We acknowledge to the machine
-      // without round-tripping to a real endpoint to avoid wedging the queue.
-      // If we later add cross-signing support, route to /api/crypto/keys/signatures/upload.
+      // Not used (no cross-signing yet). Stub-acknowledge.
       const r = req as MatrixSdkCrypto.SignatureUploadRequest;
       const id = r.id ?? "noop";
       return { requestId: id, requestType: r.type, responseBody: "{}" };
     }
     case RequestType.RoomMessage: {
-      // Not used in our DM flow (we send via /api/dm/[id]/messages directly,
-      // not via the Matrix RoomMessage path). Stub-acknowledge.
+      // Not used in our flow (we send via app-specific endpoints).
       const r = req as MatrixSdkCrypto.RoomMessageRequest;
       return { requestId: r.id, requestType: r.type, responseBody: '{"event_id":"$noop"}' };
     }
@@ -323,24 +323,56 @@ async function dispatchOne(
       return { requestId: r.id, requestType: r.type, responseBody: "{}" };
     }
     default: {
-      // Exhaustiveness check
       const _exhaustive: never = req as never;
-      throw new Error(`dm-crypto: unknown outgoing request type: ${String(_exhaustive)}`);
+      throw new Error(`crypto: unknown outgoing request type: ${String(_exhaustive)}`);
     }
   }
 }
 
+// Single-flight mutex for pumpOutgoing.
+//
+// Background: many call sites (pollSync, ensureRoomMembers, send-retry in
+// TopicView, DM helpers) call pumpOutgoing. When two pump invocations
+// interleave, both observe the same `outgoingRequests()` array, both
+// dispatch each request, and both call `markRequestAsSent`. The OlmMachine
+// state machine treats the duplicate response as a fresh round-trip and
+// re-issues the next-step requests (most visibly: KeysQuery repeats
+// indefinitely). The result is a runaway loop hammering /api/crypto/keys/query
+// until rate-limited, and encryption never converges.
+//
+// The mutex guarantees: at any moment AT MOST ONE pump cycle is in flight.
+// Concurrent callers all await the same in-flight promise. After it
+// resolves, the next caller may start a fresh cycle (state may have
+// advanced). This preserves correctness — every request the machine wants
+// to emit still gets dispatched exactly once — while eliminating the
+// duplicate-response feedback loop.
+let pumpInFlight: Promise<void> | null = null;
+
 export async function pumpOutgoing(): Promise<void> {
-  const machine = await getMachine();
-  // Cap iterations to avoid an unbounded loop on a misbehaving server.
-  for (let i = 0; i < 32; i++) {
-    const reqs = await machine.outgoingRequests();
-    if (reqs.length === 0) return;
-    for (const req of reqs) {
-      const { requestId, requestType, responseBody } = await dispatchOne(req);
-      await machine.markRequestAsSent(requestId, requestType, responseBody);
-    }
+  if (pumpInFlight) {
+    // A pump is already running; wait for it and return.
+    // Don't start a second concurrent cycle.
+    await pumpInFlight;
+    return;
   }
+  pumpInFlight = (async () => {
+    try {
+      const machine = await getMachine();
+      // Cap iterations to avoid an unbounded loop on a misbehaving server
+      // or a wrapper bug. 32 is generous — a healthy bootstrap takes ≤4.
+      for (let i = 0; i < 32; i++) {
+        const reqs = await machine.outgoingRequests();
+        if (reqs.length === 0) return;
+        for (const req of reqs) {
+          const { requestId, requestType, responseBody } = await dispatchOne(req);
+          await machine.markRequestAsSent(requestId, requestType, responseBody);
+        }
+      }
+    } finally {
+      pumpInFlight = null;
+    }
+  })();
+  await pumpInFlight;
 }
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
@@ -353,7 +385,7 @@ export async function bootstrap(): Promise<void> {
   await pumpOutgoing();
 }
 
-// ── Tracking peers and establishing sessions ─────────────────────────────────
+// ── Tracking peers and establishing sessions (DM convenience) ────────────────
 
 export async function ensurePeerTracked(peerUserId: string): Promise<void> {
   const machine = await getMachine();
@@ -364,59 +396,82 @@ export async function ensurePeerTracked(peerUserId: string): Promise<void> {
 }
 
 export async function ensureSessionWithPeer(peerUserId: string): Promise<void> {
+  // DM convenience: delegate to the group-aware helper with a single peer.
+  // The self device is implicit (OlmMachine internally treats "us" via userId).
+  // The roomId is not needed for ensureRoomMembers's session-claim step —
+  // that step only requires the peer set — so we pass a placeholder. The
+  // actual shareRoomKey runs later from encryptRoom() / encryptDm() where the
+  // real roomId is known.
+  await ensureRoomMembersPeers([peerUserId]);
+}
+
+/**
+ * Internal: do the per-peer "track + claim" half of ensureRoomMembers without
+ * requiring a roomId. Used by the DM convenience helpers — the actual
+ * shareRoomKey for the room happens from encryptDm/encryptRoom which already
+ * call shareRoomKey before encryptRoomEvent.
+ */
+async function ensureRoomMembersPeers(userIds: string[]): Promise<void> {
   const machine = await getMachine();
-  const matrixPeer = toMatrixUserId(peerUserId);
-  const claim = await machine.getMissingSessions([new UserId(matrixPeer)]);
+  const matrixUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
+  await machine.updateTrackedUsers(matrixUsers);
+  // Build a fresh UserId list (the previous ones were consumed by
+  // updateTrackedUsers — wasm-bindgen "moves" UserId handles).
+  const claimUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
+  const claim = await machine.getMissingSessions(claimUsers);
   if (claim) {
     const resp = await postJson<unknown>("/api/crypto/keys/claim", claim.body);
     await machine.markRequestAsSent(claim.id, claim.type, JSON.stringify(resp));
   }
-  // Drain any follow-up requests (to-device etc.) that the machine queued.
+  // Single pump drains the KeysQuery scheduled by updateTrackedUsers plus
+  // any follow-ups. Routed through the single-flight mutex.
   await pumpOutgoing();
 }
 
 // ── Encrypt / decrypt ─────────────────────────────────────────────────────────
 
 function buildEncryptionSettings(): MatrixSdkCrypto.EncryptionSettings {
-  // Defaults are appropriate for 1:1 DMs (MegolmV1AesSha2). We leave rotation
-  // periods at the SDK defaults for now.
-  return new EncryptionSettings();
+  // MegolmV1AesSha2 (default algorithm). Apply our 1-week / 100-message
+  // rotation policy. The wasm binding takes `rotationPeriod` in MICROSECONDS,
+  // and both rotation properties are `bigint`.
+  const s = new EncryptionSettings();
+  s.rotationPeriod = BigInt(MEGOLM_ROTATION_PERIOD_MS) * BigInt(1000);
+  s.rotationPeriodMessages = BigInt(MEGOLM_ROTATION_MESSAGES);
+  return s;
 }
 
-export async function encryptDm(
+/**
+ * Ensure that a Megolm outbound session exists for `roomId` and that all
+ * listed members have received the room key. Idempotent — when the session
+ * already covers the member set, shareRoomKey returns an empty array.
+ *
+ * Callers are responsible for passing the *current* member list (including
+ * themselves). The OlmMachine treats the self-user implicitly when
+ * sharing — passing self in the list is harmless.
+ */
+export async function ensureRoomMembers(
   roomId: string,
-  plaintext: string,
-): Promise<EncryptedEnvelope> {
+  userIds: string[],
+): Promise<void> {
   const machine = await getMachine();
-  const session = cachedSession;
-  if (!session) throw new Error("dm-crypto: not initialized");
-
-  const room = new RoomId(roomId);
-
-  // Caller is expected to have already called ensurePeerTracked +
-  // ensureSessionWithPeer for the peer. We still call shareRoomKey here to
-  // make sure a megolm outbound session exists for `room` — when the session
-  // is already shared this is a no-op.
-  //
-  // shareRoomKey requires the full peer set for the room. For a 1:1 DM, the
-  // members are { self, peer }. The OlmMachine internally tracks "us" via
-  // userId, so we only need to pass the peer here. We don't know which peer
-  // belongs to this room from this signature, so we infer "all tracked users
-  // who aren't us". This is correct for 1:1 DMs but would need refinement
-  // for group rooms.
-  const tracked = await machine.trackedUsers();
-  const others: MatrixSdkCrypto.UserId[] = [];
-  for (const u of tracked) {
-    if (u.toString() !== session.matrixUserId) {
-      // updateTrackedUsers / trackedUsers invalidate UserId objects after they
-      // pass through the machine, but `trackedUsers()` returns fresh handles.
-      others.push(u);
-    }
+  // 1) Make sure we have current device lists for everyone. This schedules
+  //    a KeysQuery internally; we drain it in the single pump at the end.
+  const trackUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
+  await machine.updateTrackedUsers(trackUsers);
+  // 2) Establish Olm 1:1 sessions with every device that's missing one (these
+  //    are the channels Megolm room keys ride on). getMissingSessions returns
+  //    a KeysClaim request directly — handle it inline.
+  const claimUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
+  const claim = await machine.getMissingSessions(claimUsers);
+  if (claim) {
+    const resp = await postJson<unknown>("/api/crypto/keys/claim", claim.body);
+    await machine.markRequestAsSent(claim.id, claim.type, JSON.stringify(resp));
   }
-
+  // 3) Share the Megolm outbound session with everyone (no-op if already shared).
+  const shareUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
   const todeviceReqs = await machine.shareRoomKey(
-    room,
-    others,
+    new RoomId(roomId),
+    shareUsers,
     buildEncryptionSettings(),
   );
   for (const req of todeviceReqs) {
@@ -426,10 +481,23 @@ export async function encryptDm(
     const resp = await putJson<unknown>(path, req.body);
     await machine.markRequestAsSent(req.id, req.type, JSON.stringify(resp));
   }
-  // Drain anything else queued as a side effect (e.g. queries triggered by
-  // device-list changes).
+  // Single pump at the end drains everything still queued (KeysQuery from
+  // updateTrackedUsers, any follow-up KeysUpload, etc). Going through the
+  // single-flight mutex ensures we don't race with pollSync's own pump.
   await pumpOutgoing();
+}
 
+/**
+ * Encrypt a plaintext message for the room. Callers must have already invoked
+ * `ensureRoomMembers(roomId, members)` (or, for DMs, `ensureSessionWithPeer`).
+ * No member-set inference is done here.
+ */
+export async function encryptRoom(
+  roomId: string,
+  plaintext: string,
+): Promise<EncryptedEnvelope> {
+  const machine = await getMachine();
+  if (!cachedSession) throw new Error("crypto: not initialized");
   const contentJson = await machine.encryptRoomEvent(
     new RoomId(roomId),
     "m.room.message",
@@ -438,13 +506,11 @@ export async function encryptDm(
   return JSON.parse(contentJson) as EncryptedEnvelope;
 }
 
-export async function decryptDm(
+export async function decryptRoom(
   roomId: string,
   envelope: IncomingEnvelope,
 ): Promise<string> {
   const machine = await getMachine();
-  // decryptRoomEvent expects a full Matrix event JSON. We build one from the
-  // envelope shape we receive from /api/dm/[id]/messages.
   const eventJson = JSON.stringify({
     type: envelope.type,
     sender: envelope.sender,
@@ -468,6 +534,47 @@ export async function decryptDm(
   return inner.content?.body ?? "";
 }
 
+// DM-flavored thin wrappers — kept for call-site clarity. Both delegate to
+// the room-generic helpers. The peer-set inference that used to live in
+// encryptDm has been removed; callers must call ensureSessionWithPeer (or
+// ensureRoomMembers) before encrypting.
+
+export async function encryptDm(
+  roomId: string,
+  plaintext: string,
+): Promise<EncryptedEnvelope> {
+  return encryptRoom(roomId, plaintext);
+}
+
+export async function decryptDm(
+  roomId: string,
+  envelope: IncomingEnvelope,
+): Promise<string> {
+  return decryptRoom(roomId, envelope);
+}
+
+/**
+ * Drop the current Megolm outbound session for the room and reshare a fresh
+ * one with the new member set. Call this on join/leave so kicked members
+ * can't decrypt future messages and new members get the next key.
+ *
+ * Note: when leaving, the kicked user is omitted from `newMemberList` —
+ * shareRoomKey will not send the new room key to them.
+ *
+ * Uses `OlmMachine.invalidateGroupSession(roomId)` (the wasm SDK's name for
+ * what other Matrix docs call "discard room key").
+ */
+export async function onMembershipChange(
+  roomId: string,
+  _action: "join" | "leave",
+  _userId: string,
+  newMemberList: string[],
+): Promise<void> {
+  const machine = await getMachine();
+  await machine.invalidateGroupSession(new RoomId(roomId));
+  await ensureRoomMembers(roomId, newMemberList);
+}
+
 // ── Sync polling ──────────────────────────────────────────────────────────────
 
 type SyncResponse = {
@@ -481,7 +588,7 @@ type SyncResponse = {
 export async function pollSync(): Promise<{ newToDeviceCount: number }> {
   const machine = await getMachine();
   const session = cachedSession;
-  if (!session) throw new Error("dm-crypto: not initialized");
+  if (!session) throw new Error("crypto: not initialized");
   const cursorKey = `sync_cursor:${session.userId}:${session.deviceId}`;
   const since = (await metaGet<string>(cursorKey)) ?? "";
 
@@ -493,7 +600,7 @@ export async function pollSync(): Promise<{ newToDeviceCount: number }> {
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`dm-crypto: GET ${url} failed: ${res.status} ${txt}`);
+    throw new Error(`crypto: GET ${url} failed: ${res.status} ${txt}`);
   }
   const body = (await res.json()) as SyncResponse;
 
@@ -536,9 +643,7 @@ export async function getPeerFingerprint(
   const devices = await machine.getUserDevices(new UserId(matrixPeer), null);
   const all = devices.devices();
   if (all.length === 0) return null;
-  // For 1:1 DMs we typically pick the first non-deleted device. A future
-  // version of the safety modal should let the user pick among multiple
-  // devices and display a per-device fingerprint.
+  // For 1:1 DMs we pick the first non-deleted device.
   for (const dev of all) {
     if (dev.isDeleted()) continue;
     const ed = dev.ed25519Key;
@@ -546,6 +651,47 @@ export async function getPeerFingerprint(
     return formatFingerprint(ed.toBase64());
   }
   return null;
+}
+
+/**
+ * Group-room fingerprint: SHA-256 of the concatenation of every member's
+ * ed25519 device keys, sorted lexicographically. Caller passes the room's
+ * member list. Returns null if any member has no usable device (so the UI
+ * can render "fingerprint unavailable" instead of a misleading hash).
+ *
+ * The formatter matches `getMyFingerprint` / `getPeerFingerprint` so the
+ * safety modal can render all three identically.
+ */
+export async function getRoomFingerprint(
+  _roomId: string,
+  userIds: string[],
+): Promise<string | null> {
+  const machine = await getMachine();
+  const keys: string[] = [];
+  for (const u of userIds) {
+    const matrixUser = toMatrixUserId(u);
+    const devices = await machine.getUserDevices(new UserId(matrixUser), null);
+    const all = devices.devices();
+    let any = false;
+    for (const dev of all) {
+      if (dev.isDeleted()) continue;
+      const ed = dev.ed25519Key;
+      if (!ed) continue;
+      keys.push(ed.toBase64());
+      any = true;
+    }
+    if (!any) return null;
+  }
+  keys.sort();
+  const enc = new TextEncoder().encode(keys.join("|"));
+  const digest = await crypto.subtle.digest("SHA-256", enc);
+  // Base64-encode the 32-byte SHA-256 result so formatFingerprint produces
+  // the same visual format as for ed25519 keys (also 32 bytes -> 44 b64).
+  const bytes = new Uint8Array(digest);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  const b64 = btoa(bin);
+  return formatFingerprint(b64);
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────

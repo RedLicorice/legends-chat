@@ -288,6 +288,20 @@
       "when": 1780000000000,
       "tag": "0040_dm_request_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0041_megolm_topics",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1780200000000,
+      "tag": "0042_user_to_device_queue_drop_txn_idx",
+      "breakpoints": true
     }
   ]
 }

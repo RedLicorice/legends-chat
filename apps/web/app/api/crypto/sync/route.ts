@@ -61,18 +61,25 @@ export async function GET(req: NextRequest) {
 
   // Pull queued to-device events for THIS user where the device matches
   // OR the recipient_device_id is "*" (broadcast).
+  //
+  // CURSOR PRECISION NOTE: Postgres `timestamptz` is microsecond-precision but
+  // JS Date / ISO strings only carry millisecond precision. If we filter raw
+  // `created_at > $since` against the cursor we round-tripped through JS, any
+  // sub-millisecond fraction makes the row match again next poll → infinite
+  // loop. We truncate both sides to milliseconds to make the cursor stable.
   const rows = await db.execute<{
     id: string;
     sender_user_id: string;
     event_type: string;
     content_json: Record<string, unknown>;
-    created_at: Date;
+    created_at_ms: Date;
   }>(sql`
-    SELECT id, sender_user_id, event_type, content_json, created_at
+    SELECT id, sender_user_id, event_type, content_json,
+           date_trunc('milliseconds', created_at) AS created_at_ms
       FROM user_to_device_queue
      WHERE recipient_user_id = ${user.id}
        AND (recipient_device_id = ${deviceId} OR recipient_device_id = '*')
-       AND created_at > ${since.toISOString()}
+       AND date_trunc('milliseconds', created_at) > ${since.toISOString()}
      ORDER BY created_at ASC
      LIMIT ${PAGE_SIZE}
   `);
@@ -88,7 +95,8 @@ export async function GET(req: NextRequest) {
       content: row.content_json,
     });
     ids.push(row.id);
-    lastCreatedAt = row.created_at instanceof Date ? row.created_at : new Date(row.created_at);
+    const at = row.created_at_ms instanceof Date ? row.created_at_ms : new Date(row.created_at_ms);
+    if (!lastCreatedAt || at > lastCreatedAt) lastCreatedAt = at;
   }
 
   // Best-effort mark-delivered. Failure here is non-fatal; the row will just
@@ -121,14 +129,55 @@ export async function GET(req: NextRequest) {
   const hasFallback =
     !!bundle?.fallback && typeof bundle.fallback === "object" && Object.keys(bundle.fallback).length > 0;
 
-  const nextBatch = lastCreatedAt
-    ? lastCreatedAt.toISOString()
+  // device_lists.changed: every user whose device set materially changed
+  // since `since`. OlmMachine uses this to invalidate cached device lists
+  // and re-query /keys/query for affected users. Capped at 200/sync so a
+  // huge churn doesn't blow the payload — the client keeps draining via
+  // the advancing cursor.
+  //
+  // CURSOR PRECISION: `changed_at` is timestamptz (microsecond precision in
+  // Postgres) but the cursor we hand back is an ISO string (millisecond
+  // precision in JS). If we filter raw `changed_at > $since`, a row stamped
+  // e.g. `12:34:56.123456` truncates to `12:34:56.123Z` in next_batch, then
+  // `.123456 > .123000` matches again → OlmMachine re-queries forever and
+  // hits the 60/min keys/query rate cap. Truncate both sides to milliseconds
+  // for a stable, monotonic cursor. Also DISTINCT ON dedups multiple log rows
+  // for the same user_id so a noisy user only appears once.
+  const changeRows = await db.execute<{ user_id: string; changed_at_ms: Date | string }>(sql`
+    SELECT DISTINCT ON (user_id) user_id,
+           date_trunc('milliseconds', changed_at) AS changed_at_ms
+      FROM user_device_change_log
+     WHERE date_trunc('milliseconds', changed_at) > ${since.toISOString()}
+     ORDER BY user_id, changed_at DESC
+     LIMIT 200
+  `);
+  const seenChanged = new Set<string>();
+  const changedUserIds: string[] = [];
+  let maxChangedAt: Date | null = null;
+  for (const row of Array.from(changeRows)) {
+    const mxid = toMatrixUserId(row.user_id);
+    if (!seenChanged.has(mxid)) {
+      seenChanged.add(mxid);
+      changedUserIds.push(mxid);
+    }
+    const at = row.changed_at_ms instanceof Date ? row.changed_at_ms : new Date(row.changed_at_ms);
+    if (!maxChangedAt || at > maxChangedAt) maxChangedAt = at;
+  }
+
+  // next_batch advances to whichever watermark is later: the last to-device
+  // row delivered, or the latest device-change row we surfaced. Falling back
+  // to the incoming cursor (or EPOCH) keeps idempotent re-polls cheap.
+  const candidates: Date[] = [];
+  if (lastCreatedAt) candidates.push(lastCreatedAt);
+  if (maxChangedAt) candidates.push(maxChangedAt);
+  const nextBatch = candidates.length > 0
+    ? new Date(Math.max(...candidates.map((d) => d.getTime()))).toISOString()
     : sinceRaw || EPOCH;
 
   return NextResponse.json({
     next_batch: nextBatch,
     to_device: { events },
-    device_lists: { changed: [], left: [] },
+    device_lists: { changed: changedUserIds, left: [] },
     device_one_time_keys_count: { signed_curve25519: unusedOtkCount },
     device_unused_fallback_key_types: hasFallback ? ["signed_curve25519"] : [],
   });

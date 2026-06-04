@@ -17,6 +17,7 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
 import { toMatrixUserId } from "@/lib/crypto-matrix";
+import { logDeviceChange } from "@/lib/device-change-log";
 
 const deviceKeysSchema = z.object({
   user_id: z.string().min(1).max(256),
@@ -111,6 +112,10 @@ export async function POST(req: Request) {
           updatedAt: new Date(),
         },
       });
+
+    // Tell peers' OlmMachine to re-query this user's device list on next /sync.
+    // Best-effort; logDeviceChange swallows DB errors.
+    await logDeviceChange(user.id, "keys_upload");
   }
 
   // If we didn't get device_keys but the caller is uploading OTKs/fallback,
@@ -128,21 +133,24 @@ export async function POST(req: Request) {
   // that any OTK/fallback upload include device_keys, OR that there is
   // exactly one user_key_bundles row for this user.
   if (!deviceId && (one_time_keys || fallback_keys)) {
+    // We don't carry device_id on the session cookie. When multiple device
+    // rows exist (e.g. user logged in from a second browser context), the
+    // OlmMachine's subsequent OTK/fallback top-ups arrive without device_keys
+    // so we can't disambiguate from the request alone. The pragmatic
+    // disambiguation: the OlmMachine in THIS session uploaded its device_keys
+    // most recently — that row's `updated_at` will be the freshest. Pick it.
+    // (Single-row case still works because the only row IS the freshest.)
+    // TODO: bind device_id to the session/JWT so this becomes deterministic.
     const rows = await db
-      .select({ deviceId: userKeyBundles.deviceId })
+      .select({ deviceId: userKeyBundles.deviceId, updatedAt: userKeyBundles.updatedAt })
       .from(userKeyBundles)
-      .where(eq(userKeyBundles.userId, user.id));
+      .where(eq(userKeyBundles.userId, user.id))
+      .orderBy(sql`${userKeyBundles.updatedAt} DESC NULLS LAST`)
+      .limit(1);
     if (rows.length === 0) {
       return matrixError(
         "M_UNKNOWN",
         "device_keys must be uploaded before one_time_keys or fallback_keys",
-        400,
-      );
-    }
-    if (rows.length > 1) {
-      return matrixError(
-        "M_UNKNOWN",
-        "multiple devices registered; include device_keys to disambiguate",
         400,
       );
     }
