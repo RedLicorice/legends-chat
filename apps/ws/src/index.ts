@@ -248,12 +248,18 @@ io.on("connection", async (socket: AuthedSocket) => {
       });
       io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
       ack?.({ ok: true, message: msg });
+      // `plainPreview` is reused for push notifications + the in-app
+      // notification fanout, which still want *some* user-visible string for
+      // E2EE topics (where the server has no plaintext). The sidebar payload
+      // below ships an empty preview instead so the chat list never renders a
+      // "(encrypted message)" placeholder.
       const plainPreview = isE2ee ? "(encrypted message)" : stripMarkdownPreview(processedText, topic?.isFeed ?? false);
+      const sidebarPreview = isE2ee ? "" : plainPreview;
       // Broadcast sidebar update to all topic members so their sidebar refreshes in real time
       getTopicMemberUserIds(parsed.topicId).then((memberIds) => {
         const sidebarPayload = {
           topicId: parsed.topicId,
-          preview: plainPreview,
+          preview: sidebarPreview,
           senderName: msg.senderDisplayName ?? null,
           at: typeof msg.createdAt === "string" ? msg.createdAt : (msg.createdAt as Date).toISOString(),
         };
@@ -412,11 +418,30 @@ io.on("connection", async (socket: AuthedSocket) => {
       if (!isOwn && !canEditAny) {
         ack?.({ ok: false, error: "forbidden" }); return;
       }
-      // Skip link processing for E2EE topics; client handles it pre-encryption.
+      // Branch must match topic.isE2ee — client encrypts via Megolm for E2EE,
+      // sends plaintext for plain topics. Reject crossed wires.
       const editTopic = await getTopicById(parsed.topicId);
-      const editText = (editTopic?.isE2ee ?? false)
-        ? parsed.text
-        : await maybeProcessLinks(parsed.text, user.sub);
+      const topicE2ee = editTopic?.isE2ee ?? false;
+      if (topicE2ee) {
+        if (!parsed.ciphertextJson) {
+          ack?.({ ok: false, error: "E2EE topic requires ciphertextJson" }); return;
+        }
+        const updated = await editMessage({
+          messageId: parsed.messageId,
+          topicId: parsed.topicId,
+          newCiphertextJson: parsed.ciphertextJson,
+          editedByUserId: user.sub,
+        });
+        if (!updated) { ack?.({ ok: false, error: "message not found or deleted" }); return; }
+        io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.MESSAGE_EDIT, updated);
+        ack?.({ ok: true });
+        return;
+      }
+      // Plain-topic path
+      if (parsed.text === undefined) {
+        ack?.({ ok: false, error: "plain topic requires text" }); return;
+      }
+      const editText = await maybeProcessLinks(parsed.text, user.sub);
       const updated = await editMessage({
         messageId: parsed.messageId,
         topicId: parsed.topicId,
@@ -479,6 +504,7 @@ subClient.subscribe(
   REDIS_CHANNELS.SYMBOLS_UPDATE,
   REDIS_CHANNELS.DM_MESSAGE_NEW,
   REDIS_CHANNELS.DM_CONVERSATION_UPDATED,
+  REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED,
   (err) => { if (err) console.error("redis subscribe failed", err); },
 );
 
@@ -557,6 +583,25 @@ subClient.on("message", (channel, message) => {
           state,
         });
       }
+    } else if (channel === REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED) {
+      // E2EE topic key-rotation signal — published from
+      // apps/ws/src/messages.ts:ensureTopicMembership on first join. Fan to
+      // every connected viewer of the topic so TopicView can discard the
+      // current Megolm session and reshare with the new full member set.
+      const { topicId, action, affectedUserId, memberUserIds, adminUserIds } = JSON.parse(message) as {
+        topicId: string;
+        action: "join" | "leave";
+        affectedUserId: string;
+        memberUserIds: string[];
+        adminUserIds: string[];
+      };
+      io.to(`topic:${topicId}`).emit(WS_EVENTS.TOPIC_MEMBERS_UPDATED, {
+        topicId,
+        action,
+        affectedUserId,
+        memberUserIds,
+        adminUserIds,
+      });
     } else if (channel === REDIS_CHANNELS.SYMBOLS_UPDATE) {
       io.emit(WS_EVENTS.SYMBOLS_UPDATE, {});
     }

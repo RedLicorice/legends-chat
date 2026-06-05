@@ -63,7 +63,7 @@ export function TopicListItem({
               )}
             </div>
             <div className="truncate text-xs text-muted">
-              {topic.lastMessage?.preview ?? topic.description ?? ""}
+              {(topic.lastMessage?.preview || topic.description) ?? ""}
             </div>
           </div>
         </Link>
@@ -104,7 +104,7 @@ export function TopicListItem({
           </div>
           <div className="mt-0.5 flex items-center gap-2">
             <div className="line-clamp-1 flex-1 text-sm text-muted">
-              {topic.lastMessage?.preview ?? topic.description ?? "No messages yet"}
+              {(topic.lastMessage?.preview || topic.description) ?? "No messages yet"}
             </div>
             {topic.unreadCount > 0 && (
               <div className="rounded-full bg-accent px-2 py-0.5 text-xs font-semibold text-white">

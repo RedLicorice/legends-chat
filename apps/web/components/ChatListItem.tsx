@@ -22,6 +22,12 @@ export type ChatItem = {
   lastPreview: string | null;
   unreadCount: number;
   isE2ee?: boolean;
+  /**
+   * Topic description, only populated for `kind === "topic"` rows. Rendered
+   * as the secondary line on E2EE topic rows (where we never see plaintext
+   * server-side so there's no last-message preview to show).
+   */
+  description?: string | null;
 };
 
 export interface ChatListItemProps {
@@ -96,6 +102,36 @@ function Avatar({ item }: { item: ChatItem }) {
   );
 }
 
+/**
+ * Secondary line under the row title. Branches:
+ *   - non-E2EE rows: plaintext `lastPreview` (current behavior).
+ *   - E2EE topic rows: italic-muted `description` (single line, ellipsis);
+ *     blank if no description.
+ *   - E2EE DM rows (user or bot): always blank — title + lastAt + lock +
+ *     unread badge carry the row.
+ * The empty placeholder div is kept in the no-content cases so the row's
+ * fixed 56px height stays consistent.
+ */
+function PreviewSlot({ item }: { item: ChatItem }) {
+  if (item.isE2ee) {
+    if (item.kind === "topic") {
+      const desc = item.description?.trim();
+      return (
+        <div className="line-clamp-1 flex-1 truncate text-xs italic text-muted">
+          {desc ?? ""}
+        </div>
+      );
+    }
+    // E2EE DMs: render an empty slot to preserve row height.
+    return <div className="flex-1" />;
+  }
+  return (
+    <div className="line-clamp-1 flex-1 truncate text-xs text-muted">
+      {item.lastPreview ?? ""}
+    </div>
+  );
+}
+
 export function ChatListItem({ item, active }: ChatListItemProps) {
   const time = formatLastAt(item.lastAt);
   return (
@@ -121,9 +157,7 @@ export function ChatListItem({ item, active }: ChatListItemProps) {
           {time && <div className="ml-auto shrink-0 pl-1 text-[11px] text-muted">{time}</div>}
         </div>
         <div className="mt-0.5 flex items-center gap-2">
-          <div className="line-clamp-1 flex-1 truncate text-xs text-muted">
-            {item.lastPreview ?? ""}
-          </div>
+          <PreviewSlot item={item} />
           {item.unreadCount > 0 && (
             <div className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-white">
               {item.unreadCount > 99 ? "99+" : item.unreadCount}

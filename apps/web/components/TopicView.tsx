@@ -225,6 +225,10 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [adminDisplayNames, setAdminDisplayNames] = useState<Map<string, string>>(new Map());
   const memberUserIdsRef = useRef<string[]>([]);
   useEffect(() => { memberUserIdsRef.current = memberUserIds; }, [memberUserIds]);
+  // Mirror e2eeRoomId in a ref so the long-lived socket listener can read the
+  // current value without re-subscribing on every dependency change.
+  const e2eeRoomIdRef = useRef<string | null>(e2eeRoomId);
+  useEffect(() => { e2eeRoomIdRef.current = e2eeRoomId; }, [e2eeRoomId]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const cryptoRef = useRef<typeof import("@/lib/crypto") | null>(null);
   const cryptoInitPromise = useRef<Promise<void> | null>(null);
@@ -570,7 +574,21 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     });
     socket.on(WS_EVENTS.MESSAGE_EDIT, (updated: Message) => {
       if (!active || updated.topicId !== topic.id) return;
-      setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, text: updated.text, editedAt: updated.editedAt, attachments: updated.attachments } : m));
+      setMessages((prev) => prev.map((m) => m.id === updated.id
+        ? { ...m, text: updated.text, editedAt: updated.editedAt, attachments: updated.attachments, ciphertextJson: updated.ciphertextJson ?? m.ciphertextJson }
+        : m));
+      // On E2EE rows, drop any cached plaintext so the batch decrypt effect
+      // picks up the new envelope. (For optimistic edits by self, the cache
+      // was repopulated synchronously by submitEdit's ack — that cache hit
+      // is overwritten here, then re-populated by the decrypt batch.)
+      if (updated.ciphertextJson) {
+        setDecryptedTexts((prev) => {
+          if (!prev.has(updated.id)) return prev;
+          const next = new Map(prev);
+          next.delete(updated.id);
+          return next;
+        });
+      }
     });
     socket.on(WS_EVENTS.MESSAGE_DELETE, (d: { id: string; topicId: string }) => {
       if (!active || d.topicId !== topic.id) return;
@@ -591,6 +609,36 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     });
     socket.on(WS_EVENTS.SYMBOLS_UPDATE, () => {
       refetchSymbols();
+    });
+    // E2EE topic key rotation. Server fires this on any topic_members insert
+    // (apps/ws → REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED). On receipt we drop the
+    // current Megolm outbound session and re-share to the new member set so
+    // the new joiner can read messages from now on. Without this we'd only
+    // rotate at the next send, leaving them with a "(encrypted)" gap.
+    //
+    // Note: cryptoRef may be null if the viewer hasn't bootstrapped E2EE on
+    // this device yet — in that case there's no session to invalidate, and
+    // refreshing member state is enough; the next send path will share the
+    // session with the updated member list.
+    socket.on(WS_EVENTS.TOPIC_MEMBERS_UPDATED, async (payload: {
+      topicId: string;
+      action: "join" | "leave";
+      affectedUserId: string;
+      memberUserIds: string[];
+      adminUserIds: string[];
+    }) => {
+      if (!active || payload.topicId !== topic.id) return;
+      setMemberUserIds(Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds])).sort());
+      setAdminUserIds(payload.adminUserIds);
+      const roomId = e2eeRoomIdRef.current;
+      const mod = cryptoRef.current;
+      if (!roomId || !mod) return;
+      const fullMembers = Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds]));
+      try {
+        await mod.onMembershipChange(roomId, payload.action, payload.affectedUserId, fullMembers);
+      } catch (err) {
+        console.error("[e2ee] onMembershipChange failed", { topicId: payload.topicId, err });
+      }
     });
 
     let refreshing = false;
@@ -749,12 +797,57 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     const text = editText.trim();
     if (!text) return;
 
-    // E2EE topics: editing messages requires re-encrypting through the
-    // current Megolm session. The ws edit path also needs a ciphertextJson
-    // surface — Plan D leaves this to a follow-up. For now the row stays
-    // immutable on E2EE topics; UI gates "Edit" elsewhere.
+    // E2EE topics: re-encrypt the new plaintext through the current Megolm
+    // session and ship the envelope to the server. The ws handler matches
+    // the branch against topic.isE2ee and replaces ciphertext_json on the
+    // row (keeping content_ciphertext empty per messages_payload_chk XOR).
     if (topic.isE2ee) {
-      setE2eeError("Editing encrypted messages is not yet supported.");
+      if (!e2eeRoomId) {
+        setE2eeError("Encrypted room not initialized.");
+        return;
+      }
+      const mod = cryptoRef.current ?? (await ensureCrypto());
+      if (!mod) {
+        setE2eeError("Encryption not initialized.");
+        return;
+      }
+      let envelope: Record<string, unknown>;
+      try {
+        // Refresh + ensure room key fan-out before re-encrypt — matches the
+        // send-path safety net since there's no live member-change event.
+        await refreshRoomMembers();
+        await mod.ensureRoomMembers(e2eeRoomId, memberUserIdsRef.current);
+        envelope = (await mod.encryptRoom(e2eeRoomId, text)) as unknown as Record<string, unknown>;
+      } catch (err) {
+        try {
+          await mod.pumpOutgoing();
+          envelope = (await mod.encryptRoom(e2eeRoomId, text)) as unknown as Record<string, unknown>;
+        } catch (err2) {
+          console.error("[e2ee] edit encrypt failed", err2);
+          setE2eeError("Encryption setup with peers in progress, try again in a moment.");
+          return;
+        }
+      }
+      socketRef.current?.emit(
+        WS_EVENTS.MESSAGE_EDIT_REQ,
+        { messageId, topicId: topic.id, ciphertextJson: envelope },
+        (res: { ok: boolean; error?: string }) => {
+          if (res.ok) {
+            // Optimistically cache the new plaintext so we don't flash
+            // "(encrypted…)" while waiting for the MESSAGE_EDIT broadcast
+            // to round-trip and re-decrypt.
+            setDecryptedTexts((prev) => {
+              const next = new Map(prev);
+              next.set(messageId, text);
+              return next;
+            });
+            setEditingId(null);
+            setEditText("");
+          } else {
+            console.warn("edit failed", res.error);
+          }
+        },
+      );
       return;
     }
 
@@ -768,7 +861,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         else console.warn("edit failed", res.error);
       },
     );
-  }, [editText, topic.id, topic.isE2ee]);
+  }, [editText, topic.id, topic.isE2ee, e2eeRoomId, ensureCrypto, refreshRoomMembers]);
 
   const replyCounts = useMemo(() => {
     const counts = new Map<string, number>();

@@ -122,7 +122,10 @@ export async function listTopicsForUser(userId: string, userRole: string, userPe
           preview = "(unavailable)";
         }
       } else {
-        preview = "(encrypted)";
+        // E2EE topics: server can't read plaintext. Surface an empty preview
+        // and let consumers (chat list, legacy topic list) fall back to the
+        // topic description instead of leaking a "(encrypted)" placeholder.
+        preview = "";
       }
       lastMessage = {
         id: latest.id.toString(),

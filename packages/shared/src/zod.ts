@@ -106,11 +106,32 @@ export const pollCloseSchema = z.object({
   pollId: z.string().uuid(),
 });
 
-export const messageEditSchema = z.object({
-  messageId: z.string(),
-  topicId: z.string().uuid(),
-  text: z.string().min(1).max(8000).trim(),
-});
+// Edit payload: either plaintext `text` (for plain topics) XOR a Megolm
+// `ciphertextJson` envelope (for E2EE topics). The ws handler additionally
+// verifies that the branch matches `topic.isE2ee`.
+export const messageEditSchema = z
+  .object({
+    messageId: z.string(),
+    topicId: z.string().uuid(),
+    text: z.string().max(8000).optional(),
+    ciphertextJson: ciphertextEnvelopeSchema.optional(),
+  })
+  .superRefine((v, ctx) => {
+    const hasCipher = !!v.ciphertextJson;
+    const hasText = !!v.text && v.text.trim().length > 0;
+    if (hasCipher && hasText) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ciphertextJson is mutually exclusive with text",
+      });
+    }
+    if (!hasCipher && !hasText) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "edit must include text or ciphertextJson",
+      });
+    }
+  });
 export type MessageEditInput = z.infer<typeof messageEditSchema>;
 
 export const messageDeleteSchema = z.object({

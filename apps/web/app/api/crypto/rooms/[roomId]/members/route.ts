@@ -17,13 +17,12 @@ import {
   dmParticipants,
   topicMembers,
   topics,
-  userKeyBundles,
-  users,
 } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
 import { fromMatrixRoomId } from "@/lib/crypto-matrix";
+import { listTopicCryptoMembers } from "@/lib/topic-members";
 
 function matrixError(errcode: string, error: string, status: number) {
   return NextResponse.json({ errcode, error }, { status });
@@ -77,34 +76,22 @@ export async function GET(
       .limit(1);
     if (!member) return matrixError("M_FORBIDDEN", "not a member", 403);
 
-    const memberRows = await db
-      .select({ userId: topicMembers.userId })
-      .from(topicMembers)
-      .where(eq(topicMembers.topicId, topic.id));
-    const memberIds = memberRows.map((r) => r.userId);
-
+    // Shared with the live publisher in apps/ws — see listTopicCryptoMembers.
     // Admins are auto-added to E2EE topics so they can read history if needed.
     // Plain-text topics already have admin read via permissions; no auto-add.
-    // We filter to admins that have at least one device key bundle uploaded —
-    // an admin without a bootstrapped E2EE session cannot decrypt anyway, and
-    // including them would make the sender's OlmMachine spin forever trying
-    // to claim Olm sessions with a user that has zero devices.
-    let adminIds: string[] = [];
-    if (topic.isE2ee) {
-      const adminRows = await db
-        .select({ id: users.id })
-        .from(users)
-        .innerJoin(userKeyBundles, eq(userKeyBundles.userId, users.id))
-        .where(and(eq(users.role, "admin"), eq(users.isAnon, false)))
-        .groupBy(users.id);
-      adminIds = adminRows.map((r) => r.id);
-    }
+    // The helper filters admins to those with at least one device key bundle
+    // uploaded — an admin without a bootstrapped E2EE session cannot decrypt
+    // anyway, and including them would make the sender's OlmMachine spin
+    // forever trying to claim Olm sessions with a user that has zero devices.
+    const crypto = await listTopicCryptoMembers(topic.id);
+    const memberIds = crypto?.memberUserIds ?? [];
+    const adminIds = crypto?.adminUserIds ?? [];
 
     const merged = Array.from(new Set([...memberIds, ...adminIds])).sort();
     return NextResponse.json({
       user_ids: merged,
-      member_user_ids: memberIds.slice().sort(),
-      admin_user_ids: adminIds.slice().sort(),
+      member_user_ids: memberIds,
+      admin_user_ids: adminIds,
     });
   }
 

@@ -159,7 +159,11 @@ export function ChatListPane({ initialItems, currentUserId, activeHref }: ChatLi
         next[idx] = {
           ...cur,
           lastAt: u.at,
-          lastPreview: u.preview,
+          // E2EE rows never render a server-side preview; keep `lastPreview`
+          // null so the renderer falls back to the topic description. The ws
+          // server already ships an empty string for these, but null-coerce
+          // defensively in case an older payload arrives.
+          lastPreview: cur.isE2ee ? null : u.preview,
           unreadCount: cur.unreadCount + 1,
         };
         return next.sort(compareChatItems);
@@ -189,10 +193,9 @@ export function ChatListPane({ initialItems, currentUserId, activeHref }: ChatLi
         next[idx] = {
           ...cur,
           lastAt: u.createdAt,
-          // Plaintext rows ship `text`; E2EE rows carry an empty `text` and
-          // we keep the existing "(encrypted)" placeholder rather than
-          // leak ciphertext bytes through the preview slot.
-          lastPreview: cur.isE2ee ? cur.lastPreview ?? "(encrypted)" : u.text,
+          // Plaintext rows ship `text`; E2EE rows render no preview at all
+          // (the row keeps title + lastAt + lock + unread badge).
+          lastPreview: cur.isE2ee ? null : u.text,
           unreadCount: isOutgoing ? cur.unreadCount : cur.unreadCount + 1,
         };
         return next.sort(compareChatItems);

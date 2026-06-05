@@ -10,6 +10,7 @@ import {
   topicMembers,
   topics,
   userDeviceChangeLog,
+  userKeyBundles,
   userMutes,
   users,
 } from "@legends/db/schema";
@@ -20,7 +21,9 @@ import {
   unwrapKey,
   wrapKey,
 } from "@legends/crypto";
+import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "./db";
+import { pubClient } from "./redis";
 
 let cachedKey: { id: string; data: Uint8Array } | null = null;
 
@@ -470,6 +473,75 @@ export async function isUserMuted(userId: string): Promise<{ reason: string; exp
   return { reason: row.reason, expiresAt: row.expiresAt };
 }
 
+/**
+ * Crypto-member resolver mirroring apps/web/lib/topic-members.ts. Used by the
+ * topic-members live-update publisher so every connected TopicView can rotate
+ * its Megolm session as soon as someone joins (rather than on next send).
+ *
+ *   member_user_ids → topic_members rows for this topic
+ *   admin_user_ids  → role=admin, !isAnon, has ≥1 userKeyBundle (only for
+ *                     is_e2ee topics; plain topics return [])
+ */
+async function listTopicCryptoMembers(
+  topicId: string,
+): Promise<{ memberUserIds: string[]; adminUserIds: string[] } | null> {
+  const [topic] = await db
+    .select({ id: topics.id, isE2ee: topics.isE2ee })
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .limit(1);
+  if (!topic) return null;
+
+  const memberRows = await db
+    .select({ userId: topicMembers.userId })
+    .from(topicMembers)
+    .where(eq(topicMembers.topicId, topic.id));
+  const memberUserIds = memberRows.map((r) => r.userId).sort();
+
+  let adminUserIds: string[] = [];
+  if (topic.isE2ee) {
+    const adminRows = await db
+      .select({ id: users.id })
+      .from(users)
+      .innerJoin(userKeyBundles, eq(userKeyBundles.userId, users.id))
+      .where(and(eq(users.role, "admin"), eq(users.isAnon, false)))
+      .groupBy(users.id);
+    adminUserIds = adminRows.map((r) => r.id).sort();
+  }
+
+  return { memberUserIds, adminUserIds };
+}
+
+/**
+ * Publish a topic membership change over the WS relay
+ * (REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED → WS_EVENTS.TOPIC_MEMBERS_UPDATED).
+ *
+ * Best-effort: a missed publish only delays the rotation until the next send,
+ * which is the pre-change behaviour. We log and swallow.
+ */
+async function publishTopicMembersUpdated(args: {
+  topicId: string;
+  action: "join" | "leave";
+  affectedUserId: string;
+}): Promise<void> {
+  try {
+    const crypto = await listTopicCryptoMembers(args.topicId);
+    if (!crypto) return;
+    await pubClient.publish(
+      REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED,
+      JSON.stringify({
+        topicId: args.topicId,
+        action: args.action,
+        affectedUserId: args.affectedUserId,
+        memberUserIds: crypto.memberUserIds,
+        adminUserIds: crypto.adminUserIds,
+      }),
+    );
+  } catch (err) {
+    console.error("[topic-members] publish failed", { topicId: args.topicId, err });
+  }
+}
+
 export async function ensureTopicMembership(userId: string, topicId: string): Promise<void> {
   // `.returning()` returns the inserted row, or [] if the conflict suppressed
   // the write. We use that to log a device_change ONLY on first join, so
@@ -488,6 +560,10 @@ export async function ensureTopicMembership(userId: string, topicId: string): Pr
     } catch (err) {
       console.error("[device-change-log] topic_join insert failed", { userId, topicId, err });
     }
+    // Live key-rotation signal — only on the actual join, not the re-open
+    // path. Subscribers in apps/ws/src/index.ts forward to topic:<id> so every
+    // viewer can discard + reshare the Megolm session immediately.
+    void publishTopicMembersUpdated({ topicId, action: "join", affectedUserId: userId });
   }
 }
 
@@ -591,7 +667,14 @@ export async function getMessageOwner(messageId: string): Promise<{ topicId: str
 export async function editMessage(args: {
   messageId: string;
   topicId: string;
-  newText: string;
+  /** New plaintext (plain topics). Mutually exclusive with ciphertextJson. */
+  newText?: string;
+  /**
+   * New Megolm envelope (E2EE topics). When provided, content_ciphertext
+   * stays empty and ciphertext_json is replaced. messages_payload_chk still
+   * holds: XOR (cipherJson IS NOT NULL) <> (octet_length(content_ciphertext) > 0).
+   */
+  newCiphertextJson?: Record<string, unknown>;
   editedByUserId: string;
 }): Promise<InsertedMessage | null> {
   const [current] = await db
@@ -601,7 +684,16 @@ export async function editMessage(args: {
     .limit(1);
   if (!current) return null;
 
-  // Archive previous ciphertext
+  const isE2eeEdit = !!args.newCiphertextJson;
+  const wasE2eeRow = !!current.ciphertextJson;
+  // Must match the row's payload shape — refuse mixing.
+  if (isE2eeEdit !== wasE2eeRow) return null;
+
+  // Archive previous payload. For E2EE rows the byte columns are empty (the
+  // payload lives in ciphertext_json); we still write the row to preserve the
+  // edit-by-user / timestamp history. Schema has no jsonb column for prior
+  // envelopes, so the envelope itself is not archived (acceptable: Megolm
+  // ratchets forward and the prior payload is no longer needed).
   await db.insert(messageEdits).values({
     messageId: BigInt(args.messageId),
     editedByUserId: args.editedByUserId,
@@ -610,16 +702,24 @@ export async function editMessage(args: {
     keyId: current.keyId,
   });
 
-  // Encrypt new content
-  const key = await currentDataKey();
-  const aad = new TextEncoder().encode(args.topicId);
-  const encoded = encodeContent(args.newText);
-  const { ciphertext, nonce } = encryptMessage(key.data, encoded, aad);
   const now = new Date();
 
-  await db.update(messages)
-    .set({ contentCiphertext: ciphertext, contentNonce: nonce, keyId: key.id, editedAt: now })
-    .where(eq(messages.id, BigInt(args.messageId)));
+  if (isE2eeEdit) {
+    // Swap ciphertext_json; leave content_ciphertext/nonce as the existing
+    // empty bytea (CHECK still passes).
+    await db.update(messages)
+      .set({ ciphertextJson: args.newCiphertextJson, editedAt: now })
+      .where(eq(messages.id, BigInt(args.messageId)));
+  } else {
+    // Plaintext branch: re-encrypt envelope with current data key.
+    const key = await currentDataKey();
+    const aad = new TextEncoder().encode(args.topicId);
+    const encoded = encodeContent(args.newText ?? "");
+    const { ciphertext, nonce } = encryptMessage(key.data, encoded, aad);
+    await db.update(messages)
+      .set({ contentCiphertext: ciphertext, contentNonce: nonce, keyId: key.id, editedAt: now })
+      .where(eq(messages.id, BigInt(args.messageId)));
+  }
 
   let senderDisplayName: string | null = null;
   let senderAvatarUrl: string | null = null;
@@ -634,7 +734,10 @@ export async function editMessage(args: {
     if (u) { senderDisplayName = u.displayName; senderIsAnon = u.isAnon; senderAvatarUrl = u.avatarUrl; senderRole = u.role; }
   }
 
-  const { attachments } = decodeContent(encodeContent(args.newText));
+  const broadcastText = isE2eeEdit ? "" : (args.newText ?? "");
+  const attachments = isE2eeEdit
+    ? []
+    : decodeContent(encodeContent(args.newText ?? "")).attachments;
 
   return {
     id: args.messageId,
@@ -646,10 +749,11 @@ export async function editMessage(args: {
     senderRole,
     botId: current.botId,
     replyToMessageId: current.replyToMessageId?.toString() ?? null,
-    text: args.newText,
+    text: broadcastText,
     attachments,
     createdAt: current.createdAt,
     editedAt: now,
+    ciphertextJson: isE2eeEdit ? args.newCiphertextJson! : null,
   };
 }
 

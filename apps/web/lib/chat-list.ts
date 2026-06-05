@@ -37,6 +37,12 @@ export type ChatItem = {
   lastPreview: string | null;
   unreadCount: number;
   isE2ee?: boolean;
+  /**
+   * Topic description, only populated for `kind === "topic"` rows. Rendered as
+   * the secondary line on E2EE topic rows in place of a last-message preview
+   * (we never see plaintext server-side for those).
+   */
+  description?: string | null;
 };
 
 function topicToItem(t: TopicListItem): ChatItem {
@@ -47,9 +53,12 @@ function topicToItem(t: TopicListItem): ChatItem {
     title: t.title,
     avatar: { iconUrl: t.iconUrl ?? null },
     lastAt: t.lastMessage?.at ? t.lastMessage.at.toISOString() : null,
-    lastPreview: t.lastMessage?.preview ?? t.description ?? null,
+    // E2EE topics never get a server-side last-message preview (we can't
+    // decrypt ciphertext); the renderer falls back to `description` instead.
+    lastPreview: t.isE2ee ? null : t.lastMessage?.preview ?? t.description ?? null,
     unreadCount: t.unreadCount,
     isE2ee: t.isE2ee,
+    description: t.description ?? null,
   };
 }
 
@@ -67,9 +76,13 @@ function dmToItem(c: DmConversationView): ChatItem | null {
     title: c.peer.displayName,
     avatar: { url: c.peer.avatarUrl },
     lastAt: c.lastMessageAt,
-    lastPreview: c.isE2ee ? "(encrypted)" : null,
+    // E2EE DMs render no preview at all — the row keeps title + lastAt + lock.
+    // Non-E2EE DMs don't currently surface a preview either (no field on the
+    // server view yet), but the renderer is preview-aware once that lands.
+    lastPreview: null,
     unreadCount: 0, // DM unread counts not yet tracked server-side
     isE2ee: c.isE2ee,
+    description: null,
   };
 }
 
