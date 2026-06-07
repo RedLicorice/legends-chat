@@ -14,9 +14,20 @@ const log = createLogger("auth:callback");
 
 export async function GET(req: NextRequest) {
   const publicOrigin = publicOriginServer(req);
-  const reqHost = req.headers.get("host");
+  // Prefer X-Forwarded-Host (the host the client actually used) over the
+  // Host header, which a reverse proxy (Tailscale serve, nginx, etc.) may
+  // rewrite to the upstream address (e.g. "localhost:3000" / "0.0.0.0:3000").
+  const reqHost =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const publicHost = (() => { try { return new URL(publicOrigin).host; } catch { return null; } })();
-  const errorOrigin = publicHost && reqHost && publicHost !== reqHost ? req.nextUrl.origin : publicOrigin;
+  // If APP_PUBLIC_URL is explicitly configured, trust it unconditionally —
+  // operator opted in. Only run the mismatch defense when we derived the
+  // public origin from request headers (no env, no ngrok).
+  const trustPublic = !!process.env.APP_PUBLIC_URL;
+  const errorOrigin =
+    !trustPublic && publicHost && reqHost && publicHost !== reqHost
+      ? req.nextUrl.origin
+      : publicOrigin;
   const errorRedirect = (code: string) =>
     NextResponse.redirect(new URL(`/login?error=${code}`, errorOrigin));
 

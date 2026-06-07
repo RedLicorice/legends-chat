@@ -13,12 +13,50 @@ install:
     fi
 
 dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
     pnpm --filter @legends/web run dev
 
 prebuild:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
     pnpm --filter @legends/web run build
 
 dev-warm: prebuild dev
+
+# Bring up dev infra: postgres + redis containers, wait for healthy.
+infra-up:
+    docker compose up -d --wait
+
+infra-down:
+    docker compose down
+
+infra-logs:
+    docker compose logs -f --tail=100
+
+# Start ws daemon in foreground (run in its own terminal).
+ws:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
+    pnpm --filter @legends/ws run dev
+
+# Start Telegram bot daemon in foreground (run in its own terminal).
+bot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
+    pnpm --filter @legends/bot run dev
+
+# Full dev stack one-liner: infra + migrate + (web build) + web dev.
+# WS + bot still need separate terminals: `just ws`, `just bot`.
+dev-stack: infra-up migrate prebuild dev
 
 start:
     ./start.sh
@@ -45,6 +83,28 @@ clearlogs:
     pm2 flush
     rm -f logs/*.log logs/ngrok.env
     @echo "logs cleared"
+
+# ── Tailscale TLS for LAN/tailnet dev (WebAuthn needs Secure Context) ────────
+
+# Front next dev with Tailscale-issued TLS on :443. Internal Next rewrites
+# proxy /socket.io/* → ws (3001) and /bot/webhook → bot (3002), so only :3000
+# is fronted. Prereq: HTTPS Certificates enabled at
+# https://login.tailscale.com/admin/dns and `just dev-warm` running.
+tls-up:
+    sudo tailscale serve --bg --https=443 http://localhost:3000
+
+tls-down:
+    sudo tailscale serve reset
+
+tls-status:
+    tailscale serve status
+
+# Print the https URL to hand to clients on the tailnet.
+tls-url:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name=$(tailscale status --self --peers=false --json | grep -oE '"DNSName":\s*"[^"]+"' | head -n1 | sed -E 's/.*"DNSName":\s*"([^"]+)\.?"/\1/')
+    echo "https://${name%.}"
 
 # ── Docker / Production ───────────────────────────────────────────────────────
 

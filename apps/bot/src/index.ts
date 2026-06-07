@@ -216,14 +216,37 @@ process.on("uncaughtException", (err) => {
   log.error("uncaughtException", err);
 });
 
-subscribeToConsumption(bot.api);
-rescheduleOnStartup(bot.api).catch((err) => log.error("lifecycle reschedule failed", err));
-
 const BOT_MODE = process.env.BOT_MODE ?? "polling";
 const BOT_WEBHOOK_PORT = Number(process.env.BOT_WEBHOOK_PORT ?? 3002);
 const BOT_WEBHOOK_PATH = "/bot/webhook";
 
 log.info(`starting (mode: ${BOT_MODE})`);
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, rej) =>
+      setTimeout(() => rej(new Error(`${what} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+try {
+  const me = await withTimeout(bot.api.getMe(), 10_000, "getMe");
+  log.info(
+    `identified as @${me.username} (id=${me.id}, name="${me.first_name}", can_join_groups=${me.can_join_groups})`,
+  );
+} catch (err) {
+  log.error("getMe failed — check TELEGRAM_BOT_TOKEN and network to api.telegram.org", err);
+  process.exit(1);
+}
+
+subscribeToConsumption(bot.api);
+log.info("redis subscription initiated (login_token_consumed channel)");
+
+await withTimeout(rescheduleOnStartup(bot.api), 10_000, "rescheduleOnStartup")
+  .then(() => log.info("lifecycle reschedule ready"))
+  .catch((err) => log.error("lifecycle reschedule failed (continuing anyway)", err));
 
 if (BOT_MODE === "webhook") {
   const publicUrl = appPublicUrl();

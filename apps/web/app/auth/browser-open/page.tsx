@@ -12,7 +12,9 @@ export default function BrowserOpenPage() {
   useEffect(() => {
     if (!verifyUrl) return;
     const ua = navigator.userAgent;
-    const isAndroid = /android/i.test(ua);
+    // Require both "Android" and "Mobile" so spoofed/emulator UAs on desktop
+    // don't get an intent:// they can't launch.
+    const isAndroid = /android/i.test(ua) && /mobile/i.test(ua);
     const isIos = /iphone|ipad|ipod/i.test(ua);
 
     if (isAndroid) {

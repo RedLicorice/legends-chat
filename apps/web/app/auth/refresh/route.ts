@@ -16,9 +16,17 @@ export async function GET(req: NextRequest) {
   // reached us via localhost while APP_PUBLIC_URL points at LAN IP), redirect
   // to the same origin the user is on so the cookies we just set still apply.
   const publicOrigin = publicOriginServer(req);
-  const reqHost = req.headers.get("host");
+  // Prefer X-Forwarded-Host (client's actual host) over Host (may be rewritten
+  // to the upstream address by a reverse proxy like Tailscale serve).
+  const reqHost =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const publicHost = (() => { try { return new URL(publicOrigin).host; } catch { return null; } })();
-  const origin = publicHost && reqHost && publicHost !== reqHost ? req.nextUrl.origin : publicOrigin;
+  // If APP_PUBLIC_URL is set, trust it — operator configured it deliberately.
+  const trustPublic = !!process.env.APP_PUBLIC_URL;
+  const origin =
+    !trustPublic && publicHost && reqHost && publicHost !== reqHost
+      ? req.nextUrl.origin
+      : publicOrigin;
   if (!ok) return NextResponse.redirect(new URL("/login", origin));
   return NextResponse.redirect(new URL(to, origin));
 }

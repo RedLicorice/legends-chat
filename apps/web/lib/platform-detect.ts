@@ -6,7 +6,10 @@ export type PlatformOpenResult =
 export function openInBrowser(targetPath: string): PlatformOpenResult {
   if (typeof window === "undefined") return { kind: "redirect" };
   const ua = navigator.userAgent;
-  const isAndroid = /android/i.test(ua);
+  // Substring "Android" alone matches some emulator / spoofed desktop UAs.
+  // Require BOTH "Android" and "Mobile" so we never fire an intent:// from
+  // a desktop browser (Chrome desktop has neither).
+  const isAndroid = /android/i.test(ua) && /mobile/i.test(ua);
   const isIos = /iphone|ipad|ipod/i.test(ua);
   const isRealSafari = /Safari\//i.test(ua);
   const host = window.location.host;
