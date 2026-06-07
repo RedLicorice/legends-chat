@@ -1,73 +1,10 @@
-import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import { getCurrentUser } from "@/lib/auth";
-import { TotpPanel } from "@/components/TotpPanel";
-import { ThemeSelector } from "@/components/ThemeSelector";
-import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
-import { EmailLinkPanel } from "@/components/EmailLinkPanel";
-import { PasskeyPanel } from "@/components/PasskeyPanel";
-import { SettingsClient } from "@/components/SettingsClient";
-import { getSetting } from "@legends/db/system-settings";
-import { db } from "@/lib/db";
+import { SettingsPageClient } from "./SettingsPageClient";
 
-export const dynamic = "force-dynamic";
+// Static shell: rendered once at build, hydrated on the client. The client
+// fetches /api/me + /api/settings/me and renders the settings UI. Middleware
+// still gates unauthenticated access at the edge before this shell is served.
+export const dynamic = "force-static";
 
-export default async function SettingsPage() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
-
-  const jar = await cookies();
-  const userTheme = jar.get("lc_theme")?.value;
-  const userSidebarCompact = jar.get("lc_sidebar_compact")?.value;
-
-  const [defaultTheme, sidebarCompactDefault] = await Promise.all([
-    getSetting(db, "default_theme").catch(() => null),
-    getSetting(db, "sidebar_compact_default").catch(() => null),
-  ]);
-
-  const currentTheme = userTheme ?? defaultTheme ?? "dark";
-  const currentCompact = userSidebarCompact ?? sidebarCompactDefault ?? "minimal";
-
-  return (
-    <main className="selectable fixed inset-0 overflow-y-auto flex items-start justify-center px-8 pb-8 pt-[calc(2rem+var(--sat))]">
-      <div className="w-full max-w-lg space-y-8">
-        <div>
-          <Link
-            href="/"
-            className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text"
-          >
-            <ArrowLeft className="h-4 w-4" /> Back to chat
-          </Link>
-          <h1 className="text-2xl font-semibold">Account settings</h1>
-          <p className="mt-1 text-sm text-muted">Manage your security and appearance preferences.</p>
-        </div>
-
-        <SettingsClient
-          appearance={
-            <div className="rounded-xl border border-border bg-panel p-5 space-y-4">
-              <ThemeSelector defaultTheme={currentTheme} />
-              <SidebarCompactSelector defaultValue={currentCompact} />
-            </div>
-          }
-          security={
-            <>
-              <div className="rounded-xl border border-border bg-panel p-5">
-                <TotpPanel />
-              </div>
-              <div className="rounded-xl border border-border bg-panel p-5">
-                <PasskeyPanel />
-              </div>
-            </>
-          }
-          account={
-            <div className="rounded-xl border border-border bg-panel p-5">
-              <EmailLinkPanel />
-            </div>
-          }
-        />
-      </div>
-    </main>
-  );
+export default function Page() {
+  return <SettingsPageClient />;
 }
