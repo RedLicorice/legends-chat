@@ -5,6 +5,7 @@ import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
 import { ExternalLinkBootstrap } from "@/components/ExternalLinkBootstrap";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
+import { RootShell } from "@/components/RootShell";
 
 // Strict-SPA root layout: pure, sync, no cookies(), no DB. Dynamic data
 // (theme attributes, branding, external-link config) is resolved on the
@@ -80,7 +81,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <PushSetup />
         <TokenRefresh />
         <ExternalLinkBootstrap>
-          <SymbolsProvider>{children}</SymbolsProvider>
+          <SymbolsProvider>
+            <RootShell>{children}</RootShell>
+          </SymbolsProvider>
           <ExternalLinkDialog />
         </ExternalLinkBootstrap>
       </body>

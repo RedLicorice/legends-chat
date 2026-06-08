@@ -1,15 +1,7 @@
-import { AppShell } from "@/components/AppShell";
-
-// Persistent SPA shell. Lives at the catch-all layout boundary so Next 15
-// reuses the same React tree across every authed URL — slug change, query
-// string toggle, push and pop — without unmounting AppShell or its views.
-// The catch-all page is an empty marker; the actual UI is dispatched by
-// AppShell via usePathname().
+// Catch-all layout is now a passthrough. The persistent SPA shell lives
+// in the root layout (`app/layout.tsx` → `RootShell` → `AppShell`) so it
+// stays mounted across every URL change. Anything under here is owned by
+// the route group above.
 export default function Layout({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <AppShell />
-      {children}
-    </>
-  );
+  return <>{children}</>;
 }
