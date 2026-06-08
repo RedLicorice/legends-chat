@@ -12,21 +12,29 @@ install:
         exit 1
     fi
 
-dev:
+# `just dev` — single command that brings up EVERYTHING and auto-reloads
+# every code change. Starts (or reuses) postgres + redis containers, then
+# runs web (next dev --turbo), ws (tsx watch), and bot (tsx watch) in a
+# single foreground process. Ctrl+C stops them all together.
+#
+# What auto-reloads:
+#   - Web    : next dev --turbo handles HMR + RSC + server route reloads.
+#   - WS     : tsx watch restarts the daemon on file change.
+#   - Bot    : tsx watch restarts the daemon on file change.
+#   - Shared packages (@legends/db, @legends/shared, @legends/crypto) are
+#     pnpm symlinks; tsx watch follows the symlinks; turbopack transpiles
+#     them under `transpilePackages`.
+dev: infra-up
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f .env ]; then set -a; source .env; set +a; fi
     if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
-    pnpm --filter @legends/web run dev
+    # --parallel keeps all three running; --stream prefixes each line with
+    # the package name so output stays legible.
+    pnpm -r --parallel --stream --filter "./apps/*" run dev
 
-prebuild:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -f .env ]; then set -a; source .env; set +a; fi
-    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
-    pnpm --filter @legends/web run build
-
-dev-warm: prebuild dev
+# Alias for muscle memory. Same behaviour as `just dev`.
+dev-warm: dev
 
 # Bring up dev infra: postgres + redis containers, wait for healthy.
 infra-up:
@@ -38,7 +46,15 @@ infra-down:
 infra-logs:
     docker compose logs -f --tail=100
 
-# Start ws daemon in foreground (run in its own terminal).
+# Run a single app's dev script. Use this only when you want to run web,
+# ws, or bot in isolation — `just dev` runs all three at once.
+web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
+    pnpm --filter @legends/web run dev
+
 ws:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -46,7 +62,6 @@ ws:
     if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
     pnpm --filter @legends/ws run dev
 
-# Start Telegram bot daemon in foreground (run in its own terminal).
 bot:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -54,9 +69,17 @@ bot:
     if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
     pnpm --filter @legends/bot run dev
 
-# Full dev stack one-liner: infra + migrate + (web build) + web dev.
-# WS + bot still need separate terminals: `just ws`, `just bot`.
-dev-stack: infra-up migrate prebuild dev
+# Production web build (only when something explicitly needs the .next/
+# output — `just dev` skips this because Next dev compiles on demand).
+prebuild:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt; fi
+    pnpm --filter @legends/web run build
+
+# Migrate DB then start the full stack.
+dev-stack: infra-up migrate dev
 
 start:
     ./start.sh
