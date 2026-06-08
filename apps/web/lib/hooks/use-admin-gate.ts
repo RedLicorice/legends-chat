@@ -9,14 +9,6 @@ export type AdminGateStatus =
   | "forbidden"
   | "error";
 
-/**
- * Client-side admin gate. Calls /api/me via useMe() and checks whether the
- * caller holds at least one of the required permissions. Returns a status the
- * shell client component can switch on.
- *
- * Server enforcement still happens at the per-action API routes — this hook
- * is purely UX: avoid rendering the admin panel for users who'd 403 anyway.
- */
 export function useAdminGate(requiredPermissions: string[]): {
   status: AdminGateStatus;
   me: ReturnType<typeof useMe>["me"];

@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/fetch";
+import { useApiResource } from "@/lib/hooks/use-api-resource";
 import type { ChatItem } from "@/components/ChatListItem";
 
 export interface DmPayload {
@@ -28,35 +27,6 @@ export interface DmPayload {
   };
 }
 
-export type DmStatus =
-  | "loading"
-  | "ready"
-  | "unauthenticated"
-  | "notFound"
-  | "error";
-
-export function useDm(id: string | undefined): { data: DmPayload | null; status: DmStatus } {
-  const [data, setData] = useState<DmPayload | null>(null);
-  const [status, setStatus] = useState<DmStatus>("loading");
-
-  useEffect(() => {
-    if (!id) return;
-    let mounted = true;
-    setStatus("loading");
-    setData(null);
-    apiFetch(`/api/dm/${encodeURIComponent(id)}`)
-      .then(async (r) => {
-        if (!mounted) return;
-        if (r.status === 401) { setStatus("unauthenticated"); return; }
-        if (r.status === 404) { setStatus("notFound"); return; }
-        if (!r.ok) throw new Error(`/api/dm/${id} ${r.status}`);
-        const j = (await r.json()) as DmPayload;
-        setData(j);
-        setStatus("ready");
-      })
-      .catch(() => mounted && setStatus("error"));
-    return () => { mounted = false; };
-  }, [id]);
-
-  return { data, status };
+export function useDm(id: string | undefined) {
+  return useApiResource<DmPayload>(id ? `/api/dm/${encodeURIComponent(id)}` : null);
 }

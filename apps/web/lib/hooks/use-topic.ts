@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/fetch";
+import { useApiResource } from "@/lib/hooks/use-api-resource";
 import type { ChatItem } from "@/components/ChatListItem";
 
 export interface TopicPayload {
@@ -40,30 +39,6 @@ export interface TopicPayload {
   canReply: boolean;
 }
 
-export type TopicStatus = "loading" | "ready" | "unauthenticated" | "notFound" | "error";
-
-export function useTopic(slug: string | undefined): { data: TopicPayload | null; status: TopicStatus } {
-  const [data, setData] = useState<TopicPayload | null>(null);
-  const [status, setStatus] = useState<TopicStatus>("loading");
-
-  useEffect(() => {
-    if (!slug) return;
-    let mounted = true;
-    setStatus("loading");
-    setData(null);
-    apiFetch(`/api/topic/${encodeURIComponent(slug)}`)
-      .then(async (r) => {
-        if (!mounted) return;
-        if (r.status === 401) { setStatus("unauthenticated"); return; }
-        if (r.status === 404) { setStatus("notFound"); return; }
-        if (!r.ok) throw new Error(`/api/topic/${slug} ${r.status}`);
-        const j = (await r.json()) as TopicPayload;
-        setData(j);
-        setStatus("ready");
-      })
-      .catch(() => mounted && setStatus("error"));
-    return () => { mounted = false; };
-  }, [slug]);
-
-  return { data, status };
+export function useTopic(slug: string | undefined) {
+  return useApiResource<TopicPayload>(slug ? `/api/topic/${encodeURIComponent(slug)}` : null);
 }
