@@ -8,7 +8,15 @@ const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
   skipTrailingSlashRedirect: true,
-  allowedDevOrigins: ["100.*", "192.168.*", "10.*", "*.local", "*.ts.net"],
+  allowedDevOrigins: [
+    "100.*",
+    "192.168.*",
+    "10.*",
+    "*.local",
+    "*.ts.net",
+    "*.*.ts.net",
+    "clockworkpi.tail78b0d3.ts.net",
+  ],
   transpilePackages: ["@legends/db", "@legends/shared", "@legends/crypto"],
   serverExternalPackages: ["postgres", "ioredis"],
   // Tell Next.js standalone tracing to root at the monorepo root so it can
