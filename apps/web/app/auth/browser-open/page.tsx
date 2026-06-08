@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 export default function BrowserOpenPage() {
+  return (
+    <Suspense fallback={<div className="h-dvh bg-bg" />}>
+      <BrowserOpenInner />
+    </Suspense>
+  );
+}
+
+function BrowserOpenInner() {
   const params = useSearchParams();
   const token = params.get("token") ?? "";
   const verifyUrl = token ? `/auth/callback?token=${encodeURIComponent(token)}` : null;
