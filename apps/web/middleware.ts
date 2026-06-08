@@ -17,6 +17,7 @@ const PUBLIC_PATHS = [
   "/api/auth/landing-info",
   "/api/auth/telegram-register",
   "/api/auth/telegram-login",
+  "/api/branding",
   "/api/register-config",
   "/api/invite-check",
   "/api/user/email-link/verify",
