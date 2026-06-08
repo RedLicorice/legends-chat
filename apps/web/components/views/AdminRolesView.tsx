@@ -8,7 +8,7 @@ export function AdminRolesView() {
   const { data, status } = useAdminRoles();
 
   return (
-    <AdminPanel status={status} errorMessage="Failed to load roles. Try refreshing.">
+    <AdminPanel status={status} hasData={!!data} errorMessage="Failed to load roles. Try refreshing.">
       {data && (
         <main className="flex-1 p-4 sm:p-8">
           <h1 className="mb-2 text-2xl font-semibold">Roles</h1>

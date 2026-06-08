@@ -10,7 +10,8 @@
     "lint": "pnpm -r lint",
     "db:generate": "pnpm --filter @legends/db generate",
     "db:migrate": "pnpm --filter @legends/db migrate",
-    "db:seed": "pnpm --filter @legends/db seed"
+    "db:seed": "pnpm --filter @legends/db seed",
+    "dev:login": "tsx scripts/dev-login.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

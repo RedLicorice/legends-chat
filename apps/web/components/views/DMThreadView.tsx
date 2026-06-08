@@ -15,7 +15,7 @@ export function DMThreadView({ id }: { id: string | undefined }) {
     }
   }, [status]);
 
-  if (status === "loading" || status === "unauthenticated" || !id) {
+  if ((!data && status === "loading") || status === "unauthenticated" || !id) {
     return <PWASplash />;
   }
 

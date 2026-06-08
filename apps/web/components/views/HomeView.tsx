@@ -25,9 +25,7 @@ export function HomeView() {
   }, [router, listStatus, data?.homeTopicSlug]);
 
   if (
-    meStatus === "loading" ||
     meStatus === "unauthenticated" ||
-    listStatus === "loading" ||
     !me ||
     !data ||
     data.homeTopicSlug

@@ -14,7 +14,7 @@ export function AdminSettingsView() {
     : null;
 
   return (
-    <AdminPanel status={status} errorMessage="Failed to load settings. Try refreshing.">
+    <AdminPanel status={status} hasData={!!data} errorMessage="Failed to load settings. Try refreshing.">
       {data && settings && (
         <main className="flex-1 p-8 max-w-xl">
           <h1 className="mb-2 text-2xl font-semibold">Community Settings</h1>

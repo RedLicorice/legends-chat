@@ -23,13 +23,7 @@ export function SettingsView() {
     }
   }, [meStatus, settingsStatus]);
 
-  if (
-    meStatus === "loading" ||
-    meStatus === "unauthenticated" ||
-    settingsStatus === "loading" ||
-    settingsStatus === "unauthenticated" ||
-    !data
-  ) {
+  if (meStatus === "unauthenticated" || settingsStatus === "unauthenticated" || !data) {
     return <PWASplash />;
   }
 

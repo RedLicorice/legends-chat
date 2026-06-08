@@ -11,6 +11,7 @@ export function AdminOverviewView() {
   return (
     <AdminPanel
       status={status}
+      hasData={!!data}
       errorMessage="Failed to load admin overview. Try refreshing."
       forbiddenMessage="You don't have permission to view the admin dashboard."
     >

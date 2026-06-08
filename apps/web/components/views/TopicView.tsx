@@ -18,10 +18,7 @@ export function TopicView({ slug }: { slug: string | undefined }) {
     }
   }, [status]);
 
-  if (status === "loading" || status === "unauthenticated" || !slug) {
-    return <PWASplash />;
-  }
-
+  // Hard-state UI for terminal failures.
   if (status === "notFound") {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 bg-bg p-6 text-center text-fg">
@@ -38,14 +35,18 @@ export function TopicView({ slug }: { slug: string | undefined }) {
       </div>
     );
   }
-
-  if (status === "error" || !data) {
+  if (status === "error" && !data) {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 bg-bg p-6 text-center text-fg">
         <h1 className="text-xl font-semibold">Something went wrong</h1>
         <p className="text-sm text-muted">Failed to load this topic. Try refreshing.</p>
       </div>
     );
+  }
+  // First load (no prior data) — show splash. While re-fetching for a new
+  // slug, keep rendering the previous topic so the UI never flashes black.
+  if (!data || status === "unauthenticated" || !slug) {
+    return <PWASplash />;
   }
 
   return (

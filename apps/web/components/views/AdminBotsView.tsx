@@ -8,7 +8,7 @@ export function AdminBotsView() {
   const { data, status } = useAdminBots();
 
   return (
-    <AdminPanel status={status} errorMessage="Failed to load bots. Try refreshing.">
+    <AdminPanel status={status} hasData={!!data} errorMessage="Failed to load bots. Try refreshing.">
       {data && (
         <main className="flex-1 p-4 sm:p-8">
           <h1 className="mb-2 text-2xl font-semibold">Bots</h1>
