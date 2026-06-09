@@ -127,17 +127,16 @@ export function ChatListPane({ initialItems, currentUserId, activeHref }: ChatLi
     }
   }, [initialItems]);
 
-  // ── Filter sync with `?filter=` ────────────────────────────────────────────
+  // Filter is a Home-anchored action: jumping to "Bots" from inside a topic
+  // or DM must go to `/?filter=bots`, not append the query to the current
+  // route. router.push (not replace) so the user can Back out cleanly.
   const filter = parseFilter(searchParams?.get("filter") ?? null);
   const setFilter = useCallback(
     (next: ChatListFilter) => {
-      const params = new URLSearchParams(searchParams?.toString() ?? "");
-      if (next === "all") params.delete("filter");
-      else params.set("filter", next);
-      const qs = params.toString();
-      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+      const target = next === "all" ? "/" : `/?filter=${next}`;
+      router.push(target, { scroll: false });
     },
-    [router, searchParams],
+    [router],
   );
 
   // ── Socket bumps ──────────────────────────────────────────────────────────
