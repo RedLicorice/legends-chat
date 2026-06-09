@@ -10,7 +10,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { id } = await params;
   const [user] = await db
-    .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl, role: users.role })
+    .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl, role: users.role, bio: users.bio })
     .from(users)
     .where(eq(users.id, id))
     .limit(1);

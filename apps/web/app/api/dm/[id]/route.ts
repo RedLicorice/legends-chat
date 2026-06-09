@@ -8,7 +8,7 @@ import { listChatItems } from "@/lib/chat-list";
 export const dynamic = "force-dynamic";
 
 // GET /api/dm/[id]
-// Returns the payload needed to render <ChatLayout> + <DmThreadPane> on the
+// Returns the payload needed to render <ChatPane mode={kind:"dm"}> via DMThreadView
 // client. Mirrors the SSR gates the previous page.tsx performed:
 //   - 401 if unauthenticated (defence-in-depth on top of middleware)
 //   - 404 if the conversation does not exist

@@ -56,6 +56,7 @@ export const users = pgTable(
     bannerUrl: text("banner_url"),
     roleExpiresAt: timestamp("role_expires_at", { withTimezone: true }),
     roleFallback: text("role_fallback"),
+    bio: text("bio"),
   },
   (t) => ({
     telegramUserIdIdx: uniqueIndex("users_telegram_user_id_idx").on(t.telegramUserId).where(sql`${t.telegramUserId} IS NOT NULL`),

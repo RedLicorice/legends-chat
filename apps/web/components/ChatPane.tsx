@@ -9,7 +9,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
-import { io, type Socket } from "socket.io-client";
 import { WS_EVENTS, PERMISSIONS } from "@legends/shared";
 import { cn } from "@/lib/cn";
 import { GifPicker } from "@/components/GifPicker";
@@ -21,12 +20,13 @@ import { SearchModal } from "@/components/SearchModal";
 import { ThreadPanel } from "@/components/ThreadPanel";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { TopicInfoModal } from "@/components/TopicInfoModal";
-import { toMatrixRoomId, toMatrixUserId } from "@/lib/crypto-matrix";
-import type { EncryptedEnvelope, IncomingEnvelope } from "@/lib/crypto";
+import type { IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
 import { useTopicHashtags } from "@/hooks/useTopicHashtags";
 import type { TopicBootstrapHashtag, TopicBootstrapMember } from "@legends/shared";
+import type { ChatSource } from "@/lib/chat-source";
+import type { ChatCrypto } from "@/lib/chat-crypto";
 
 interface Attachment {
   type: "image" | "gif" | "file";
@@ -106,27 +106,43 @@ interface SidebarTopicUpdate {
   at: string;
 }
 
-interface TopicViewProps {
+export interface ChatPaneTopicMode {
+  kind: "topic";
   topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl?: string | null; bannerUrl?: string | null; description?: string | null };
-  currentUser: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mute: { reason: string; expiresAt: string | null } | null;
   giphyEnabled?: boolean;
   communityName?: string | null;
   communityIconUrl?: string | null;
+  canPost: boolean;
+  canReply: boolean;
+  initialMembers: TopicBootstrapMember[];
+  initialHashtags: TopicBootstrapHashtag[];
+  onSidebarUpdate?: (update: SidebarTopicUpdate) => void;
+}
+
+export interface ChatPaneDmMode {
+  kind: "dm";
+  conversation: {
+    id: string;
+    isE2ee: boolean;
+    e2eeRoomId: string | null;
+    state: "pending" | "accepted" | "blocked";
+    peer: { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null } | null;
+  };
+}
+
+export type ChatPaneMode = ChatPaneTopicMode | ChatPaneDmMode;
+
+interface ChatPaneProps {
+  user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
+  mode: ChatPaneMode;
+  source: ChatSource;
+  chatCrypto: ChatCrypto | null;
   highlightMessageId?: string;
   onMenuOpen?: () => void;
   onConnectionChange?: (connected: boolean) => void;
   showExpandSidebar?: boolean;
   onExpandSidebar?: () => void;
-  onSidebarUpdate?: (update: SidebarTopicUpdate) => void;
-  canPost: boolean;
-  canReply: boolean;
-  /** Members list from the topic bootstrap. Live updates from
-   *  TOPIC_MEMBERS_UPDATED still patch this in-place. */
-  initialMembers: TopicBootstrapMember[];
-  /** Hashtag cloud from the topic bootstrap. HASHTAG_CLOUD_UPDATE keeps it
-   *  fresh once mounted. */
-  initialHashtags: TopicBootstrapHashtag[];
 }
 
 async function processLinks(text: string): Promise<string> {
@@ -184,8 +200,28 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate, canPost, canReply, initialMembers, initialHashtags }: TopicViewProps) {
-  const draftKey = `legends-draft-${topic.id}`;
+export function ChatPane({ user: currentUser, mode, source, chatCrypto, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar }: ChatPaneProps) {
+  const isTopicMode = mode.kind === "topic";
+  const isDmMode = mode.kind === "dm";
+  const topic = isTopicMode ? mode.topic : null;
+  const dmConversation = isDmMode ? mode.conversation : null;
+  const topicMute = isTopicMode ? mode.mute : null;
+  const giphyEnabled = isTopicMode ? mode.giphyEnabled : undefined;
+  const communityName = isTopicMode ? mode.communityName : null;
+  const communityIconUrl = isTopicMode ? mode.communityIconUrl : null;
+  const canPost = isTopicMode ? mode.canPost : dmConversation?.state === "accepted";
+  const canReply = isTopicMode ? mode.canReply : false;
+  const initialMembers = isTopicMode ? mode.initialMembers : [];
+  const initialHashtags = isTopicMode ? mode.initialHashtags : [];
+  const onSidebarUpdate = isTopicMode ? mode.onSidebarUpdate : undefined;
+
+  const roomKey = source.roomKey;
+  const caps = source.capabilities;
+  const isE2ee = isTopicMode ? topic!.isE2ee : !!dmConversation?.isE2ee;
+  const isFeed = isTopicMode ? topic!.isFeed : false;
+  const headerTitle = isTopicMode ? topic!.title : (dmConversation?.peer?.displayName ?? "Conversation");
+  const conversationKey = isTopicMode ? topic!.id : dmConversation!.id;
+  const draftKey = `legends-draft-${conversationKey}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [reactions, setReactions] = useState<ReactionRow[]>([]);
@@ -222,24 +258,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [hashtagFilter, setHashtagFilter] = useState<string | null>(null);
   const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
   const [filteredLoading, setFilteredLoading] = useState(false);
-  const [e2eeReady, setE2eeReady] = useState(!topic.isE2ee);
-  // Megolm room id ("!<topicId>:legends.local") + room member sets fetched from
-  // /api/crypto/rooms/[roomId]/members. Empty until first fetch resolves.
-  const e2eeRoomId = useMemo(() => topic.isE2ee ? toMatrixRoomId(topic.id) : null, [topic.id, topic.isE2ee]);
+  const [e2eeReady, setE2eeReady] = useState(!isE2ee);
+  const e2eeRoomId = roomKey;
   const [memberUserIds, setMemberUserIds] = useState<string[]>([]);
   const [adminUserIds, setAdminUserIds] = useState<string[]>([]);
-  /** Display names for the admin recipient banner. Keyed by userId. */
   const [adminDisplayNames, setAdminDisplayNames] = useState<Map<string, string>>(new Map());
   const memberUserIdsRef = useRef<string[]>([]);
   useEffect(() => { memberUserIdsRef.current = memberUserIds; }, [memberUserIds]);
-  // Mirror e2eeRoomId in a ref so the long-lived socket listener can read the
-  // current value without re-subscribing on every dependency change.
   const e2eeRoomIdRef = useRef<string | null>(e2eeRoomId);
   useEffect(() => { e2eeRoomIdRef.current = e2eeRoomId; }, [e2eeRoomId]);
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const cryptoRef = useRef<typeof import("@/lib/crypto") | null>(null);
+  const chatCryptoRef = useRef<ChatCrypto | null>(chatCrypto);
+  useEffect(() => { chatCryptoRef.current = chatCrypto; }, [chatCrypto]);
   const cryptoInitPromise = useRef<Promise<void> | null>(null);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<NonNullable<ChatSource["socket"]> | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
@@ -251,9 +282,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [enterSends, setEnterSends] = useState<boolean>(() => {
-    if (typeof window === "undefined") return !topic.isFeed;
+    if (typeof window === "undefined") return !isFeed;
     const saved = localStorage.getItem("legends-enter-sends");
-    return saved !== null ? saved === "true" : !topic.isFeed;
+    return saved !== null ? saved === "true" : !isFeed;
   });
   const [contextMenu, setContextMenu] = useState<{ msg: Message; kbOffset: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -269,7 +300,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
 
-  const { tags: topicTags } = useTopicHashtags(topic.id, socketRef.current, initialHashtags);
+  const { tags: topicTags } = useTopicHashtags(isTopicMode ? topic!.id : "", source.socket, initialHashtags);
   const { symbols, refetch: refetchSymbols } = useSymbols();
 
   const canCreatePoll = currentUser.role !== "user";
@@ -326,7 +357,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   function deleteSelected() {
     for (const id of selectedIds) {
-      socketRef.current?.emit(WS_EVENTS.MESSAGE_DELETE_REQ, { messageId: id, topicId: topic.id });
+      void source.remove?.(id);
     }
     setSelectedIds(new Set());
   }
@@ -353,12 +384,14 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   useEffect(() => { localStorage.setItem(draftKey, draft); }, [draft, draftKey]);
   useEffect(() => { localStorage.setItem("legends-enter-sends", String(enterSends)); }, [enterSends]);
-  useEffect(() => { localStorage.setItem("lc-last-topic", topic.slug); }, [topic.slug]);
+  useEffect(() => {
+    if (isTopicMode && topic) localStorage.setItem("lc-last-topic", topic.slug);
+  }, [isTopicMode, topic]);
 
   // Drag-and-drop: document-level enter/leave counter to avoid flicker
   // between child elements. Overlay handles the actual drop routing.
   useEffect(() => {
-    if (!canAttach || !canPost || mute) return;
+    if (!canAttach || !canPost || topicMute) return;
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
     function onEnter(e: DragEvent) {
       if (!hasFiles(e)) return;
@@ -383,7 +416,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       window.removeEventListener("dragleave", onLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [canAttach, canPost, mute]);
+  }, [canAttach, canPost, topicMute]);
 
   // Prevent the browser from opening the file when dropped outside the overlay zones.
   useEffect(() => {
@@ -405,23 +438,17 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     };
   }, []);
 
-  // ── Megolm crypto session bootstrap (idempotent) ──────────────────────────
-  // Initializes the OlmMachine singleton, drains the initial KeysUpload, and
-  // toggles `e2eeReady` on success. On bootstrap failure (e.g. no IndexedDB,
-  // no entropy, server rejects keys upload), surface the setup gate so the
-  // user can retry from the banner. Mirrors `DmThreadPane.ensureCrypto`.
-  const ensureCrypto = useCallback(async (): Promise<typeof import("@/lib/crypto") | null> => {
-    if (cryptoRef.current && e2eeReady) return cryptoRef.current;
+  const ensureCrypto = useCallback(async (): Promise<ChatCrypto | null> => {
+    const cc = chatCryptoRef.current;
+    if (!cc) return null;
+    if (e2eeReady) return cc;
     if (cryptoInitPromise.current) {
       await cryptoInitPromise.current;
-      return cryptoRef.current;
+      return cc;
     }
     cryptoInitPromise.current = (async () => {
       try {
-        const mod = await import("@/lib/crypto");
-        cryptoRef.current = mod;
-        await mod.initCrypto(currentUser.id);
-        await mod.bootstrap();
+        await cc.init(currentUser.id);
         setE2eeReady(true);
         setE2eeSetupNeeded(false);
         try { localStorage.setItem(`legends-crypto-bootstrapped:${currentUser.id}`, "1"); } catch {}
@@ -434,22 +461,16 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       }
     })();
     try { await cryptoInitPromise.current; } catch { return null; }
-    return cryptoRef.current;
+    return cc;
   }, [currentUser.id, e2eeReady]);
 
-  // Auto-init on mount for E2EE topics.
   useEffect(() => {
-    if (!topic.isE2ee) return;
+    if (!isE2ee) return;
     ensureCrypto().catch(() => {});
-  }, [topic.isE2ee, ensureCrypto]);
+  }, [isE2ee, ensureCrypto]);
 
-  // Fetch room member list (members ∪ admins) for E2EE topics. We also use
-  // /api/topics/<id>/members to resolve admin display names for the banner
-  // — admins may not be present in topic_members but they ARE auto-added to
-  // the Megolm room. If they're not in topic_members the banner falls back
-  // to the userId (we document this so cleanup task can revisit).
   const refreshRoomMembers = useCallback(async () => {
-    if (!topic.isE2ee || !e2eeRoomId) return;
+    if (!isTopicMode || !isE2ee || !e2eeRoomId) return;
     try {
       const r = await apiFetch(`/api/crypto/rooms/${encodeURIComponent(e2eeRoomId)}/members`);
       if (!r.ok) return;
@@ -457,7 +478,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       setMemberUserIds(d.user_ids);
       setAdminUserIds(d.admin_user_ids);
     } catch { /* network blip — retry on next member change */ }
-  }, [topic.isE2ee, e2eeRoomId]);
+  }, [isTopicMode, isE2ee, e2eeRoomId]);
 
   useEffect(() => {
     refreshRoomMembers();
@@ -514,182 +535,147 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
   }, [contextMenu]);
 
-  // Ctrl+K for search
   useEffect(() => {
+    if (!caps.members) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); setShowSearch(true); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  const wsUrl = typeof window !== "undefined" ? window.location.origin : "";
+  }, [caps.members]);
 
   useEffect(() => {
     let active = true;
-    const socket = io(wsUrl, { withCredentials: true, transports: ["polling", "websocket"] });
-    socketRef.current = socket;
-    setSocket(socket);
-
-    socket.on("connect", () => {
-      if (!active) return;
-      setConnected(true);
-      onConnectionChange?.(true);
-      socket.emit(
-        WS_EVENTS.TOPIC_JOIN,
-        topic.id,
-        (res: { ok: boolean; messages?: Message[]; reactions?: ReactionRow[]; onlineUserIds?: string[]; myPollVotes?: Record<string, string[]>; error?: string }) => {
-          if (!active) return;
-          if (res.ok) {
-            if (res.messages) {
-              setMessages(res.messages);
-              // Seed the pending Set with every E2EE row so the periodic
-              // drain picks them up regardless of when keys arrive.
-              for (const m of res.messages) {
-                if (m.ciphertextJson && !decryptedRef.current.has(m.id)) {
-                  pendingDecryptRef.current.add(m.id);
-                }
-              }
+    const unsubscribe = source.subscribe({
+      onConnect: (initial) => {
+        if (!active) return;
+        setConnected(true);
+        onConnectionChange?.(true);
+        if (initial.messages) {
+          setMessages(initial.messages);
+          for (const m of initial.messages) {
+            if (m.ciphertextJson && !decryptedRef.current.has(m.id)) {
+              pendingDecryptRef.current.add(m.id);
             }
-            if (res.reactions) setReactions(res.reactions);
-            if (res.onlineUserIds && !currentUser.presenceOptOut) setOnlineUsers(new Set(res.onlineUserIds));
-            if (res.myPollVotes) setMyPollVotes(res.myPollVotes);
           }
-        },
-      );
-    });
-    socket.on("disconnect", () => { if (active) { setConnected(false); onConnectionChange?.(false); } });
-    socket.on(WS_EVENTS.MESSAGE_NEW, (msg: Message) => {
-      if (!active || msg.topicId !== topic.id) return;
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-      // E2EE rows: enqueue for the drain interval to decrypt as soon as we
-      // either already have the room key or get it on the next pollSync.
-      if (msg.ciphertextJson && !decryptedRef.current.has(msg.id)) {
-        pendingDecryptRef.current.add(msg.id);
-      }
-      if (msg.replyToMessageId && topic.isFeed) {
-        setExpandedThreads((prev) => new Set([...prev, String(msg.replyToMessageId)]));
-      }
-    });
-    socket.on(WS_EVENTS.POLL_UPDATED, (d: { pollId: string; options: PollOption[]; totalVotes: number; isClosed: boolean }) => {
-      if (!active) return;
-      setMessages((prev) => prev.map((m) =>
-        m.poll?.id === d.pollId
-          ? { ...m, poll: { ...m.poll, options: d.options, totalVotes: d.totalVotes, isClosed: d.isClosed } }
-          : m,
-      ));
-    });
-    socket.on(WS_EVENTS.REACTION_ADD, (r: ReactionRow) => {
-      if (!active) return;
-      setReactions((prev) =>
-        prev.some((x) => x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)
-          ? prev
-          : [...prev, r],
-      );
-    });
-    socket.on(WS_EVENTS.REACTION_REMOVE, (r: ReactionRow) => {
-      if (!active) return;
-      setReactions((prev) =>
-        prev.filter((x) => !(x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)),
-      );
-    });
-    socket.on(WS_EVENTS.MESSAGE_EDIT, (updated: Message) => {
-      if (!active || updated.topicId !== topic.id) return;
-      setMessages((prev) => prev.map((m) => m.id === updated.id
-        ? { ...m, text: updated.text, editedAt: updated.editedAt, attachments: updated.attachments, ciphertextJson: updated.ciphertextJson ?? m.ciphertextJson }
-        : m));
-      // On E2EE rows, drop any cached plaintext so the batch decrypt effect
-      // picks up the new envelope. (For optimistic edits by self, the cache
-      // was repopulated synchronously by submitEdit's ack — that cache hit
-      // is overwritten here, then re-populated by the decrypt batch.)
-      if (updated.ciphertextJson) {
-        setDecryptedTexts((prev) => {
-          if (!prev.has(updated.id)) return prev;
-          const next = new Map(prev);
-          next.delete(updated.id);
-          return next;
-        });
-        // Re-enqueue so the drain picks up the new envelope.
-        pendingDecryptRef.current.add(updated.id);
-      }
-    });
-    socket.on(WS_EVENTS.MESSAGE_DELETE, (d: { id: string; topicId: string }) => {
-      if (!active || d.topicId !== topic.id) return;
-      setMessages((prev) => prev.filter((m) => m.id !== d.id));
-      setReactions((prev) => prev.filter((r) => r.messageId !== d.id));
-      pendingDecryptRef.current.delete(d.id);
-    });
-    socket.on(WS_EVENTS.PRESENCE_UPDATE, (d: { userId: string; online: boolean }) => {
-      if (!active || currentUser.presenceOptOut) return;
-      setOnlineUsers((prev) => {
-        const next = new Set(prev);
-        if (d.online) next.add(d.userId); else next.delete(d.userId);
-        return next;
-      });
-    });
-    socket.on(WS_EVENTS.SIDEBAR_UPDATE, (update: SidebarTopicUpdate) => {
-      if (!active) return;
-      onSidebarUpdate?.(update);
-    });
-    socket.on(WS_EVENTS.SYMBOLS_UPDATE, () => {
-      refetchSymbols();
-    });
-    // E2EE topic key rotation. Server fires this on any topic_members insert
-    // (apps/ws → REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED). On receipt we drop the
-    // current Megolm outbound session and re-share to the new member set so
-    // the new joiner can read messages from now on. Without this we'd only
-    // rotate at the next send, leaving them with a "(encrypted)" gap.
-    //
-    // Note: cryptoRef may be null if the viewer hasn't bootstrapped E2EE on
-    // this device yet — in that case there's no session to invalidate, and
-    // refreshing member state is enough; the next send path will share the
-    // session with the updated member list.
-    socket.on(WS_EVENTS.TOPIC_MEMBERS_UPDATED, async (payload: {
-      topicId: string;
-      action: "join" | "leave";
-      affectedUserId: string;
-      memberUserIds: string[];
-      adminUserIds: string[];
-    }) => {
-      if (!active || payload.topicId !== topic.id) return;
-      setMemberUserIds(Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds])).sort());
-      setAdminUserIds(payload.adminUserIds);
-      const roomId = e2eeRoomIdRef.current;
-      const mod = cryptoRef.current;
-      if (!roomId || !mod) return;
-      const fullMembers = Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds]));
-      try {
-        await mod.onMembershipChange(roomId, payload.action, payload.affectedUserId, fullMembers);
-      } catch (err) {
-        console.error("[e2ee] onMembershipChange failed", { topicId: payload.topicId, err });
-      }
-    });
-
-    let refreshing = false;
-    socket.on("connect_error", async (err: Error) => {
-      if (!active) return;
-      const msg = err?.message ?? "";
-      if (msg === "no auth cookie" || msg === "auth failed" || msg === "token revoked") {
-        if (refreshing) return;
-        refreshing = true;
-        const ok = await fetch("/api/auth/refresh", { method: "POST" }).then((r) => r.ok).catch(() => false);
-        refreshing = false;
-        if (!ok && typeof window !== "undefined") {
-          window.location.replace("/login");
         }
-        // Socket.IO auto-retries; next attempt will use the refreshed cookie.
-      }
+        if (initial.reactions) setReactions(initial.reactions);
+        if (initial.onlineUserIds && !currentUser.presenceOptOut) setOnlineUsers(new Set(initial.onlineUserIds));
+        if (initial.myPollVotes) setMyPollVotes(initial.myPollVotes);
+      },
+      onDisconnect: () => { if (active) { setConnected(false); onConnectionChange?.(false); } },
+      onNew: (msg) => {
+        if (!active) return;
+        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        if (msg.ciphertextJson && !decryptedRef.current.has(msg.id)) {
+          pendingDecryptRef.current.add(msg.id);
+        }
+        if (msg.replyToMessageId && isFeed) {
+          setExpandedThreads((prev) => new Set([...prev, String(msg.replyToMessageId)]));
+        }
+      },
+      onEdit: (updated) => {
+        if (!active) return;
+        setMessages((prev) => prev.map((m) => m.id === updated.id
+          ? { ...m, text: updated.text, editedAt: updated.editedAt, attachments: updated.attachments, ciphertextJson: updated.ciphertextJson ?? m.ciphertextJson }
+          : m));
+        if (updated.ciphertextJson) {
+          setDecryptedTexts((prev) => {
+            if (!prev.has(updated.id)) return prev;
+            const next = new Map(prev);
+            next.delete(updated.id);
+            return next;
+          });
+          pendingDecryptRef.current.add(updated.id);
+        }
+      },
+      onDelete: (id) => {
+        if (!active) return;
+        setMessages((prev) => prev.filter((m) => m.id !== id));
+        setReactions((prev) => prev.filter((r) => r.messageId !== id));
+        pendingDecryptRef.current.delete(id);
+      },
+      onReactionAdd: (r) => {
+        if (!active) return;
+        setReactions((prev) =>
+          prev.some((x) => x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)
+            ? prev
+            : [...prev, r],
+        );
+      },
+      onReactionRemove: (r) => {
+        if (!active) return;
+        setReactions((prev) =>
+          prev.filter((x) => !(x.messageId === r.messageId && x.userId === r.userId && x.emojiKey === r.emojiKey)),
+        );
+      },
     });
+    socketRef.current = source.socket;
+
+    let pollOff: (() => void) | undefined;
+    let presenceOff: (() => void) | undefined;
+    let sidebarOff: (() => void) | undefined;
+    let symbolsOff: (() => void) | undefined;
+    let membersOff: (() => void) | undefined;
+
+    if (isTopicMode) {
+      const sock = source.socket;
+      if (sock) {
+        const onPoll = (d: { pollId: string; options: PollOption[]; totalVotes: number; isClosed: boolean }) => {
+          if (!active) return;
+          setMessages((prev) => prev.map((m) =>
+            m.poll?.id === d.pollId
+              ? { ...m, poll: { ...m.poll, options: d.options, totalVotes: d.totalVotes, isClosed: d.isClosed } }
+              : m,
+          ));
+        };
+        const onPresence = (d: { userId: string; online: boolean }) => {
+          if (!active || currentUser.presenceOptOut) return;
+          setOnlineUsers((prev) => {
+            const next = new Set(prev);
+            if (d.online) next.add(d.userId); else next.delete(d.userId);
+            return next;
+          });
+        };
+        const onSidebar = (update: SidebarTopicUpdate) => { if (active) onSidebarUpdate?.(update); };
+        const onSymbols = () => { refetchSymbols(); };
+        const onMembers = async (payload: { topicId: string; action: "join" | "leave"; affectedUserId: string; memberUserIds: string[]; adminUserIds: string[] }) => {
+          if (!active || !topic || payload.topicId !== topic.id) return;
+          setMemberUserIds(Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds])).sort());
+          setAdminUserIds(payload.adminUserIds);
+          const cc = chatCryptoRef.current;
+          if (!cc?.onMembershipChange) return;
+          const fullMembers = Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds]));
+          try {
+            await cc.onMembershipChange(payload.action, payload.affectedUserId, fullMembers);
+          } catch (err) {
+            console.error("[e2ee] onMembershipChange failed", { topicId: payload.topicId, err });
+          }
+        };
+        sock.on(WS_EVENTS.POLL_UPDATED, onPoll);
+        sock.on(WS_EVENTS.PRESENCE_UPDATE, onPresence);
+        sock.on(WS_EVENTS.SIDEBAR_UPDATE, onSidebar);
+        sock.on(WS_EVENTS.SYMBOLS_UPDATE, onSymbols);
+        sock.on(WS_EVENTS.TOPIC_MEMBERS_UPDATED, onMembers);
+        pollOff = () => sock.off(WS_EVENTS.POLL_UPDATED, onPoll);
+        presenceOff = () => sock.off(WS_EVENTS.PRESENCE_UPDATE, onPresence);
+        sidebarOff = () => sock.off(WS_EVENTS.SIDEBAR_UPDATE, onSidebar);
+        symbolsOff = () => sock.off(WS_EVENTS.SYMBOLS_UPDATE, onSymbols);
+        membersOff = () => sock.off(WS_EVENTS.TOPIC_MEMBERS_UPDATED, onMembers);
+      }
+    }
 
     return () => {
       active = false;
-      setSocket(null);
-      socket.emit(WS_EVENTS.TOPIC_LEAVE, topic.id);
-      socket.off(WS_EVENTS.SYMBOLS_UPDATE);
-      socket.off("connect_error");
-      socket.disconnect();
+      pollOff?.();
+      presenceOff?.();
+      sidebarOff?.();
+      symbolsOff?.();
+      membersOff?.();
+      unsubscribe();
+      socketRef.current = null;
     };
-  }, [topic.id, wsUrl]);
+  }, [source, conversationKey, isFeed, isTopicMode, topic]);
 
   // Scroll to bottom when keyboard opens/closes so latest messages stay visible
   useEffect(() => {
@@ -718,13 +704,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         target.scrollIntoView({ behavior: "smooth", block: "center" });
         setHighlightedId(highlightMessageId);
         setTimeout(() => setHighlightedId(null), 2500);
-        if (last) socketRef.current?.emit(WS_EVENTS.TOPIC_READ, { topicId: topic.id, lastReadMessageId: last.id });
+        if (last) source.markRead?.(last.id);
         return;
       }
     }
     el.scrollTop = el.scrollHeight;
-    if (last) socketRef.current?.emit(WS_EVENTS.TOPIC_READ, { topicId: topic.id, lastReadMessageId: last.id });
-  }, [messages, topic.id, highlightMessageId]);
+    if (last) source.markRead?.(last.id);
+  }, [messages, source, highlightMessageId]);
 
   // Members ride on the topic bootstrap (TOPIC_JOIN ack). When the slug
   // changes, swap to the new initial list. Live deltas land via
@@ -734,7 +720,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   }, [initialMembers]);
 
   useEffect(() => {
-    if (!hashtagFilter) {
+    if (!hashtagFilter || !isTopicMode || !topic || !caps.hashtags) {
       setFilteredMessages([]);
       return;
     }
@@ -744,12 +730,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       .then((data: Message[]) => setFilteredMessages(data))
       .catch(() => setFilteredMessages([]))
       .finally(() => setFilteredLoading(false));
-  }, [hashtagFilter, topic.id]);
+  }, [hashtagFilter, isTopicMode, topic, caps.hashtags]);
 
   const toggleReaction = useCallback((messageId: string, emojiKey: string) => {
-    socketRef.current?.emit(WS_EVENTS.REACTION_TOGGLE, { messageId, emojiKey });
+    void source.react?.(messageId, emojiKey);
     setPickerFor(null);
-  }, []);
+  }, [source]);
 
   const handleKeyboardCallback = useCallback((msg: Message, callbackData: string) => {
     if (!msg.botId) return;
@@ -761,8 +747,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   }, []);
 
   const submitPoll = useCallback((data: { question: string; options: string[]; isAnonymous: boolean; allowsMultiple: boolean }) => {
+    if (!isTopicMode || !topic) return;
     socketRef.current?.emit(WS_EVENTS.POLL_CREATE, { topicId: topic.id, ...data });
-  }, [topic.id]);
+  }, [isTopicMode, topic]);
 
   const votePoll = useCallback((pollId: string, optionIds: string[]) => {
     socketRef.current?.emit(WS_EVENTS.POLL_VOTE, { pollId, optionIds }, (res: { ok: boolean; myVotes: string[] }) => {
@@ -801,8 +788,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   }, []);
 
   const deleteMessage = useCallback((messageId: string) => {
-    socketRef.current?.emit(WS_EVENTS.MESSAGE_DELETE_REQ, { messageId, topicId: topic.id });
-  }, [topic.id]);
+    void source.remove?.(messageId);
+  }, [source]);
 
   const startEdit = useCallback((m: Message, displayText: string) => {
     setEditingId(m.id);
@@ -816,73 +803,45 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   const submitEdit = useCallback(async (messageId: string) => {
     const text = editText.trim();
-    if (!text) return;
+    if (!text || !source.edit) return;
 
-    // E2EE topics: re-encrypt the new plaintext through the current Megolm
-    // session and ship the envelope to the server. The ws handler matches
-    // the branch against topic.isE2ee and replaces ciphertext_json on the
-    // row (keeping content_ciphertext empty per messages_payload_chk XOR).
-    if (topic.isE2ee) {
-      if (!e2eeRoomId) {
-        setE2eeError("Encrypted room not initialized.");
-        return;
-      }
-      const mod = cryptoRef.current ?? (await ensureCrypto());
-      if (!mod) {
+    if (isE2ee) {
+      const cc = chatCryptoRef.current ?? (await ensureCrypto());
+      if (!cc) {
         setE2eeError("Encryption not initialized.");
         return;
       }
       let envelope: Record<string, unknown>;
       try {
-        // Refresh + ensure room key fan-out before re-encrypt — matches the
-        // send-path safety net since there's no live member-change event.
         await refreshRoomMembers();
-        await mod.ensureRoomMembers(e2eeRoomId, memberUserIdsRef.current);
-        envelope = (await mod.encryptRoom(e2eeRoomId, text)) as unknown as Record<string, unknown>;
+        await cc.ensureSession(memberUserIdsRef.current);
+        envelope = (await cc.encrypt(text)) as unknown as Record<string, unknown>;
       } catch (err) {
         try {
-          await mod.pumpOutgoing();
-          envelope = (await mod.encryptRoom(e2eeRoomId, text)) as unknown as Record<string, unknown>;
+          await cc.pumpOutgoing();
+          envelope = (await cc.encrypt(text)) as unknown as Record<string, unknown>;
         } catch (err2) {
           console.error("[e2ee] edit encrypt failed", err2);
           setE2eeError("Encryption setup with peers in progress, try again in a moment.");
           return;
         }
       }
-      socketRef.current?.emit(
-        WS_EVENTS.MESSAGE_EDIT_REQ,
-        { messageId, topicId: topic.id, ciphertextJson: envelope },
-        (res: { ok: boolean; error?: string }) => {
-          if (res.ok) {
-            // Optimistically cache the new plaintext so we don't flash
-            // "(encrypted…)" while waiting for the MESSAGE_EDIT broadcast
-            // to round-trip and re-decrypt.
-            setDecryptedTexts((prev) => {
-              const next = new Map(prev);
-              next.set(messageId, text);
-              return next;
-            });
-            setEditingId(null);
-            setEditText("");
-          } else {
-            console.warn("edit failed", res.error);
-          }
-        },
-      );
+      await source.edit(messageId, { ciphertextJson: envelope });
+      setDecryptedTexts((prev) => {
+        const next = new Map(prev);
+        next.set(messageId, text);
+        return next;
+      });
+      setEditingId(null);
+      setEditText("");
       return;
     }
 
     const processed = await processLinks(text);
-
-    socketRef.current?.emit(
-      WS_EVENTS.MESSAGE_EDIT_REQ,
-      { messageId, topicId: topic.id, text: processed },
-      (res: { ok: boolean; error?: string }) => {
-        if (res.ok) { setEditingId(null); setEditText(""); }
-        else console.warn("edit failed", res.error);
-      },
-    );
-  }, [editText, topic.id, topic.isE2ee, e2eeRoomId, ensureCrypto, refreshRoomMembers]);
+    await source.edit(messageId, { text: processed });
+    setEditingId(null);
+    setEditText("");
+  }, [editText, isE2ee, ensureCrypto, refreshRoomMembers, source]);
 
   const replyCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -921,33 +880,29 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   // array on each tick — O(pending) vs O(messages).
   const pendingDecryptRef = useRef<Set<string>>(new Set());
 
-  // Build an IncomingEnvelope for `decryptRoom`. Sender id is mapped through
-  // `toMatrixUserId` — `decryptRoomEvent` cross-references this with the
-  // device that signed the to-device room key.
-  const toIncomingTopicEnvelope = useCallback((args: {
+  const toIncomingEnvelope = useCallback((args: {
     envelope: Record<string, unknown>;
     senderUserId: string | null;
     messageId: string;
     createdAt: string | Date;
-  }): IncomingEnvelope => ({
-    type: "m.room.encrypted",
-    sender: toMatrixUserId(args.senderUserId ?? currentUser.id),
-    content: args.envelope as unknown as EncryptedEnvelope,
-    event_id: `$${args.messageId}`,
-    origin_server_ts: typeof args.createdAt === "string"
-      ? (Date.parse(args.createdAt) || Date.now())
-      : args.createdAt.getTime(),
-  }), [currentUser.id]);
+  }): IncomingEnvelope | null => {
+    const cc = chatCryptoRef.current;
+    if (!cc) return null;
+    return {
+      type: "m.room.encrypted",
+      sender: cc.matrixSenderFor(args.senderUserId, currentUser.id),
+      content: args.envelope as unknown as import("@/lib/crypto").EncryptedEnvelope,
+      event_id: `$${args.messageId}`,
+      origin_server_ts: typeof args.createdAt === "string"
+        ? (Date.parse(args.createdAt) || Date.now())
+        : args.createdAt.getTime(),
+    };
+  }, [currentUser.id]);
 
-  // Initial-batch decrypt: when crypto becomes ready, attempt every queued
-  // ciphertext id once. Rows that still lack a room key stay in the Set so
-  // the periodic drain picks them up on the next pollSync tick.
   useEffect(() => {
-    if (!topic.isE2ee || !e2eeReady || !e2eeRoomId) return;
-    const mod = cryptoRef.current;
-    if (!mod) return;
-    // Seed any messages already on screen that haven't been queued yet —
-    // covers cases where the messages array landed before crypto was ready.
+    if (!isE2ee || !e2eeReady || !e2eeRoomId) return;
+    const cc = chatCryptoRef.current;
+    if (!cc) return;
     for (const m of messagesRef.current) {
       if (m.ciphertextJson && !decryptedRef.current.has(m.id)) {
         pendingDecryptRef.current.add(m.id);
@@ -959,18 +914,19 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       for (const id of Array.from(pendingDecryptRef.current)) {
         const m = messagesRef.current.find((x) => x.id === id);
         if (!m?.ciphertextJson) { pendingDecryptRef.current.delete(id); continue; }
+        const env = toIncomingEnvelope({
+          envelope: m.ciphertextJson,
+          senderUserId: m.senderUserId,
+          messageId: m.id,
+          createdAt: m.createdAt,
+        });
+        if (!env) continue;
         try {
-          const env = toIncomingTopicEnvelope({
-            envelope: m.ciphertextJson,
-            senderUserId: m.senderUserId,
-            messageId: m.id,
-            createdAt: m.createdAt,
-          });
-          const plain = await mod.decryptRoom(e2eeRoomId, env);
+          const plain = await cc.decrypt(env);
           newly[m.id] = plain;
           pendingDecryptRef.current.delete(id);
         } catch {
-          // Locked row — leave in Set; drain will retry after next pollSync.
+          /* Locked row — retry on next drain. */
         }
       }
       if (cancelled) return;
@@ -984,36 +940,32 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       }
     })();
     return () => { cancelled = true; };
-  }, [topic.isE2ee, e2eeReady, e2eeRoomId, toIncomingTopicEnvelope]);
+  }, [isE2ee, e2eeReady, e2eeRoomId, toIncomingEnvelope]);
 
-  // Periodic /api/crypto/sync poll while the tab is visible. Each tick we
-  // drain the pending Set (O(pending) instead of O(messages)) — newly-arrived
-  // ciphertexts get pushed into the Set by MESSAGE_NEW / MESSAGE_EDIT, and
-  // anything still locked stays in the Set until a future pollSync delivers
-  // its room key. Mirrors DmThreadPane.
   useEffect(() => {
-    if (!topic.isE2ee || !e2eeReady || !e2eeRoomId) return;
+    if (!isE2ee || !e2eeReady || !e2eeRoomId) return;
     let interval: ReturnType<typeof setInterval> | null = null;
     const startPolling = () => {
       if (interval) return;
       interval = setInterval(async () => {
-        const mod = cryptoRef.current;
-        if (!mod) return;
-        try { await mod.pollSync(); } catch { return; }
+        const cc = chatCryptoRef.current;
+        if (!cc) return;
+        try { await cc.pollSync(); } catch { return; }
         if (pendingDecryptRef.current.size === 0) return;
         const newly: Record<string, string> = {};
         for (const id of Array.from(pendingDecryptRef.current)) {
           const m = messagesRef.current.find((x) => x.id === id);
           if (!m?.ciphertextJson) { pendingDecryptRef.current.delete(id); continue; }
           if (decryptedRef.current.has(id)) { pendingDecryptRef.current.delete(id); continue; }
+          const env = toIncomingEnvelope({
+            envelope: m.ciphertextJson,
+            senderUserId: m.senderUserId,
+            messageId: m.id,
+            createdAt: m.createdAt,
+          });
+          if (!env) continue;
           try {
-            const env = toIncomingTopicEnvelope({
-              envelope: m.ciphertextJson,
-              senderUserId: m.senderUserId,
-              messageId: m.id,
-              createdAt: m.createdAt,
-            });
-            const plain = await mod.decryptRoom(e2eeRoomId, env);
+            const plain = await cc.decrypt(env);
             newly[m.id] = plain;
             pendingDecryptRef.current.delete(id);
           } catch { /* leave in Set; retry next drain */ }
@@ -1043,11 +995,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         document.removeEventListener("visibilitychange", onVisibility);
       }
     };
-  }, [topic.isE2ee, e2eeReady, e2eeRoomId, toIncomingTopicEnvelope]);
+  }, [isE2ee, e2eeReady, e2eeRoomId, toIncomingEnvelope]);
 
   function getDisplayText(msg: Message): string {
-    if (!topic.isE2ee) return msg.text;
-    if (!msg.ciphertextJson) return msg.text; // legacy plaintext row in pre-Plan D
+    if (!isE2ee) return msg.text;
+    if (!msg.ciphertextJson) return msg.text;
     return decryptedTexts.get(msg.id) ?? "(encrypted…)";
   }
 
@@ -1143,7 +1095,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const filename = `${topic.slug}-${stamp}.md`;
+    const filename = `${topic?.slug ?? conversationKey}-${stamp}.md`;
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
@@ -1183,47 +1135,32 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   async function send() {
     const text = draft.trim();
-    if ((!text && pendingAttachments.length === 0) || mute) return;
+    if ((!text && pendingAttachments.length === 0) || topicMute) return;
 
-    // Strip tracking params / wrap external links server-side before
-    // (optionally) encrypting. On endpoint failure we fall back to original.
     const processed = text ? await processLinks(text) : text;
 
-    // E2EE topics travel via `ciphertextJson` — the server enforces the
-    // text↔cipher XOR. We send empty text + the Megolm envelope. Plain
-    // topics send `finalText` as-is.
     let finalText = processed;
     let ciphertextEnvelope: Record<string, unknown> | null = null;
-    if (topic.isE2ee && e2eeRoomId) {
-      const mod = cryptoRef.current ?? (await ensureCrypto());
-      if (!mod) {
+    if (isE2ee) {
+      const cc = chatCryptoRef.current ?? (await ensureCrypto());
+      if (!cc) {
         setE2eeError("encryption not initialized");
         return;
       }
       try {
-        // Always refresh the room key fan-out before encrypting — this is a
-        // no-op when the Megolm session already covers the current member
-        // set, and it heals any join we missed (no member-change socket
-        // event exists today; we lean on the send path as a safety net).
-        // ensureRoomMembers drains outgoing requests internally via the
-        // single-flight pump mutex; no extra pumpOutgoing needed here.
         await refreshRoomMembers();
-        await mod.ensureRoomMembers(e2eeRoomId, memberUserIdsRef.current);
-        const envelope = await mod.encryptRoom(e2eeRoomId, processed);
+        await cc.ensureSession(memberUserIdsRef.current);
+        const envelope = await cc.encrypt(processed);
         ciphertextEnvelope = envelope as unknown as Record<string, unknown>;
         finalText = "";
       } catch (err) {
-        // One retry after pumping any queued requests. If a pump is already
-        // in flight (e.g. from pollSync), the mutex makes us await it; this
-        // gives the OlmMachine time to settle before we re-encrypt.
         try {
-          if (!mod) throw err;
-          await mod.pumpOutgoing();
-          const envelope = await mod.encryptRoom(e2eeRoomId, processed);
+          await cc.pumpOutgoing();
+          const envelope = await cc.encrypt(processed);
           ciphertextEnvelope = envelope as unknown as Record<string, unknown>;
           finalText = "";
         } catch (err2) {
-          console.error("[e2ee] encrypt failed", err2);
+          console.error("[e2ee] encrypt failed", err, err2);
           setE2eeError("Encryption setup with peers in progress, try again in a moment.");
           return;
         }
@@ -1231,62 +1168,40 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     }
 
     const hashtags: string[] = [];
-    const hashRegex = /#([a-zA-Z]\w*)/g;
-    const symRegex = /\$([a-zA-Z]\w*)/g;
-    let m: RegExpExecArray | null;
-    while ((m = hashRegex.exec(processed)) !== null) {
-      const tag = `#${m[1]!.toLowerCase()}`;
-      if (!hashtags.includes(tag)) hashtags.push(tag);
-    }
-    while ((m = symRegex.exec(processed)) !== null) {
-      const sym = m[1]!.toLowerCase();
-      if (symbols.some((s) => s.symbol === sym)) {
-        const tag = `$${sym}`;
+    if (source.capabilities.hashtags) {
+      const hashRegex = /#([a-zA-Z]\w*)/g;
+      const symRegex = /\$([a-zA-Z]\w*)/g;
+      let m: RegExpExecArray | null;
+      while ((m = hashRegex.exec(processed)) !== null) {
+        const tag = `#${m[1]!.toLowerCase()}`;
         if (!hashtags.includes(tag)) hashtags.push(tag);
+      }
+      while ((m = symRegex.exec(processed)) !== null) {
+        const sym = m[1]!.toLowerCase();
+        if (symbols.some((s) => s.symbol === sym)) {
+          const tag = `$${sym}`;
+          if (!hashtags.includes(tag)) hashtags.push(tag);
+        }
       }
     }
 
-    // E2EE rows don't carry hashtags (the server can't index ciphertext); the
-    // empty-text branch on the ws side will reject anything with hashtags too.
-    const isE2eeSend = topic.isE2ee && ciphertextEnvelope !== null;
-    socketRef.current?.emit(
-      WS_EVENTS.MESSAGE_SEND,
-      {
-        topicId: topic.id,
-        content: {
-          text: finalText,
-          attachments: isE2eeSend
-            ? undefined
-            : (pendingAttachments.length > 0 ? pendingAttachments : undefined),
-          replyToMessageId: replyingTo?.id,
-          hashtags: isE2eeSend
-            ? undefined
-            : (hashtags.length > 0 ? hashtags.slice(0, 20) : undefined),
-          ciphertextJson: ciphertextEnvelope ?? undefined,
-        },
-      },
-      (res: { ok: boolean; error?: string }) => {
-        if (!res.ok) console.warn("send failed", res.error);
-      },
-    );
-    // Optimistically cache the plaintext for the message we just sent so the
-    // local render uses our own copy instead of waiting for the round-trip
-    // through pollSync. The MESSAGE_NEW broadcast will still upsert the row.
-    if (isE2eeSend) {
-      // Plaintext is in `processed` (we cleared finalText for the wire). We
-      // can't key by message id yet — the server assigns it — so we stash by
-      // a synthetic id and remap when MESSAGE_NEW for this send arrives.
-      // Simpler approach: re-decrypt locally when MESSAGE_NEW arrives by
-      // using the round-trip envelope, which our pollSync-style decrypter
-      // covers automatically. No optimistic stash here.
-    }
+    const isE2eeSend = isE2ee && ciphertextEnvelope !== null;
+    await source.send({
+      text: finalText,
+      attachments: isE2eeSend
+        ? undefined
+        : (pendingAttachments.length > 0 ? pendingAttachments : undefined),
+      replyToMessageId: replyingTo?.id,
+      hashtags: isE2eeSend ? undefined : (hashtags.length > 0 ? hashtags : undefined),
+      ciphertextJson: ciphertextEnvelope ?? undefined,
+    });
     setDraft("");
     setPendingAttachments([]);
     setReplyingTo(null);
     localStorage.removeItem(draftKey);
   }
 
-  const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !mute && !uploading && canPost;
+  const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !topicMute && !uploading && canPost;
 
   function toggleThread(postId: string) {
     setExpandedThreads((prev) => {
@@ -1298,11 +1213,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   }
 
   function sendReply(parentId: string, text: string) {
-    if (!socketRef.current) return;
-    socketRef.current.emit(WS_EVENTS.MESSAGE_SEND, {
-      topicId: topic.id,
-      content: { text, attachments: [], replyToMessageId: parentId },
-    });
+    void source.send({ text, replyToMessageId: parentId });
   }
 
   const filteredMembers = useMemo(() => {
@@ -1320,10 +1231,72 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         .map((id) => adminDisplayNames.get(id) ?? `${id.slice(0, 8)}…`)
         .join(", ");
 
+  if (isDmMode && dmConversation && dmConversation.state !== "accepted") {
+    return (
+      <section className="flex h-full min-h-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-4 pt-[calc(1rem+var(--sat))] md:px-6">
+          <button
+            type="button"
+            onClick={onMenuOpen}
+            className="shrink-0 rounded-md p-1 hover:bg-panel2 transition md:hidden"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          {dmConversation.peer && (
+            <Avatar name={dmConversation.peer.displayName} url={dmConversation.peer.avatarUrl} size={9} />
+          )}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-semibold truncate">{headerTitle}</h1>
+            <p className="text-xs text-muted">
+              {dmConversation.state === "pending" ? "Conversation request" : "Conversation blocked"}
+            </p>
+          </div>
+        </header>
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="rounded-2xl border border-border bg-panel p-6 max-w-md w-full text-center space-y-3">
+            <h2 className="text-base font-semibold">
+              {dmConversation.state === "pending"
+                ? `${dmConversation.peer?.displayName ?? "Someone"} wants to chat`
+                : "This conversation is blocked"}
+            </h2>
+            {dmConversation.state === "pending" && (
+              <div className="flex gap-2 justify-center">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = await apiFetch(`/api/dm/${dmConversation.id}/accept`, { method: "POST" });
+                    if (r.ok) window.location.reload();
+                  }}
+                  className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white"
+                >Accept</button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await apiFetch(`/api/dm/${dmConversation.id}/decline`, { method: "POST" });
+                    window.location.href = "/";
+                  }}
+                  className="rounded-lg bg-panel2 px-3 py-2 text-sm font-medium"
+                >Decline</button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await apiFetch(`/api/dm/${dmConversation.id}/block`, { method: "POST" });
+                    window.location.href = "/";
+                  }}
+                  className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-medium text-danger"
+                >Block</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <HashtagClickContext.Provider value={{ onHashtagClick: setHashtagFilter }}>
+    <HashtagClickContext.Provider value={{ onHashtagClick: caps.hashtags ? setHashtagFilter : () => {} }}>
     <>
-      {showSearch && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
+      {showSearch && caps.members && isTopicMode && topic && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       {dragActive && (
         <div
@@ -1376,7 +1349,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
           </div>
         </div>
       )}
-      {showTopicInfo && (
+      {showTopicInfo && isTopicMode && topic && (
         <TopicInfoModal
           topic={{
             id: topic.id,
@@ -1414,34 +1387,43 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         )}
         <button
           type="button"
-          onClick={() => setShowTopicInfo(true)}
-          className="flex-1 text-left min-w-0"
+          onClick={() => { if (isTopicMode) setShowTopicInfo(true); }}
+          className="flex-1 text-left min-w-0 flex items-center gap-2"
         >
-          <h1 className="text-lg font-semibold truncate hover:underline decoration-muted underline-offset-2">{topic.title}</h1>
-          <p className="flex items-center gap-1.5 text-xs text-muted">
-            {topic.isE2ee
-              ? <Lock className="h-3 w-3 text-accent2" />
-              : <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
-            }
-            {connected ? "connected" : "connecting…"}
-          </p>
+          {isDmMode && dmConversation?.peer && (
+            <Avatar name={dmConversation.peer.displayName} url={dmConversation.peer.avatarUrl} size={9} />
+          )}
+          <div className="min-w-0 flex-1">
+            <h1 className={cn("text-lg font-semibold truncate", isTopicMode && "hover:underline decoration-muted underline-offset-2")}>{headerTitle}</h1>
+            <p className="flex items-center gap-1.5 text-xs text-muted">
+              {isE2ee
+                ? <Lock className="h-3 w-3 text-accent2" />
+                : <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
+              }
+              {connected ? "connected" : "connecting…"}
+            </p>
+          </div>
         </button>
-        <button
-          type="button"
-          onClick={() => setShowSearch(true)}
-          title="Search (Ctrl+K)"
-          className="rounded-lg p-2 transition hover:bg-panel2 text-muted hover:text-text"
-        >
-          <Search className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowUsers((v) => !v)}
-          title="Members"
-          className={cn("rounded-lg p-2 transition hover:bg-panel2", showUsers && "bg-panel2 text-accent")}
-        >
-          <Users className="h-5 w-5" />
-        </button>
+        {caps.members && (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowSearch(true)}
+              title="Search (Ctrl+K)"
+              className="rounded-lg p-2 transition hover:bg-panel2 text-muted hover:text-text"
+            >
+              <Search className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowUsers((v) => !v)}
+              title="Members"
+              className={cn("rounded-lg p-2 transition hover:bg-panel2", showUsers && "bg-panel2 text-accent")}
+            >
+              <Users className="h-5 w-5" />
+            </button>
+          </>
+        )}
       </header>
 
       {hashtagFilter && (
@@ -1461,7 +1443,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       )}
 
       <AnimatePresence>
-        {showUsers && (
+        {caps.members && showUsers && (
           <motion.div
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
@@ -1595,7 +1577,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                         {friendlyTime(msg.createdAt)}
                       </div>
                     </div>
-                    {perEmoji && perEmoji.size > 0 && (
+                    {caps.reactions && perEmoji && perEmoji.size > 0 && (
                       <div className={cn("mt-1 flex flex-wrap gap-1", mine ? "justify-end" : "justify-start")}>
                         {Array.from(perEmoji.entries()).map(([key, users]) => {
                           const reacted = users.includes(currentUser.id);
@@ -1616,8 +1598,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
           </div>
         </div>
       ) : (<>
-      <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", topic.isFeed ? "space-y-4" : "space-y-1")}>
-        {topic.isE2ee && (
+      <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", isFeed ? "space-y-4" : "space-y-1")}>
+        {isE2ee && (
           <div className="mb-3 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
             <span aria-hidden="true">🔒</span>{" "}
             <span className="font-medium text-text">End-to-end encrypted.</span>{" "}
@@ -1625,7 +1607,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
             New members will NOT see prior messages.
           </div>
         )}
-        {topic.isE2ee && e2eeSetupNeeded && !e2eeReady && (
+        {isE2ee && e2eeSetupNeeded && !e2eeReady && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
             <span>Enable encryption to read and send messages in this topic.</span>
             <button
@@ -1642,8 +1624,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
           </div>
         )}
         {(() => {
-          const topLevelMessages = topic.isFeed ? messages.filter((m) => !m.replyToMessageId) : messages;
-          const repliesByParent = topic.isFeed
+          const topLevelMessages = isFeed ? messages.filter((m) => !m.replyToMessageId) : messages;
+          const repliesByParent = isFeed
             ? messages.reduce<Map<string, Message[]>>((acc, m) => {
                 if (!m.replyToMessageId) return acc;
                 const parentId = String(m.replyToMessageId);
@@ -1665,7 +1647,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
               new Date(m.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 5 * 60 * 1000;
             const showSender = !mine && isNewGroup;
 
-            if (topic.isFeed) {
+            if (isFeed) {
               const isSelected = selectedIds.has(m.id);
               return (
                 <motion.div
@@ -1701,15 +1683,17 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                       <div className="text-sm font-medium">{m.senderDisplayName ?? communityName ?? "System"}</div>
                       <div suppressHydrationWarning className="text-xs text-muted">{friendlyTime(m.createdAt)}</div>
                     </div>
-                    <div className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100">
-                      <button
-                        ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
-                        type="button" className="text-muted hover:text-text"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => { e.stopPropagation(); setPickerFor(pickerFor === m.id ? null : m.id); }}>
-                        <SmilePlus className="h-4 w-4" />
-                      </button>
-                    </div>
+                    {caps.reactions && (
+                      <div className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100">
+                        <button
+                          ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
+                          type="button" className="text-muted hover:text-text"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); setPickerFor(pickerFor === m.id ? null : m.id); }}>
+                          <SmilePlus className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {m.attachments.length > 0 && (
@@ -1733,7 +1717,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     <MarkdownContent content={getDisplayText(m)} className="text-sm" />
                   )}
 
-                  {perEmoji && perEmoji.size > 0 && (
+                  {caps.reactions && perEmoji && perEmoji.size > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {Array.from(perEmoji.entries()).map(([key, users]) => {
                         const reacted = users.includes(currentUser.id);
@@ -1748,7 +1732,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     </div>
                   )}
 
-                  {pickerFor === m.id && (
+                  {caps.reactions && pickerFor === m.id && (
                     <EmojiPickerPopover
                       anchorRef={{ current: reactionBtnRefs.current.get(m.id) ?? null }}
                       onSelect={(glyph) => toggleReaction(m.id, glyph)}
@@ -1756,8 +1740,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     />
                   )}
 
-                  {/* Thread section */}
-                  {(() => {
+                  {caps.threads && (() => {
                     const postId = String(m.id);
                     const replies = repliesByParent.get(postId) ?? [];
                     const isExpanded = expandedThreads.has(postId);
@@ -1938,7 +1921,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     );
                   })()}
 
-                  {m.poll ? (
+                  {caps.polls && m.poll ? (
                     <div className="w-64 max-w-full">
                       <PollMessage
                         poll={m.poll}
@@ -1974,35 +1957,37 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                   <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
                     !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
                     getDisplayText(m).trim() === "" && m.attachments.length > 0 && "p-1")}>
-                    {/* Quick reaction button on bubble */}
-                    <button
-                      ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
-                      type="button"
-                      title="React"
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); setPickerFor(pickerFor === m.id ? null : m.id); }}
-                      className={cn(
-                        "absolute -bottom-2.5 opacity-0 group-hover/bubble:opacity-100 transition z-10",
-                        "flex h-6 w-6 items-center justify-center rounded-full border border-border bg-panel shadow-sm hover:bg-panel2",
-                        mine ? "-left-3" : "-right-3",
-                      )}
-                    >
-                      <SmilePlus className="h-3.5 w-3.5 text-muted" />
-                    </button>
-                    {/* Reply button on bubble */}
-                    <button
-                      type="button"
-                      title="Reply"
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); setReplyingTo(m); }}
-                      className={cn(
-                        "absolute -bottom-2.5 opacity-0 group-hover/bubble:opacity-100 transition z-10",
-                        "flex h-6 w-6 items-center justify-center rounded-full border border-border bg-panel shadow-sm hover:bg-panel2",
-                        mine ? "-right-3" : "-left-3",
-                      )}
-                    >
-                      <CornerDownLeft className="h-3.5 w-3.5 text-muted" />
-                    </button>
+                    {caps.reactions && (
+                      <button
+                        ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
+                        type="button"
+                        title="React"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); setPickerFor(pickerFor === m.id ? null : m.id); }}
+                        className={cn(
+                          "absolute -bottom-2.5 opacity-0 group-hover/bubble:opacity-100 transition z-10",
+                          "flex h-6 w-6 items-center justify-center rounded-full border border-border bg-panel shadow-sm hover:bg-panel2",
+                          mine ? "-left-3" : "-right-3",
+                        )}
+                      >
+                        <SmilePlus className="h-3.5 w-3.5 text-muted" />
+                      </button>
+                    )}
+                    {caps.threads && (
+                      <button
+                        type="button"
+                        title="Reply"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); setReplyingTo(m); }}
+                        className={cn(
+                          "absolute -bottom-2.5 opacity-0 group-hover/bubble:opacity-100 transition z-10",
+                          "flex h-6 w-6 items-center justify-center rounded-full border border-border bg-panel shadow-sm hover:bg-panel2",
+                          mine ? "-right-3" : "-left-3",
+                        )}
+                      >
+                        <CornerDownLeft className="h-3.5 w-3.5 text-muted" />
+                      </button>
+                    )}
                     {m.attachments.length > 0 && (
                       <div className={cn("flex flex-col gap-1", getDisplayText(m).trim() && "mb-2")}>
                         {m.attachments.map((att, ai) =>
@@ -2047,7 +2032,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                   </div>
                   )}
 
-                  {(replyCounts.get(m.id) ?? 0) >= 3 && (
+                  {caps.threads && (replyCounts.get(m.id) ?? 0) >= 3 && (
                     <button
                       type="button"
                       onClick={() => setThreadFor(m)}
@@ -2058,7 +2043,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     </button>
                   )}
 
-                  {perEmoji && perEmoji.size > 0 && (
+                  {caps.reactions && perEmoji && perEmoji.size > 0 && (
                     <div className={cn("mt-1 flex flex-wrap gap-1", mine ? "justify-end" : "justify-start")}>
                       {Array.from(perEmoji.entries()).map(([key, users]) => {
                         const reacted = users.includes(currentUser.id);
@@ -2073,7 +2058,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     </div>
                   )}
 
-                  {pickerFor === m.id && (
+                  {caps.reactions && pickerFor === m.id && (
                     <EmojiPickerPopover
                       anchorRef={{ current: reactionBtnRefs.current.get(m.id) ?? null }}
                       onSelect={(glyph) => { toggleReaction(m.id, glyph); setPickerFor(null); }}
@@ -2089,12 +2074,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         })()}
       </div>
 
-      {threadFor && (
+      {threadFor && caps.threads && isTopicMode && topic && (
         <ThreadPanel
           rootMessage={threadFor}
           topicId={topic.id}
           currentUserId={currentUser.id}
-          isE2ee={topic.isE2ee}
+          isE2ee={isE2ee}
           onClose={() => setThreadFor(null)}
           onReply={(msgId) => {
             const msg = messages.find((m) => m.id === msgId);
@@ -2111,7 +2096,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         <div className="border-t border-border bg-panel px-4 pt-2.5 pb-[calc(0.625rem+var(--sab))] flex items-center gap-3 shrink-0">
           <span className="text-sm font-semibold text-text">{selectedIds.size} selected</span>
           <div className="flex-1" />
-          {(canDeleteOwn || canDeleteAny) && (
+          {caps.delete && (canDeleteOwn || canDeleteAny) && (
             <button type="button" onClick={deleteSelected}
               className="flex items-center gap-1.5 rounded-lg bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/20 transition">
               <Trash2 className="h-3.5 w-3.5" />
@@ -2130,18 +2115,22 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         </div>
       )}
 
-      {!hashtagFilter && (mute ? (
+      {!hashtagFilter && (topicMute ? (
         <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-danger shrink-0">
-          You are muted: {mute.reason}
-          {mute.expiresAt ? ` (until ${new Date(mute.expiresAt).toLocaleString()})` : " (permanent)"}
+          You are muted: {topicMute.reason}
+          {topicMute.expiresAt ? ` (until ${new Date(topicMute.expiresAt).toLocaleString()})` : " (permanent)"}
         </div>
       ) : !canPost ? (
         <div className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-muted shrink-0">
-          Only {topic.postRoles.join(", ")} can post in this channel.
+          {isTopicMode && topic
+            ? `Only ${topic.postRoles.join(", ")} can post in this channel.`
+            : isDmMode && dmConversation?.state === "pending"
+              ? "This conversation is pending approval."
+              : "You cannot post in this conversation."}
         </div>
       ) : (
         <div className="border-t border-border bg-panel px-3 pt-2 pb-[calc(0.375rem+var(--sab))] shrink-0">
-          {replyingTo && (
+          {caps.threads && replyingTo && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
               <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent2" />
               <span className="text-xs text-muted flex-1 truncate">
@@ -2203,17 +2192,17 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                 value={draft}
                 onChange={setDraft}
                 onSubmit={() => void send()}
-                placeholder={uploading ? "Uploading…" : topic.isFeed ? "Write a post… (Ctrl+Enter to send)" : enterSends ? "Write a message… (Enter to send)" : "Write a message… (Ctrl+Enter to send)"}
-                compact={!topic.isFeed}
-                enterSends={topic.isFeed ? false : enterSends}
+                placeholder={uploading ? "Uploading…" : isFeed ? "Write a post… (Ctrl+Enter to send)" : enterSends ? "Write a message… (Enter to send)" : "Write a message… (Ctrl+Enter to send)"}
+                compact={!isFeed}
+                enterSends={isFeed ? false : enterSends}
                 disabled={uploading}
-                members={members}
-                topicTags={topicTags}
-                symbols={symbols.map((s) => ({
+                members={caps.mentions ? members : []}
+                topicTags={caps.hashtags ? topicTags : []}
+                symbols={caps.hashtags ? symbols.map((s) => ({
                   symbol: s.symbol,
                   name: s.name,
                   avatarUrl: s.linkedUserAvatarUrl,
-                }))}
+                })) : []}
               />
               <div className="flex items-center gap-2">
                 {canAttach && (
@@ -2248,13 +2237,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                     <SmilePlus className="h-4 w-4" />
                   </button>
                 </Tooltip>
-                {canCreatePoll && (
+                {caps.polls && canCreatePoll && (
                   <button type="button" onClick={() => setShowPollCreator(true)}
                     className={cn("text-muted hover:text-text", showPollCreator && "text-accent")} title="Create poll">
                     <BarChart2 className="h-4 w-4" />
                   </button>
                 )}
-                {topic.isFeed && (
+                {isFeed && (
                   <Tooltip label="Export draft as Markdown">
                     <button
                       type="button"
@@ -2268,7 +2257,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                   </Tooltip>
                 )}
                 <div className="flex-1" />
-                {!topic.isFeed && (
+                {!isFeed && (
                   <button
                     type="button"
                     title={enterSends ? "Enter sends — click to switch to Ctrl+Enter" : "Ctrl+Enter sends — click to switch to Enter"}
@@ -2281,11 +2270,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                 <button type="button" onClick={() => void send()} disabled={!canSend}
                   className={cn(
                     "transition disabled:opacity-40",
-                    topic.isFeed
+                    isFeed
                       ? "rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90"
                       : "rounded-lg bg-accent p-1.5 text-white hover:opacity-90",
                   )}>
-                  {topic.isFeed ? "Post" : <Send className="h-4 w-4" />}
+                  {isFeed ? "Post" : <Send className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -2308,7 +2297,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         </div>
       ))}
 
-      {showPollCreator && (
+      {caps.polls && showPollCreator && (
         <PollCreator
           onSubmit={submitPoll}
           onClose={() => setShowPollCreator(false)}
@@ -2347,39 +2336,39 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
                 {getDisplayText(contextMenu.msg).trim() || (contextMenu.msg.attachments.length > 0 ? "📎 Attachment" : "")}
               </p>
             </div>
-            {/* Quick reactions */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-              {QUICK_REACTIONS.map((emoji) => (
+            {caps.reactions && (
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+                {QUICK_REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="flex h-10 w-10 items-center justify-center rounded-full text-xl hover:bg-panel2 active:scale-90 transition"
+                    onClick={() => { toggleReaction(contextMenu.msg.id, emoji); setContextMenu(null); }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
                 <button
-                  key={emoji}
+                  ref={(el) => { if (el) reactionBtnRefs.current.set(`ctx-${contextMenu.msg.id}`, el); else reactionBtnRefs.current.delete(`ctx-${contextMenu.msg.id}`); }}
                   type="button"
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-xl hover:bg-panel2 active:scale-90 transition"
-                  onClick={() => { toggleReaction(contextMenu.msg.id, emoji); setContextMenu(null); }}
+                  className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-panel2 transition text-muted hover:text-text"
+                  onClick={() => { setPickerFor(contextMenu.msg.id); setContextMenu(null); }}
                 >
-                  {emoji}
+                  <SmilePlus className="h-5 w-5" />
                 </button>
-              ))}
-              <button
-                ref={(el) => { if (el) reactionBtnRefs.current.set(`ctx-${contextMenu.msg.id}`, el); else reactionBtnRefs.current.delete(`ctx-${contextMenu.msg.id}`); }}
-                type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-panel2 transition text-muted hover:text-text"
-                onClick={() => { setPickerFor(contextMenu.msg.id); setContextMenu(null); }}
-              >
-                <SmilePlus className="h-5 w-5" />
-              </button>
-            </div>
-            {/* Action items */}
+              </div>
+            )}
             <div className="py-1 pb-[max(0.25rem,var(--sab))]">
               {[
-                { icon: CornerDownLeft, label: "Reply", action: () => { setReplyingTo(contextMenu.msg); setContextMenu(null); } },
+                ...(caps.threads ? [{ icon: CornerDownLeft, label: "Reply", action: () => { setReplyingTo(contextMenu.msg); setContextMenu(null); } }] : []),
                 { icon: Copy, label: "Copy", action: () => { void copyMessage(getDisplayText(contextMenu.msg)); setContextMenu(null); } },
                 ...(!isSelecting ? [{ icon: CheckSquare, label: "Select", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } }] : [
                   { icon: CheckSquare, label: selectedIds.has(contextMenu.msg.id) ? "Deselect" : "Add to selection", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } },
                 ]),
-                ...((((contextMenu.msg.senderUserId === currentUser.id && canEditOwn) || canEditAny) && !contextMenu.msg.poll)
+                ...((caps.edit && (((contextMenu.msg.senderUserId === currentUser.id && canEditOwn) || canEditAny) && !contextMenu.msg.poll))
                   ? [{ icon: Pencil, label: "Edit", action: () => { startEdit(contextMenu.msg, getDisplayText(contextMenu.msg)); setContextMenu(null); } }]
                   : []),
-                ...(((contextMenu.msg.senderUserId === currentUser.id && canDeleteOwn) || canDeleteAny)
+                ...((caps.delete && ((contextMenu.msg.senderUserId === currentUser.id && canDeleteOwn) || canDeleteAny))
                   ? [{ icon: Trash2, label: "Delete", danger: true, action: () => { deleteMessage(contextMenu.msg.id); setContextMenu(null); } }]
                   : []),
                 { icon: Flag, label: "Report", danger: true, action: () => { void reportMessage(contextMenu.msg.id); setContextMenu(null); } },

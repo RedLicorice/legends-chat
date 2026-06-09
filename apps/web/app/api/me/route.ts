@@ -27,7 +27,7 @@ export async function GET() {
   const me = await getCurrentUser();
   if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const [row] = await db
-    .select({ bannerUrl: users.bannerUrl, email: users.email })
+    .select({ bannerUrl: users.bannerUrl, email: users.email, bio: users.bio })
     .from(users)
     .where(eq(users.id, me.id))
     .limit(1);
@@ -42,6 +42,7 @@ export async function GET() {
     avatarUrl: me.avatarUrl,
     bannerUrl: row?.bannerUrl ?? null,
     email: row?.email ?? null,
+    bio: row?.bio ?? null,
     isAnon: me.isAnon,
     presenceOptOut: me.presenceOptOut,
     tokenExpiresAt,

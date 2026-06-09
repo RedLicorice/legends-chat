@@ -6,8 +6,12 @@ import { useRouter } from "next/navigation";
 import { Hash } from "lucide-react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ChatListPane } from "@/components/ChatListPane";
-import { TopicView } from "@/components/TopicView";
+import { ChatPane } from "@/components/ChatPane";
 import { P2PView } from "@/components/P2PView";
+import { createTopicChatSource } from "@/lib/chat-source/topic";
+import { createMegolmChatCrypto } from "@/lib/chat-crypto";
+import { toMatrixRoomId } from "@/lib/crypto-matrix";
+import { useMemo } from "react";
 import { PasskeyBanner } from "@/components/PasskeyBanner";
 import { TopicPasswordGate } from "@/components/TopicPasswordGate";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
@@ -151,16 +155,9 @@ export function TopicLayout({ user, chatItems, currentSlug, topic, mute, hasPass
               onExpandSidebar={expand}
             />
           ) : (
-            <TopicView
+            <TopicChatPaneHost
+              user={user}
               topic={topic}
-              currentUser={{
-                id: user.id,
-                displayName: user.displayName,
-                avatarUrl: user.avatarUrl,
-                role: user.role,
-                presenceOptOut: user.presenceOptOut ?? false,
-                permissions: user.permissions,
-              }}
               mute={mute}
               giphyEnabled={giphyEnabled}
               communityName={communityName}
@@ -179,5 +176,63 @@ export function TopicLayout({ user, chatItems, currentSlug, topic, mute, hasPass
         </TopicPasswordGate>
       </main>
     </div>
+  );
+}
+
+interface TopicChatPaneHostProps {
+  user: Props["user"];
+  topic: Props["topic"];
+  mute: Props["mute"];
+  giphyEnabled?: boolean;
+  communityName?: string | null;
+  communityIconUrl?: string | null;
+  highlightMessageId?: string;
+  onMenuOpen: () => void;
+  onConnectionChange: (connected: boolean) => void;
+  showExpandSidebar: boolean;
+  onExpandSidebar: () => void;
+  canPost: boolean;
+  canReply: boolean;
+  initialMembers: TopicBootstrapMember[];
+  initialHashtags: TopicBootstrapHashtag[];
+}
+
+function TopicChatPaneHost({ user, topic, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, canPost, canReply, initialMembers, initialHashtags }: TopicChatPaneHostProps) {
+  const source = useMemo(() => createTopicChatSource({
+    topicId: topic.id,
+    isE2ee: topic.isE2ee,
+    isFeed: topic.isFeed,
+  }), [topic.id, topic.isE2ee, topic.isFeed]);
+  const chatCrypto = useMemo(() => topic.isE2ee ? createMegolmChatCrypto(toMatrixRoomId(topic.id)) : null, [topic.id, topic.isE2ee]);
+  return (
+    <ChatPane
+      user={{
+        id: user.id,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        role: user.role,
+        presenceOptOut: user.presenceOptOut ?? false,
+        permissions: user.permissions,
+      }}
+      mode={{
+        kind: "topic",
+        topic,
+        mute,
+        giphyEnabled,
+        communityName,
+        communityIconUrl,
+        canPost,
+        canReply,
+        initialMembers,
+        initialHashtags,
+      }}
+      source={source}
+      chatCrypto={chatCrypto}
+      highlightMessageId={highlightMessageId}
+      onMenuOpen={onMenuOpen}
+      onConnectionChange={onConnectionChange}
+      showExpandSidebar={showExpandSidebar}
+      onExpandSidebar={onExpandSidebar}
+    />
   );
 }

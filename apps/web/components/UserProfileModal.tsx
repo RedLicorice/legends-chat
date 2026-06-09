@@ -19,6 +19,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [bio, setBio] = useState<string>("");
   const [presenceOptOut, setPresenceOptOut] = useState(user.presenceOptOut ?? false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -32,6 +33,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
   useEffect(() => {
     apiFetch("/api/user/profile").then((r) => r.ok ? r.json() : null).catch(() => null).then((profile) => {
       if (profile?.bannerUrl != null) setBannerUrl(profile.bannerUrl);
+      if (typeof profile?.bio === "string") setBio(profile.bio);
     });
   }, []);
 
@@ -80,7 +82,7 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
       const res = await apiFetch("/api/user/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: displayName.trim(), avatarUrl, bannerUrl, presenceOptOut }),
+        body: JSON.stringify({ displayName: displayName.trim(), avatarUrl, bannerUrl, presenceOptOut, bio: bio.trim() }),
       });
       if (!res.ok) throw new Error("save failed");
       onUpdate({ displayName: displayName.trim(), avatarUrl, presenceOptOut });
@@ -174,6 +176,19 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
             maxLength={64}
             className="w-full rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
           />
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium uppercase tracking-wide text-muted">Bio</label>
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value.slice(0, 200))}
+            maxLength={200}
+            rows={3}
+            placeholder="Tell people about yourself"
+            className="w-full resize-none rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+          <div className="text-right text-xs text-muted">{bio.length}/200</div>
         </div>
 
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-panel2">

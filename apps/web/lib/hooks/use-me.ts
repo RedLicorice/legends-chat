@@ -11,6 +11,7 @@ export interface MeShape {
   avatarUrl: string | null;
   bannerUrl: string | null;
   email: string | null;
+  bio: string | null;
   isAnon: boolean;
   presenceOptOut: boolean;
 }
