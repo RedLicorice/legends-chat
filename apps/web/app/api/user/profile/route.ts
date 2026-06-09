@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { users } from "@legends/db/schema";
 import { db } from "@/lib/db";
-import { getCurrentUser, invalidateUserProfileCache } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 const patchSchema = z.object({
   displayName: z.string().trim().min(1).max(64).optional(),
@@ -43,6 +43,5 @@ export async function PATCH(req: Request) {
   if (Object.keys(updates).length === 0) return NextResponse.json({ ok: true });
 
   await db.update(users).set(updates).where(eq(users.id, user.id));
-  await invalidateUserProfileCache(user.id);
   return NextResponse.json({ ok: true });
 }

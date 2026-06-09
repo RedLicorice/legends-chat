@@ -4,7 +4,7 @@ import { z } from "zod";
 import { passkeyCredentials, userBans, userMutes, users } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
-import { getCurrentUser, invalidateUserProfileCache } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { logDeviceChange } from "@/lib/device-change-log";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -108,8 +108,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  await invalidateUserProfileCache(id);
-
   return NextResponse.json({ ok: true });
 }
 
@@ -126,7 +124,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   }
 
   await db.delete(users).where(eq(users.id, id));
-  await invalidateUserProfileCache(id);
 
   return NextResponse.json({ ok: true });
 }

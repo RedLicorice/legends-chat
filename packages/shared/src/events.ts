@@ -81,5 +81,4 @@ export const REDIS_KEYS = {
   REVOKED_JTI: (jti: string) => `legends:jti:revoked:${jti}`,
   BAN_CACHE: (userId: string) => `legends:ban:${userId}`,
   MUTE_CACHE: (userId: string) => `legends:mute:${userId}`,
-  USER_PROFILE: (userId: string) => `legends:user:profile:${userId}`,
 } as const;

@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { principalPermissionOverrides } from "@legends/db/schema";
 import { PERMISSIONS, isValidPermission, isValidEffect } from "@legends/shared";
 import { db } from "@/lib/db";
-import { getCurrentUser, invalidateUserProfileCache } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
@@ -49,8 +49,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     .returning();
 
-  await invalidateUserProfileCache(id);
-
   return NextResponse.json({ override });
 }
 
@@ -69,6 +67,5 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       eq(principalPermissionOverrides.permission, body.permission),
     ),
   );
-  await invalidateUserProfileCache(id);
   return NextResponse.json({ ok: true });
 }
