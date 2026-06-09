@@ -16,6 +16,7 @@ import {
 import { sessions, userBans, userMutes, users, rolesPermissions, principalPermissionOverrides } from "@legends/db/schema";
 import { db } from "./db";
 import { redis } from "./redis";
+import { redisMemo, redisInvalidate } from "@/lib/redis-memo";
 
 const accessSecret = new TextEncoder().encode(
   process.env.JWT_ACCESS_SECRET ?? (() => { throw new Error("JWT_ACCESS_SECRET not set"); })(),
@@ -52,6 +53,11 @@ export async function issueSession(userId: string, role: Role): Promise<{ access
     userId,
     refreshTokenHash: refreshJti,
   });
+
+  // Prewarm the profile cache so the first authenticated request after
+  // login skips the cold DB lookup. Fire-and-forget; failure here is
+  // non-fatal because getCurrentUser falls back to a live load.
+  primeUserProfileCache(userId).catch(() => {});
 
   return { accessJwt, refreshJwt };
 }
@@ -167,6 +173,80 @@ export interface CurrentUser {
   presenceOptOut: boolean;
 }
 
+// Cached profile shape stored in Redis. Permissions are serialised as an
+// array because Sets don't survive JSON.stringify. The full CurrentUser
+// returned to callers reconstructs the Set on hydration.
+interface CachedProfile {
+  id: string;
+  role: Role;
+  permissions: string[];
+  displayName: string;
+  avatarUrl: string | null;
+  bannerUrl: string | null;
+  email: string | null;
+  isAnon: boolean;
+  presenceOptOut: boolean;
+}
+
+const USER_PROFILE_TTL_SECONDS = 300;
+
+async function loadProfileFromDb(userId: string): Promise<CachedProfile | null> {
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!u) return null;
+  const effectiveRole = await checkAndRevertExpiredRole(u);
+  const now = new Date();
+  const [perms, overrideRows] = await Promise.all([
+    db.select({ permission: rolesPermissions.permission })
+      .from(rolesPermissions)
+      .where(eq(rolesPermissions.role, effectiveRole)),
+    db.select({ permission: principalPermissionOverrides.permission, effect: principalPermissionOverrides.effect })
+      .from(principalPermissionOverrides)
+      .where(
+        and(
+          eq(principalPermissionOverrides.principalType, "user"),
+          eq(principalPermissionOverrides.principalId, u.id),
+          or(isNull(principalPermissionOverrides.expiresAt), gt(principalPermissionOverrides.expiresAt, now)),
+        ),
+      ),
+  ]);
+  const resolved = resolvePermissions(
+    perms.map((p) => p.permission),
+    overrideRows as { permission: string; effect: "allow" | "deny" }[],
+  );
+  return {
+    id: u.id,
+    role: effectiveRole as Role,
+    permissions: [...resolved],
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl,
+    bannerUrl: u.bannerUrl ?? null,
+    email: u.email ?? null,
+    isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
+  };
+}
+
+// Public: drop a user's cached profile so the next request fetches fresh
+// rows. Callers that mutate role/perms/profile must invoke this.
+export async function invalidateUserProfileCache(userId: string): Promise<void> {
+  await redisInvalidate(REDIS_KEYS.USER_PROFILE(userId));
+}
+
+// Public: hydrate the cache for `userId` from the DB. Useful at login so
+// the first /api/* request hits Redis instead of paying the cold-cache
+// cost. Returns the cached profile (or null if the user disappeared).
+export async function primeUserProfileCache(userId: string): Promise<CachedProfile | null> {
+  const profile = await loadProfileFromDb(userId);
+  if (profile) {
+    await redisMemo(
+      REDIS_KEYS.USER_PROFILE(userId),
+      USER_PROFILE_TTL_SECONDS,
+      async () => profile,
+    );
+  }
+  return profile;
+}
+
 export const getCurrentUser = cache(getCurrentUserImpl);
 
 async function getCurrentUserImpl(): Promise<CurrentUser | null> {
@@ -184,37 +264,22 @@ async function getCurrentUserImpl(): Promise<CurrentUser | null> {
   if (revoked) return null;
   if (await isUserBanned(payload.sub)) return null;
 
-  const [u] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
-  if (!u) return null;
-
-  const effectiveRole = await checkAndRevertExpiredRole(u);
-
-  const now = new Date();
-  const [perms, overrideRows] = await Promise.all([
-    db.select({ permission: rolesPermissions.permission })
-      .from(rolesPermissions)
-      .where(eq(rolesPermissions.role, effectiveRole)),
-    db.select({ permission: principalPermissionOverrides.permission, effect: principalPermissionOverrides.effect })
-      .from(principalPermissionOverrides)
-      .where(
-        and(
-          eq(principalPermissionOverrides.principalType, "user"),
-          eq(principalPermissionOverrides.principalId, u.id),
-          or(isNull(principalPermissionOverrides.expiresAt), gt(principalPermissionOverrides.expiresAt, now)),
-        ),
-      ),
-  ]);
-
+  const profile = await redisMemo(
+    REDIS_KEYS.USER_PROFILE(payload.sub),
+    USER_PROFILE_TTL_SECONDS,
+    () => loadProfileFromDb(payload.sub),
+  );
+  if (!profile) return null;
   return {
-    id: u.id,
-    role: effectiveRole as Role,
-    permissions: resolvePermissions(perms.map((p) => p.permission), overrideRows as { permission: string; effect: "allow" | "deny" }[]),
-    displayName: u.displayName,
-    avatarUrl: u.avatarUrl,
-    bannerUrl: u.bannerUrl ?? null,
-    email: u.email ?? null,
-    isAnon: u.isAnon,
-    presenceOptOut: u.presenceOptOut,
+    id: profile.id,
+    role: profile.role,
+    permissions: new Set(profile.permissions),
+    displayName: profile.displayName,
+    avatarUrl: profile.avatarUrl,
+    bannerUrl: profile.bannerUrl,
+    email: profile.email,
+    isAnon: profile.isAnon,
+    presenceOptOut: profile.presenceOptOut,
   };
 }
 
