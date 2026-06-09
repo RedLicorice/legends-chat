@@ -133,6 +133,13 @@ export interface ChatPaneDmMode {
 
 export type ChatPaneMode = ChatPaneTopicMode | ChatPaneDmMode;
 
+// Stable empty arrays used when ChatPane runs in DM mode. Re-creating `[]`
+// inline per render gave `initialMembers` / `initialHashtags` a fresh identity
+// every render, which fired the `useEffect(() => setMembers(initialMembers), [initialMembers])`
+// loop and triggered React's "Maximum update depth exceeded" guard.
+const EMPTY_MEMBERS: TopicBootstrapMember[] = [];
+const EMPTY_HASHTAGS: TopicBootstrapHashtag[] = [];
+
 interface ChatPaneProps {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
   mode: ChatPaneMode;
@@ -211,8 +218,8 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const communityIconUrl = isTopicMode ? mode.communityIconUrl : null;
   const canPost = isTopicMode ? mode.canPost : dmConversation?.state === "accepted";
   const canReply = isTopicMode ? mode.canReply : false;
-  const initialMembers = isTopicMode ? mode.initialMembers : [];
-  const initialHashtags = isTopicMode ? mode.initialHashtags : [];
+  const initialMembers = isTopicMode ? mode.initialMembers : EMPTY_MEMBERS;
+  const initialHashtags = isTopicMode ? mode.initialHashtags : EMPTY_HASHTAGS;
   const onSidebarUpdate = isTopicMode ? mode.onSidebarUpdate : undefined;
 
   const roomKey = source.roomKey;

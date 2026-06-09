@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { HomeView } from "@/components/views/HomeView";
-import { TopicView } from "@/components/views/TopicView";
+import { ChatShell } from "@/components/ChatShell";
+import { HomeRightPane } from "@/components/views/HomeRightPane";
+import { TopicRightPane } from "@/components/views/TopicRightPane";
 import { DMListView } from "@/components/views/DMListView";
-import { DMThreadView } from "@/components/views/DMThreadView";
+import { DmRightPane } from "@/components/views/DmRightPane";
 import { SettingsView } from "@/components/views/SettingsView";
 import { AdminShellView } from "@/components/views/AdminShellView";
 import { AdminOverviewView } from "@/components/views/AdminOverviewView";
@@ -27,6 +28,12 @@ import { AdminUsersView } from "@/components/views/AdminUsersView";
  * `app/(app)/[[...slug]]/page.tsx` always renders this component for any
  * non-public URL. We read `usePathname()` and dispatch to the matching view
  * — no nested page.tsx files, no per-route bundles.
+ *
+ * Chat-shaped routes (`/`, `/t/*`, `/dm`, `/dm/*`) are wrapped in a single
+ * stable `<ChatShell>` that owns the sidebar + ChatListPane + their sockets.
+ * Only the right pane element type changes when the pathname changes, so
+ * React keeps the shell mounted across navigation (no re-fetch, no socket
+ * reconnect, no DOM churn).
  *
  * URL contract is preserved: existing `<Link href="/...">` calls keep working
  * because the Next router still navigates between paths; this component just
@@ -119,6 +126,46 @@ function NotFoundPanel() {
 const COLD_BOOT_FLAG = "lc-spa-mounted";
 const LAST_TOPIC_KEY = "lc-last-topic";
 
+type Route =
+  | { kind: "chat"; rightPane: React.ReactNode }
+  | { kind: "admin"; panel: AdminPanelKey | null }
+  | { kind: "settings" }
+  | { kind: "notFound" };
+
+function resolveRoute(rawPath: string): Route {
+  const path =
+    rawPath.length > 1 && rawPath.endsWith("/")
+      ? rawPath.slice(0, -1)
+      : rawPath;
+
+  if (path === "/" || path === "") {
+    return { kind: "chat", rightPane: <HomeRightPane /> };
+  }
+  if (path === "/dm") {
+    return { kind: "chat", rightPane: <DMListView /> };
+  }
+  if (path === "/settings") {
+    return { kind: "settings" };
+  }
+  if (path === "/admin") {
+    return { kind: "admin", panel: "overview" };
+  }
+  if (path.startsWith("/t/")) {
+    const slug = path.slice(3).split("/")[0] || "";
+    return { kind: "chat", rightPane: <TopicRightPane slug={slug} /> };
+  }
+  if (path.startsWith("/dm/")) {
+    const id = path.slice(4).split("/")[0] || "";
+    return { kind: "chat", rightPane: <DmRightPane id={id} /> };
+  }
+  if (path.startsWith("/admin/")) {
+    const sub = path.slice(7).split("/")[0] as AdminPanelKey;
+    const key = ADMIN_PANELS.has(sub) ? sub : null;
+    return { kind: "admin", panel: key };
+  }
+  return { kind: "notFound" };
+}
+
 export function AppShell() {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
@@ -142,47 +189,19 @@ export function AppShell() {
     }
   }, [pathname, router]);
 
-  return useMemo(() => {
-    // Normalize trailing slash (Next typically strips, but be defensive).
-    const path = pathname.length > 1 && pathname.endsWith("/")
-      ? pathname.slice(0, -1)
-      : pathname;
+  const route = useMemo(() => resolveRoute(pathname), [pathname]);
 
-    // Exact matches first.
-    if (path === "/" || path === "") return <HomeView />;
-    if (path === "/dm") return <DMListView />;
-    if (path === "/settings") return <SettingsView />;
-    if (path === "/admin") {
-      return (
-        <AdminShellView>
-          {renderAdminPanel("overview")}
-        </AdminShellView>
-      );
-    }
-
-    // Topic: /t/<slug>
-    if (path.startsWith("/t/")) {
-      const slug = path.slice(3).split("/")[0];
-      return <TopicView slug={slug || undefined} />;
-    }
-
-    // DM thread: /dm/<id>
-    if (path.startsWith("/dm/")) {
-      const id = path.slice(4).split("/")[0];
-      return <DMThreadView id={id || undefined} />;
-    }
-
-    // Admin panels: /admin/<panel>
-    if (path.startsWith("/admin/")) {
-      const sub = path.slice(7).split("/")[0] as AdminPanelKey;
-      const key = ADMIN_PANELS.has(sub) ? sub : null;
-      return (
-        <AdminShellView>
-          {renderAdminPanel(key)}
-        </AdminShellView>
-      );
-    }
-
-    return <NotFoundPanel />;
-  }, [pathname]);
+  // Chat-shaped routes return ONE element type — `<ChatShell>` — so React's
+  // reconciler keeps the shell mounted and only swaps `children`. Admin and
+  // Settings live outside the chat shell intentionally (different chrome).
+  if (route.kind === "chat") {
+    return <ChatShell>{route.rightPane}</ChatShell>;
+  }
+  if (route.kind === "admin") {
+    return <AdminShellView>{renderAdminPanel(route.panel)}</AdminShellView>;
+  }
+  if (route.kind === "settings") {
+    return <SettingsView />;
+  }
+  return <NotFoundPanel />;
 }
