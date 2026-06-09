@@ -21,7 +21,7 @@ export interface ChatListPaneProps {
   /** Authenticated user id; reserved for future DM unread bookkeeping. */
   currentUserId: string;
   /**
-   * Current route (e.g. `/t/general` or `/dm/abc`). When provided, the
+   * Current route (e.g. `/t/general` or `/c/abc`). When provided, the
    * matching row is highlighted. The pane itself never *navigates*; clicks
    * follow the `<Link>` `href` baked into each item.
    */

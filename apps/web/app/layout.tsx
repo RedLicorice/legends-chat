@@ -6,6 +6,7 @@ import { SymbolsProvider } from "@/contexts/SymbolsContext";
 import { SessionBootstrapProvider } from "@/contexts/SessionBootstrapContext";
 import { ExternalLinkBootstrap } from "@/components/ExternalLinkBootstrap";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
+import { LinkContextMenu } from "@/components/LinkContextMenu";
 import { RootShell } from "@/components/RootShell";
 
 // Strict-SPA root layout: pure, sync, no cookies(), no DB. Dynamic data
@@ -97,6 +98,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <RootShell>{children}</RootShell>
             </SymbolsProvider>
             <ExternalLinkDialog />
+            <LinkContextMenu />
           </ExternalLinkBootstrap>
         </SessionBootstrapProvider>
       </body>

@@ -29,7 +29,7 @@ import { AdminUsersView } from "@/components/views/AdminUsersView";
  * non-public URL. We read `usePathname()` and dispatch to the matching view
  * — no nested page.tsx files, no per-route bundles.
  *
- * Chat-shaped routes (`/`, `/t/*`, `/dm`, `/dm/*`) are wrapped in a single
+ * Chat-shaped routes (`/`, `/t/*`, `/c`, `/c/*`) are wrapped in a single
  * stable `<ChatShell>` that owns the sidebar + ChatListPane + their sockets.
  * Only the right pane element type changes when the pathname changes, so
  * React keeps the shell mounted across navigation (no re-fetch, no socket
@@ -141,7 +141,7 @@ function resolveRoute(rawPath: string): Route {
   if (path === "/" || path === "") {
     return { kind: "chat", rightPane: <HomeRightPane /> };
   }
-  if (path === "/dm") {
+  if (path === "/c") {
     return { kind: "chat", rightPane: <DMListView /> };
   }
   if (path === "/settings") {
@@ -154,8 +154,8 @@ function resolveRoute(rawPath: string): Route {
     const slug = path.slice(3).split("/")[0] || "";
     return { kind: "chat", rightPane: <TopicRightPane slug={slug} /> };
   }
-  if (path.startsWith("/dm/")) {
-    const id = path.slice(4).split("/")[0] || "";
+  if (path.startsWith("/c/")) {
+    const id = path.slice(3).split("/")[0] || "";
     return { kind: "chat", rightPane: <DmRightPane id={id} /> };
   }
   if (path.startsWith("/admin/")) {
@@ -170,6 +170,20 @@ export function AppShell() {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const coldBootHandledRef = useRef(false);
+
+  // Backward-compat: the DM URL slug was renamed from `/dm` to `/c`. Old PWA
+  // shortcuts, pasted links, and push notifications still target `/dm/...`,
+  // so we rewrite them to `/c/...` here. `router.replace` (not `push`) so the
+  // legacy URL doesn't sit in history and the Back button skips over it.
+  useEffect(() => {
+    if (pathname === "/dm") {
+      router.replace("/c");
+      return;
+    }
+    if (pathname.startsWith("/dm/")) {
+      router.replace(`/c/${pathname.slice(4)}`);
+    }
+  }, [pathname, router]);
 
   // Cold-boot restore: if this is the FIRST mount of the SPA in this tab
   // session AND the user landed on "/", jump them to the topic they had

@@ -139,7 +139,7 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
       markLocalRead(n.id);
       window.dispatchEvent(new CustomEvent("chatlist:refresh"));
       setOpen(false);
-      router.push(`/dm/${convId}`);
+      router.push(`/c/${convId}`);
     } catch {
       setActionError((e) => ({ ...e, [n.id]: "Couldn't accept. Try again." }));
     } finally {
@@ -195,7 +195,7 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
         if ((e.target as HTMLElement).closest("[data-dm-action]")) return;
         markLocalRead(n.id);
         setOpen(false);
-        router.push(`/dm/${convId}`);
+        router.push(`/c/${convId}`);
       };
 
       return (

@@ -113,7 +113,7 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
       const { id } = (await r.json()) as { id: string };
       window.dispatchEvent(new CustomEvent("chatlist:refresh"));
       onClose();
-      router.push(`/dm/${id}`);
+      router.push(`/c/${id}`);
     } catch {
       setError("Network error. Try again.");
     } finally {

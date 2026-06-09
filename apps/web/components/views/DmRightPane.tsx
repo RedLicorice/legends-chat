@@ -13,7 +13,7 @@ interface Props {
 }
 
 /**
- * `/dm/<id>` right pane. ChatShell upstream owns the sidebar + chat list;
+ * `/c/<id>` right pane. ChatShell upstream owns the sidebar + chat list;
  * this component only owns the ChatPane and its source/crypto.
  */
 export function DmRightPane({ id }: Props) {

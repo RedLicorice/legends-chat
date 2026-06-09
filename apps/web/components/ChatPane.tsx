@@ -377,6 +377,10 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   }
 
   function handleMsgContextMenu(e: React.MouseEvent, msg: Message) {
+    // Right-click on a link inside the bubble belongs to LinkContextMenu —
+    // let that one win. Don't preventDefault here either, otherwise the
+    // global link handler would see defaultPrevented and bail.
+    if ((e.target as HTMLElement).closest("a[href]")) return;
     e.preventDefault();
     if (isStillEncrypted(msg)) return;
     openContextMenu(msg, { x: e.clientX, y: e.clientY });

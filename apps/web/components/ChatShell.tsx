@@ -21,7 +21,7 @@ import { useChatList } from "@/lib/hooks/use-chat-list";
 
 /**
  * Single stable shell that wraps every chat-shaped route (`/`, `/t/<slug>`,
- * `/dm`, `/dm/<id>`). AppShell renders ONE `<ChatShell>` element across all
+ * `/c`, `/c/<id>`). AppShell renders ONE `<ChatShell>` element across all
  * those paths and swaps only its children, so React keeps the sidebar +
  * ChatListPane + its socket mounted. Per-path right panes consume
  * `useChatShell()` for hamburger / expand controls instead of receiving the

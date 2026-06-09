@@ -68,11 +68,10 @@ function dmToItem(c: DmConversationView): ChatItem | null {
   return {
     kind,
     id: c.id,
-    // The DM route is currently `/dm` with the conversation id selected
-    // client-side; once the refactor lands this will become `/dm/${c.id}`.
-    // Pre-bake the latter shape now so a future routing change is a no-op for
-    // this helper. AppSidebar / ChatListPane just navigate to `href`.
-    href: `/dm/${c.id}`,
+    // DM conversations live under `/c/<id>` (the "c" namespace covers all
+    // 1:1 chats — user-to-user and user-to-bot — at the URL layer).
+    // AppSidebar / ChatListPane just navigate to `href`.
+    href: `/c/${c.id}`,
     title: c.peer.displayName,
     avatar: { url: c.peer.avatarUrl },
     lastAt: c.lastMessageAt,

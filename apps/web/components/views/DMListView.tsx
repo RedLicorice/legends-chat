@@ -6,7 +6,7 @@ import { PWASplash } from "@/components/PWASplash";
 import { useMe } from "@/lib/hooks/use-me";
 
 /**
- * Legacy `/dm` route. The DM list now lives in the unified left sidebar on
+ * Bare `/c` route. The DM list now lives in the unified left sidebar on
  * `/`, so we redirect to the home page with the `dms` filter chip preselected.
  * The legacy `?tab=bots` query param maps to `?filter=bots` for parity.
  *

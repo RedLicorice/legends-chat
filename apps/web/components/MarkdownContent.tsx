@@ -129,7 +129,9 @@ export function MarkdownContent({ content, className }: Props) {
       if (!link) return;
       const href = link.getAttribute("href") ?? "";
       if (!/^https?:\/\//i.test(href)) return; // mailto/tel/internal-relative → let browser handle
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
+      // Every http(s) click is routed through requestOpen — no modifier-click
+      // bypass. The app must never leak the chat origin to a destination
+      // tab and must never navigate the in-app shell to an external URL.
       e.preventDefault();
       requestOpen(href);
     };

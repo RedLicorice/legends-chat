@@ -59,7 +59,7 @@ export function UserViewModal({ userId, viewerPermissions, onClose }: Props) {
     }
     const data = (await res.json()) as { id: string };
     onClose();
-    router.push(`/dm/${data.id}`);
+    router.push(`/c/${data.id}`);
   }
 
   return (
