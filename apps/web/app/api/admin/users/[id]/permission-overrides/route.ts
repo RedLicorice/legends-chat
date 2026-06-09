@@ -4,6 +4,7 @@ import { principalPermissionOverrides } from "@legends/db/schema";
 import { PERMISSIONS, isValidPermission, isValidEffect } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { revokeUserJtis } from "@/lib/auth-revoke";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
@@ -49,6 +50,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     .returning();
 
+  await revokeUserJtis(id);
+
   return NextResponse.json({ override });
 }
 
@@ -67,5 +70,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       eq(principalPermissionOverrides.permission, body.permission),
     ),
   );
+
+  await revokeUserJtis(id);
+
   return NextResponse.json({ ok: true });
 }

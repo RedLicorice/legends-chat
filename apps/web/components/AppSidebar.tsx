@@ -1,7 +1,6 @@
 "use client";
-import { apiFetch } from "@/lib/fetch";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
@@ -14,6 +13,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { PERMISSIONS } from "@legends/shared";
 import { cn } from "@/lib/cn";
 import { useInstallPrompt } from "@/hooks/useInstallPrompt";
+import { useSessionBootstrap } from "@/contexts/SessionBootstrapContext";
 
 interface AppSidebarUser {
   id: string;
@@ -104,7 +104,6 @@ export function AppSidebar({
   const [profile, setProfile] = useState({ displayName: user.displayName, avatarUrl: user.avatarUrl });
   const [showProfile, setShowProfile] = useState(false);
   const [showModQueue, setShowModQueue] = useState(false);
-  const [pendingFlags, setPendingFlags] = useState<number | null>(null);
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [showAndroidInstall, setShowAndroidInstall] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(() =>
@@ -112,26 +111,15 @@ export function AppSidebar({
   );
 
   const installState = useInstallPrompt();
+  // Flag count rides on the per-connect bootstrap + MOD_FLAG_COUNT live
+  // event — no per-component fetch + interval anymore.
+  const { bootstrap, setModFlagCount } = useSessionBootstrap();
+  const pendingFlags = bootstrap?.modFlagCount ?? null;
 
   const has = (p: string) => user.permissions.includes(p);
   const isStaff = has(PERMISSIONS.MODERATION_QUEUE_REVIEW) || has(PERMISSIONS.ADMIN_CONFIG);
   const isAdmin = has(PERMISSIONS.ADMIN_CONFIG);
   const canModQueue = has(PERMISSIONS.MODERATION_QUEUE_REVIEW);
-
-  const refreshFlagCount = useCallback(() => {
-    if (!canModQueue) return;
-    apiFetch("/api/admin/moderation/flags")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d) setPendingFlags((d.flags as unknown[]).length); })
-      .catch(() => {});
-  }, [canModQueue]);
-
-  useEffect(() => {
-    refreshFlagCount();
-    if (!canModQueue) return;
-    const id = setInterval(refreshFlagCount, 30_000);
-    return () => clearInterval(id);
-  }, [canModQueue, refreshFlagCount]);
 
   const initials = profile.displayName.slice(0, 1).toUpperCase();
 
@@ -341,7 +329,7 @@ export function AppSidebar({
       {showModQueue && (
         <ModQueueModal
           onClose={() => setShowModQueue(false)}
-          onCountChange={(n) => setPendingFlags(n)}
+          onCountChange={(n) => setModFlagCount(n)}
         />
       )}
 

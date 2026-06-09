@@ -1,8 +1,9 @@
-import { and, eq, isNull } from "drizzle-orm";
-import { sessions, userBans, userMutes } from "@legends/db/schema";
+import { eq } from "drizzle-orm";
+import { userBans, userMutes } from "@legends/db/schema";
 import { REDIS_CHANNELS, REDIS_KEYS } from "@legends/shared";
 import { db } from "./db";
 import { redis } from "./redis";
+import { revokeUserJtis } from "./auth-revoke";
 
 export async function banUser(args: {
   userId: string;
@@ -11,21 +12,27 @@ export async function banUser(args: {
   expiresAt: Date | null;
   sourceFlagId?: string | null;
 }): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.insert(userBans).values({
-      userId: args.userId,
-      bannedByUserId: args.bannedByUserId,
-      reason: args.reason,
-      expiresAt: args.expiresAt,
-      sourceFlagId: args.sourceFlagId ?? null,
-    });
-    await tx
-      .update(sessions)
-      .set({ revokedAt: new Date() })
-      .where(and(eq(sessions.userId, args.userId), isNull(sessions.revokedAt)));
+  await db.insert(userBans).values({
+    userId: args.userId,
+    bannedByUserId: args.bannedByUserId,
+    reason: args.reason,
+    expiresAt: args.expiresAt,
+    sourceFlagId: args.sourceFlagId ?? null,
   });
+  await revokeUserJtis(args.userId);
   await redis.set(REDIS_KEYS.BAN_CACHE(args.userId), "1", "EX", 60);
   await redis.publish(REDIS_CHANNELS.USER_BANNED, JSON.stringify({ userId: args.userId }));
+}
+
+export async function liftBan(banId: string, liftedByUserId: string): Promise<void> {
+  const now = new Date();
+  const [row] = await db
+    .update(userBans)
+    .set({ liftedAt: now, liftedByUserId })
+    .where(eq(userBans.id, banId))
+    .returning({ userId: userBans.userId });
+  if (!row) return;
+  await redis.del(REDIS_KEYS.BAN_CACHE(row.userId));
 }
 
 export async function muteUser(args: {

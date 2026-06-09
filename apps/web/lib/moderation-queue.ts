@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import {
   encryptionKeys,
   messageFlags,
@@ -6,7 +6,9 @@ import {
   users,
 } from "@legends/db/schema";
 import { decryptMessage, unwrapKey } from "@legends/crypto";
+import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "./db";
+import { redis } from "./redis";
 
 export interface ModerationFlagRow {
   id: string;
@@ -101,4 +103,19 @@ export async function softDeleteMessage(messageId: string): Promise<void> {
     .update(messages)
     .set({ deletedAt: new Date() })
     .where(eq(messages.id, BigInt(messageId)));
+}
+
+/**
+ * Recompute pending-flag count and broadcast it on REDIS_CHANNELS.MOD_FLAG_COUNT.
+ * The WS server fans this out to the `mod:queue` room so every connected
+ * moderator's badge updates without polling. Call from every flag-mutation
+ * path (file/resolve/delete) right after the DB write commits.
+ */
+export async function publishPendingFlagCount(): Promise<void> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(messageFlags)
+    .where(eq(messageFlags.status, "pending"));
+  const n = row?.n ?? 0;
+  await redis.publish(REDIS_CHANNELS.MOD_FLAG_COUNT, JSON.stringify({ count: n }));
 }

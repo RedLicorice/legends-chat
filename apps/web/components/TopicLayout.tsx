@@ -12,6 +12,7 @@ import { PasskeyBanner } from "@/components/PasskeyBanner";
 import { TopicPasswordGate } from "@/components/TopicPasswordGate";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
 import type { ChatItem } from "@/components/ChatListItem";
+import type { TopicBootstrapHashtag, TopicBootstrapMember } from "@legends/shared";
 
 interface Props {
   user: {
@@ -34,9 +35,11 @@ interface Props {
   highlightMessageId?: string;
   canPost: boolean;
   canReply: boolean;
+  initialMembers: TopicBootstrapMember[];
+  initialHashtags: TopicBootstrapHashtag[];
 }
 
-export function TopicLayout({ user, chatItems, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId, canPost, canReply }: Props) {
+export function TopicLayout({ user, chatItems, currentSlug, topic, mute, hasPasskey, giphyEnabled, communityName, communityIconUrl, highlightMessageId, canPost, canReply, initialMembers, initialHashtags }: Props) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [, setConnected] = useState(false);
@@ -169,6 +172,8 @@ export function TopicLayout({ user, chatItems, currentSlug, topic, mute, hasPass
               onExpandSidebar={expand}
               canPost={canPost}
               canReply={canReply}
+              initialMembers={initialMembers}
+              initialHashtags={initialHashtags}
             />
           )}
         </TopicPasswordGate>

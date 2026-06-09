@@ -3,8 +3,10 @@ import type { Server } from "socket.io";
 import { messages, polls, topics } from "@legends/db/schema";
 import { WS_EVENTS } from "@legends/shared";
 import { db } from "./db";
+import { runAsLeader } from "./leader-lock";
 
 const TICK_MS = 60_000;
+const LOCK_TTL_MS = TICK_MS * 3;
 
 async function purgeAgeMode(io: Server): Promise<void> {
   const rows = await db
@@ -61,15 +63,14 @@ export async function purgeCountModeForTopic(io: Server, topicId: string, max: n
   }
 }
 
-export function startAutoDelete(io: Server): void {
-  const tick = async () => {
-    try {
-      await purgeAgeMode(io);
-    } catch (err) {
-      console.error("[autodelete] tick failed", err);
-    }
-  };
-  setTimeout(tick, 5_000);
-  setInterval(tick, TICK_MS);
-  console.log("[autodelete] worker started");
+export function startAutoDelete(io: Server): () => void {
+  const cancel = runAsLeader({
+    key: "legends:leader:autodelete",
+    intervalMs: TICK_MS,
+    lockTtlMs: LOCK_TTL_MS,
+    label: "autodelete",
+    tick: () => purgeAgeMode(io),
+  });
+  console.log("[autodelete] leader-elected worker started");
+  return cancel;
 }

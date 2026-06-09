@@ -3,6 +3,7 @@ import { apiFetch } from "@/lib/fetch";
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { useSessionBootstrap } from "@/contexts/SessionBootstrapContext";
 
 const AUTH_PATHS = ["/login", "/register", "/auth/"];
 
@@ -18,10 +19,14 @@ function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
 
 export function PushSetup() {
   const pathname = usePathname();
+  const { bootstrap } = useSessionBootstrap();
+  const vapidKey = bootstrap?.pushVapidPublicKey ?? null;
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     if (pathname && AUTH_PATHS.some((p) => pathname.startsWith(p))) return;
+    if (!vapidKey) return;
 
     let cancelled = false;
     (async () => {
@@ -31,14 +36,12 @@ export function PushSetup() {
         const existing = await reg.pushManager.getSubscription();
         if (existing) return;
 
-        const vapid = await apiFetch("/api/push/vapid").then((r) => r.json());
-        if (!vapid.publicKey) return;
         const permission = await Notification.requestPermission();
         if (permission !== "granted") return;
 
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToArrayBuffer(vapid.publicKey),
+          applicationServerKey: urlBase64ToArrayBuffer(vapidKey),
         });
         const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
         if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return;
@@ -59,7 +62,7 @@ export function PushSetup() {
     return () => {
       cancelled = true;
     };
-  }, [pathname]);
+  }, [pathname, vapidKey]);
 
   return null;
 }

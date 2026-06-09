@@ -6,7 +6,7 @@ import { PERMISSIONS, banReasonSchema } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { banUser, muteUser } from "@/lib/moderation";
-import { resolveFlag, softDeleteMessage } from "@/lib/moderation-queue";
+import { publishPendingFlagCount, resolveFlag, softDeleteMessage } from "@/lib/moderation-queue";
 
 const dismissSchema = z.object({ action: z.literal("dismiss") });
 const deleteSchema = z.object({ action: z.literal("delete") });
@@ -46,12 +46,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = parsed.data;
   if (body.action === "dismiss") {
     await resolveFlag({ flagId, reviewerUserId: user.id, status: "dismissed" });
+    await publishPendingFlagCount();
     return NextResponse.json({ ok: true });
   }
 
   // All non-dismiss actions soft-delete the offending message.
   await softDeleteMessage(flag.messageId.toString());
   await resolveFlag({ flagId, reviewerUserId: user.id, status: "actioned" });
+  await publishPendingFlagCount();
 
   if (body.action === "ban") {
     if (!user.permissions.has(PERMISSIONS.USERS_BAN_DIRECT)) {

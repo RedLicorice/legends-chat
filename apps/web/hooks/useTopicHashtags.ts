@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { WS_EVENTS } from "@legends/shared";
 
@@ -7,19 +7,16 @@ export interface HashtagCloudEntry {
   count: number;
 }
 
-export function useTopicHashtags(topicId: string, socket: Socket | null) {
-  const [tags, setTags] = useState<HashtagCloudEntry[]>([]);
+// Initial state arrives via the per-topic TOPIC_JOIN bootstrap. Live
+// HASHTAG_CLOUD_UPDATE events fold in any new tags as messages stream.
+export function useTopicHashtags(
+  topicId: string,
+  socket: Socket | null,
+  initialTags: HashtagCloudEntry[] = [],
+) {
+  const [tags, setTags] = useState<HashtagCloudEntry[]>(initialTags);
 
-  const load = useCallback(() => {
-    fetch(`/api/topics/${topicId}/hashtags`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: HashtagCloudEntry[]) => setTags(data))
-      .catch(() => undefined);
-  }, [topicId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { setTags(initialTags); }, [initialTags]);
 
   useEffect(() => {
     if (!socket) return;
@@ -39,5 +36,5 @@ export function useTopicHashtags(topicId: string, socket: Socket | null) {
     return () => { socket.off(WS_EVENTS.HASHTAG_CLOUD_UPDATE, handler); };
   }, [socket, topicId]);
 
-  return { tags, reload: load };
+  return { tags };
 }

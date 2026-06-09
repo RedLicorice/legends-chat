@@ -68,9 +68,23 @@ export async function POST(req: Request) {
     passwordHash,
     role: grantedRole,
     invitedByCodeId: inviteCodeId ?? undefined,
-  }).returning({ id: users.id, role: users.role });
+  }).returning({
+    id: users.id,
+    role: users.role,
+    displayName: users.displayName,
+    avatarUrl: users.avatarUrl,
+    isAnon: users.isAnon,
+    presenceOptOut: users.presenceOptOut,
+  });
 
-  const { accessJwt, refreshJwt } = await issueSession(newUser!.id, newUser!.role);
+  const { accessJwt, refreshJwt } = await issueSession({
+    id: newUser!.id,
+    role: newUser!.role,
+    displayName: newUser!.displayName,
+    avatarUrl: newUser!.avatarUrl ?? null,
+    isAnon: newUser!.isAnon,
+    presenceOptOut: newUser!.presenceOptOut,
+  });
   await setAuthCookies(accessJwt, refreshJwt);
 
   // Notify bots of new member (best-effort)

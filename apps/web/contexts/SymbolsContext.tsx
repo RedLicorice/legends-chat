@@ -1,9 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
-
-const AUTH_PATHS = ["/login", "/register", "/auth/"];
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useSessionBootstrap } from "@/contexts/SessionBootstrapContext";
 
 export interface AppSymbol {
   id: number;
@@ -29,40 +27,35 @@ const SymbolsContext = createContext<SymbolsContextValue>({
   refetch: () => undefined,
 });
 
+// Symbols are part of the per-connect SessionBootstrap, so this provider
+// just adapts the shared bootstrap state to the existing useSymbols()
+// consumer surface. `refetch()` round-trips /api/symbols to fold post-edit
+// state into the snapshot — used by the admin tools after editing the
+// symbols table, where waiting for the next bootstrap push would be too
+// slow.
 export function SymbolsProvider({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const [symbols, setSymbols] = useState<AppSymbol[]>([]);
+  const { bootstrap } = useSessionBootstrap();
+  const [override, setOverride] = useState<AppSymbol[] | null>(null);
 
-  const load = useCallback(() => {
-    fetch("/api/symbols")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: AppSymbol[]) => setSymbols(data))
+  const symbols = override ?? bootstrap?.symbols ?? [];
+
+  const refetch = useCallback(() => {
+    void fetch("/api/symbols", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: AppSymbol[] | null) => {
+        if (data) setOverride(data);
+      })
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    if (pathname && AUTH_PATHS.some((p) => pathname.startsWith(p))) return;
-    load();
-    const onFocus = () => load();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [load, pathname]);
+  const value = useMemo<SymbolsContextValue>(() => ({
+    symbols,
+    isKnownSymbol: (sym: string) => symbols.some((s) => s.symbol === sym.toLowerCase()),
+    getSymbol: (sym: string) => symbols.find((s) => s.symbol === sym.toLowerCase()),
+    refetch,
+  }), [symbols, refetch]);
 
-  const isKnownSymbol = useCallback(
-    (sym: string) => symbols.some((s) => s.symbol === sym.toLowerCase()),
-    [symbols],
-  );
-
-  const getSymbol = useCallback(
-    (sym: string) => symbols.find((s) => s.symbol === sym.toLowerCase()),
-    [symbols],
-  );
-
-  return (
-    <SymbolsContext.Provider value={{ symbols, isKnownSymbol, getSymbol, refetch: load }}>
-      {children}
-    </SymbolsContext.Provider>
-  );
+  return <SymbolsContext.Provider value={value}>{children}</SymbolsContext.Provider>;
 }
 
 export function useSymbols() {

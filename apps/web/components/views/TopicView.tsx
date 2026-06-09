@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { TopicLayout } from "@/components/TopicLayout";
 import { PWASplash } from "@/components/PWASplash";
-import { useTopic } from "@/lib/hooks/use-topic";
+import { useTopicBootstrap } from "@/lib/hooks/use-topic-bootstrap";
 import { useMe } from "@/lib/hooks/use-me";
 import { useChatList } from "@/lib/hooks/use-chat-list";
 
@@ -12,7 +12,7 @@ export function TopicView({ slug }: { slug: string | undefined }) {
   const searchParams = useSearchParams();
   const highlightMessageId = searchParams?.get("msg") ?? undefined;
 
-  const { data, status } = useTopic(slug);
+  const { data, status } = useTopicBootstrap(slug);
   const { me, status: meStatus } = useMe();
   const { data: list } = useChatList();
 
@@ -69,6 +69,8 @@ export function TopicView({ slug }: { slug: string | undefined }) {
       highlightMessageId={highlightMessageId}
       canPost={data.canPost}
       canReply={data.canReply}
+      initialMembers={data.members}
+      initialHashtags={data.hashtags}
     />
   );
 }

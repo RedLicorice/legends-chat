@@ -4,6 +4,7 @@ import { PERMISSIONS } from "@legends/shared";
 import { roles, rolesPermissions, topics } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { revokeJtisForRole } from "@/lib/auth-revoke";
 
 function parseTopicPerm(perm: string): { slug: string; action: "view" | "read" | "post" } | null {
   const m = perm.match(/^topic\.([^.]+)\.(view|read|post)$/);
@@ -30,7 +31,9 @@ export async function PATCH(
     await db.update(roles).set({ label: body.label.trim() }).where(eq(roles.name, name));
   }
 
+  let permissionsChanged = false;
   if (Array.isArray(body.permissions)) {
+    permissionsChanged = true;
     // Get old permissions before replacing
     const oldPerms = await db
       .select({ permission: rolesPermissions.permission })
@@ -75,6 +78,10 @@ export async function PATCH(
     }
   }
 
+  if (permissionsChanged) {
+    await revokeJtisForRole(name);
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -92,6 +99,7 @@ export async function DELETE(
   if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (role.isSystem) return NextResponse.json({ error: "cannot delete system role" }, { status: 400 });
 
+  await revokeJtisForRole(name);
   await db.delete(rolesPermissions).where(eq(rolesPermissions.role, name));
   await db.delete(roles).where(eq(roles.name, name));
   return NextResponse.json({ ok: true });

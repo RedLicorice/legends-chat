@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { userBans, userMutes } from "@legends/db/schema";
+import { userMutes } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { liftBan } from "@/lib/moderation";
 
 export async function DELETE(
   req: Request,
@@ -17,12 +18,11 @@ export async function DELETE(
   const url = new URL(req.url);
   const type = url.searchParams.get("type") ?? "ban";
   const { id } = await params;
-  const now = new Date();
 
   if (type === "mute") {
-    await db.update(userMutes).set({ liftedAt: now, liftedByUserId: user.id }).where(eq(userMutes.id, id));
+    await db.update(userMutes).set({ liftedAt: new Date(), liftedByUserId: user.id }).where(eq(userMutes.id, id));
   } else {
-    await db.update(userBans).set({ liftedAt: now, liftedByUserId: user.id }).where(eq(userBans.id, id));
+    await liftBan(id, user.id);
   }
 
   return NextResponse.json({ ok: true });

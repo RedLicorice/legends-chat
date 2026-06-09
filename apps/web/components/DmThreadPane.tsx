@@ -93,6 +93,11 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
   const messagesRef = useRef<Message[]>([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  // Event-driven decrypt queue (same pattern as TopicView). The poll-sync
+  // interval drains this Set instead of scanning the full messages array
+  // each tick — O(pending) vs O(messages).
+  const pendingDecryptRef = useRef<Set<string>>(new Set());
+
   const peer = conversation.peer;
   const isE2eeThread = Boolean(
     conversation.isE2ee && peer && peer.type === "user" && conversation.e2eeRoomId,
@@ -142,11 +147,13 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
         if (!mod || !e2eeReady) return;
         try { await mod.pollSync(); } catch { return; }
         if (!isE2eeThread || !conversation.e2eeRoomId || !peer || peer.type !== "user") return;
+        if (pendingDecryptRef.current.size === 0) return;
         const matrixPeer = `@${peer.id}:legends.local`;
         const newly: Record<string, string> = {};
-        for (const m of messagesRef.current) {
-          if (!m.ciphertext) continue;
-          if (decryptedRef.current[m.id] != null) continue;
+        for (const id of Array.from(pendingDecryptRef.current)) {
+          const m = messagesRef.current.find((x) => x.id === id);
+          if (!m?.ciphertext) { pendingDecryptRef.current.delete(id); continue; }
+          if (decryptedRef.current[id] != null) { pendingDecryptRef.current.delete(id); continue; }
           try {
             const env = toIncomingEnvelope({
               envelope: m.ciphertext,
@@ -158,7 +165,8 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
             });
             const text = await mod.decryptDm(conversation.e2eeRoomId, env);
             newly[m.id] = text;
-          } catch { /* still missing key */ }
+            pendingDecryptRef.current.delete(id);
+          } catch { /* leave in Set; retry next drain */ }
         }
         if (Object.keys(newly).length > 0) {
           setDecryptedById((prev) => ({ ...prev, ...newly }));
@@ -220,6 +228,13 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
       const d = (await r.json()) as { messages: Message[]; e2eeRoomId: string | null; isE2ee: boolean };
       if (cancelled) return;
       setMessages(d.messages);
+      // Seed the pending Set with every encrypted row we don't already have
+      // plaintext for — the drain interval will try them on the next tick.
+      for (const m of d.messages) {
+        if (m.ciphertext && decryptedRef.current[m.id] == null) {
+          pendingDecryptRef.current.add(m.id);
+        }
+      }
 
       if (isE2eeThread && d.e2eeRoomId && cryptoRef.current && peer) {
         const mod = cryptoRef.current;
@@ -239,8 +254,9 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
               });
               const text = await mod.decryptDm(d.e2eeRoomId!, env);
               newly[m.id] = text;
+              pendingDecryptRef.current.delete(m.id);
             } catch {
-              // Locked row — pollSync will fill it in later.
+              // Locked row — stays in the pending Set; drain retries it.
             }
           }),
         );
@@ -267,6 +283,12 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
       createdAt: m.createdAt,
     };
     setMessages((prev) => prev.some((x) => x.id === incomingMsg.id) ? prev : [...prev, incomingMsg]);
+    // Queue for drain regardless of the inline attempt below: if the inline
+    // decrypt succeeds we delete it; if not, it stays in the Set for the
+    // next pollSync tick.
+    if (incomingMsg.ciphertext && decryptedRef.current[incomingMsg.id] == null) {
+      pendingDecryptRef.current.add(incomingMsg.id);
+    }
 
     if (isE2eeThread && conversation.e2eeRoomId && peer && peer.type === "user" && incomingMsg.ciphertext && m.senderId !== currentUserId) {
       const mod = cryptoRef.current ?? (await ensureCrypto());
@@ -280,6 +302,7 @@ export function DmThreadPane({ conversationId, currentUserId, conversation }: Dm
         });
         const text = await mod.decryptDm(conversation.e2eeRoomId, env);
         setDecryptedById((prev) => ({ ...prev, [incomingMsg.id]: text }));
+        pendingDecryptRef.current.delete(incomingMsg.id);
       } catch {
         await mod.pollSync().catch(() => {});
       }

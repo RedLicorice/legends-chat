@@ -160,6 +160,8 @@ export const sessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    accessJti: text("access_jti"),
+    accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }),
   },
   (t) => ({
     userIdx: index("sessions_user_idx").on(t.userId),

@@ -7,3 +7,4 @@ export * from "./invite-code";
 export * from "./log";
 export * from "./link-processor";
 export * from "./shlink-client";
+export * from "./bootstrap";

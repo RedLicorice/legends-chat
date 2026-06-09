@@ -1,12 +1,12 @@
 "use client";
-import { apiFetch } from "@/lib/fetch";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Shield, AlertTriangle, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { PERMISSIONS } from "@legends/shared";
 import { UserProfileModal } from "@/components/UserProfileModal";
 import { ModQueueModal } from "@/components/ModQueueModal";
+import { useSessionBootstrap } from "@/contexts/SessionBootstrapContext";
 
 interface Props {
   user: {
@@ -24,28 +24,14 @@ export function HomeHeader({ user }: Props) {
   const [showProfile, setShowProfile] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showModQueue, setShowModQueue] = useState(false);
-  const [pendingFlags, setPendingFlags] = useState<number | null>(null);
+  const { bootstrap, setModFlagCount } = useSessionBootstrap();
+  const pendingFlags = bootstrap?.modFlagCount ?? null;
 
   const isStaff =
     user.permissions.includes(PERMISSIONS.MODERATION_QUEUE_REVIEW) ||
     user.permissions.includes(PERMISSIONS.ADMIN_CONFIG);
   const canModQueue = user.permissions.includes(PERMISSIONS.MODERATION_QUEUE_REVIEW);
   const initials = profile.displayName.slice(0, 1).toUpperCase();
-
-  const refreshFlagCount = useCallback(() => {
-    if (!canModQueue) return;
-    apiFetch("/api/admin/moderation/flags")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d) setPendingFlags((d.flags as unknown[]).length); })
-      .catch(() => {});
-  }, [canModQueue]);
-
-  useEffect(() => {
-    refreshFlagCount();
-    if (!canModQueue) return;
-    const id = setInterval(refreshFlagCount, 30_000);
-    return () => clearInterval(id);
-  }, [canModQueue, refreshFlagCount]);
 
   return (
     <>
@@ -151,7 +137,7 @@ export function HomeHeader({ user }: Props) {
       {showModQueue && (
         <ModQueueModal
           onClose={() => setShowModQueue(false)}
-          onCountChange={(n) => setPendingFlags(n)}
+          onCountChange={(n) => setModFlagCount(n)}
         />
       )}
     </>

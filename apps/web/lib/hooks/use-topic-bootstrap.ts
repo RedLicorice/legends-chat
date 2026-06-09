@@ -1,0 +1,118 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { WS_EVENTS, type TopicBootstrap, type TopicBootstrapAck } from "@legends/shared";
+import type { ResourceStatus } from "@/lib/hooks/use-api-resource";
+import { useSessionBootstrap } from "@/contexts/SessionBootstrapContext";
+import { apiFetch } from "@/lib/fetch";
+
+// Map the WS bootstrap fields into the legacy /api/topic/[slug] payload
+// shape so the rest of TopicView keeps working unchanged.
+export interface TopicBootstrapPayload {
+  topic: TopicBootstrap["topic"];
+  mute: TopicBootstrap["mute"];
+  hasPasskey: boolean;
+  giphyEnabled: boolean;
+  canPost: boolean;
+  canReply: boolean;
+  members: TopicBootstrap["members"];
+  hashtags: TopicBootstrap["hashtags"];
+}
+
+export interface UseTopicBootstrapResult {
+  data: TopicBootstrapPayload | null;
+  status: ResourceStatus;
+}
+
+/**
+ * Topic-open data loader. Default path: emit TOPIC_JOIN on the shared
+ * session socket and await the ack. Cold-start path: when no socket
+ * exists yet (first paint, before SessionBootstrapProvider has wired up),
+ * fall back to the REST /api/topic/<slug> route so we don't block on
+ * websocket setup. The REST path is for cold-start only — it does NOT
+ * include members/hashtags; those still resolve on the live socket.
+ */
+export function useTopicBootstrap(slug: string | undefined): UseTopicBootstrapResult {
+  const { socket } = useSessionBootstrap();
+  const [data, setData] = useState<TopicBootstrapPayload | null>(null);
+  const [status, setStatus] = useState<ResourceStatus>("loading");
+  const slugRef = useRef<string | undefined>(slug);
+  slugRef.current = slug;
+
+  useEffect(() => {
+    if (!slug) { setData(null); setStatus("loading"); return; }
+    let cancelled = false;
+    // Stale-while-revalidate: keep prior data on slug/socket change so the
+    // UI never falls back to PWASplash between renders. Only `setStatus`
+    // flips to "loading" — `setData` is updated when fresh data arrives.
+    setStatus("loading");
+
+    async function bootstrapOverSocket() {
+      if (!socket) return false;
+      // Socket.io v4 emitWithAck returns a Promise that resolves with the
+      // ack payload. We thread the slug straight through — the server
+      // accepts slug OR id and resolves internally.
+      try {
+        const ack = (await socket
+          .timeout(8000)
+          .emitWithAck(WS_EVENTS.TOPIC_JOIN, slug)) as
+          | (TopicBootstrapAck & { messages?: unknown; reactions?: unknown; onlineUserIds?: unknown; myPollVotes?: unknown })
+          | undefined;
+        if (cancelled || slugRef.current !== slug) return true;
+        if (!ack || !("ok" in ack)) {
+          setStatus("error");
+          return true;
+        }
+        if (!ack.ok) {
+          if (ack.error === "not_found") setStatus("notFound");
+          else if (ack.error === "forbidden") setStatus("forbidden");
+          else setStatus("error");
+          return true;
+        }
+        setData({
+          topic: ack.data.topic,
+          mute: ack.data.mute,
+          hasPasskey: ack.data.hasPasskey,
+          giphyEnabled: ack.data.giphyEnabled,
+          canPost: ack.data.canPost,
+          canReply: ack.data.canReply,
+          members: ack.data.members,
+          hashtags: ack.data.hashtags,
+        });
+        setStatus("ready");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // COLD START path. Hits when the socket hasn't connected yet (first
+    // paint, or transient disconnect). Mirrors the legacy
+    // /api/topic/<slug> shape — members + hashtags fill in once the
+    // socket comes up via TOPIC_JOIN.
+    async function bootstrapOverRest() {
+      try {
+        const r = await apiFetch(`/api/topic/${encodeURIComponent(slug!)}`);
+        if (cancelled || slugRef.current !== slug) return;
+        if (r.status === 404) { setStatus("notFound"); return; }
+        if (r.status === 403) { setStatus("forbidden"); return; }
+        if (r.status === 401) { setStatus("unauthenticated"); return; }
+        if (!r.ok) { setStatus("error"); return; }
+        const j = (await r.json()) as Omit<TopicBootstrapPayload, "members" | "hashtags">;
+        setData({ ...j, members: [], hashtags: [] });
+        setStatus("ready");
+      } catch {
+        if (!cancelled) setStatus("error");
+      }
+    }
+
+    void (async () => {
+      const ok = await bootstrapOverSocket();
+      if (!ok && !cancelled) await bootstrapOverRest();
+    })();
+
+    return () => { cancelled = true; };
+  }, [slug, socket]);
+
+  return { data, status };
+}

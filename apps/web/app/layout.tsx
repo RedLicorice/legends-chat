@@ -3,6 +3,7 @@ import "./globals.css";
 import { PushSetup } from "@/components/PushSetup";
 import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
+import { SessionBootstrapProvider } from "@/contexts/SessionBootstrapContext";
 import { ExternalLinkBootstrap } from "@/components/ExternalLinkBootstrap";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
 import { RootShell } from "@/components/RootShell";
@@ -13,6 +14,10 @@ import { RootShell } from "@/components/RootShell";
 // across navigations. Dynamic Metadata / Viewport still run server-side
 // per request but live OUTSIDE the React tree so they don't affect router
 // reconciliation.
+
+// Mark static so Next caches the rendered tree; this keeps the catch-all
+// route in the `(Static)` bucket instead of re-rendering RSC per request.
+export const dynamic = "force-static";
 
 export const metadata: Metadata = {
   title: "Legends Chat",
@@ -78,14 +83,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: PRE_REACT_BOOT_SCRIPT }} />
       </head>
       <body className="bg-bg text-text">
-        <PushSetup />
-        <TokenRefresh />
-        <ExternalLinkBootstrap>
-          <SymbolsProvider>
-            <RootShell>{children}</RootShell>
-          </SymbolsProvider>
-          <ExternalLinkDialog />
-        </ExternalLinkBootstrap>
+        <SessionBootstrapProvider>
+          <PushSetup />
+          <TokenRefresh />
+          <ExternalLinkBootstrap>
+            <SymbolsProvider>
+              <RootShell>{children}</RootShell>
+            </SymbolsProvider>
+            <ExternalLinkDialog />
+          </ExternalLinkBootstrap>
+        </SessionBootstrapProvider>
       </body>
     </html>
   );

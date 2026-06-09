@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, eq, gt, count, isNull, or } from "drizzle-orm";
-import { topics, passkeyCredentials, topicPrincipalGrants } from "@legends/db/schema";
-import { db } from "@/lib/db";
 import { getCurrentUser, getUserMute } from "@/lib/auth";
 import { getSettingCached } from "@/lib/settings-cache";
+import { psPasskeyCount, psTopicBySlug, psTopicUserGrants } from "@/lib/db-prepared";
 import { canPrincipal, type TopicGrant, type GrantEffect } from "@legends/shared";
 
 export const dynamic = "force-dynamic";
@@ -23,12 +21,14 @@ export async function GET(
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const [topic, mute, giphySetting, passkeyCount] = await Promise.all([
-    db.select().from(topics).where(eq(topics.slug, slug)).limit(1).then((r) => r[0]),
+  const [topicRows, mute, giphySetting, passkeyRows] = await Promise.all([
+    psTopicBySlug.execute({ slug }),
     getUserMute(user.id),
     getSettingCached("giphy_enabled"),
-    db.select({ n: count() }).from(passkeyCredentials).where(eq(passkeyCredentials.userId, user.id)).then((r) => r[0]?.n ?? 0),
+    psPasskeyCount.execute({ userId: user.id }),
   ]);
+  const topic = topicRows[0];
+  const passkeyCount = passkeyRows[0]?.n ?? 0;
   if (!topic) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const viewRoles = (topic.viewRoles as string[] | null) ?? [];
@@ -40,18 +40,10 @@ export async function GET(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const now = new Date();
-  const userGrantRows = await db
-    .select({ action: topicPrincipalGrants.action, effect: topicPrincipalGrants.effect })
-    .from(topicPrincipalGrants)
-    .where(
-      and(
-        eq(topicPrincipalGrants.topicId, topic.id),
-        eq(topicPrincipalGrants.principalType, "user"),
-        eq(topicPrincipalGrants.principalId, user.id),
-        or(isNull(topicPrincipalGrants.expiresAt), gt(topicPrincipalGrants.expiresAt, now)),
-      ),
-    );
+  const userGrantRows = await psTopicUserGrants.execute({
+    topicId: topic.id,
+    principalId: user.id,
+  });
   const userGrants: TopicGrant[] = userGrantRows.map((g) => ({ action: g.action, effect: g.effect as GrantEffect }));
 
   const canPost = canPrincipal(userGrants, (topic.postRoles as string[] | null) ?? [], user.role, "post");

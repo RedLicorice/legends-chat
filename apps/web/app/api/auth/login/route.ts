@@ -19,7 +19,15 @@ export async function POST(req: Request) {
   if (!email || !password) return NextResponse.json({ error: "Email and password required." }, { status: 400 });
 
   const [user] = await db
-    .select({ id: users.id, role: users.role, passwordHash: users.passwordHash })
+    .select({
+      id: users.id,
+      role: users.role,
+      passwordHash: users.passwordHash,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      isAnon: users.isAnon,
+      presenceOptOut: users.presenceOptOut,
+    })
     .from(users)
     .where(eq(users.email, email))
     .limit(1);
@@ -28,7 +36,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
 
-  const { accessJwt, refreshJwt } = await issueSession(user.id, user.role);
+  const { accessJwt, refreshJwt } = await issueSession({
+    id: user.id,
+    role: user.role,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl ?? null,
+    isAnon: user.isAnon,
+    presenceOptOut: user.presenceOptOut,
+  });
   await setAuthCookies(accessJwt, refreshJwt);
 
   return NextResponse.json({ ok: true });

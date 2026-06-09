@@ -23,6 +23,8 @@ export const WS_EVENTS = {
   DM_REQUEST: "dm:request",
   DM_CONVERSATION_UPDATED: "dm:conversation:updated",
   TOPIC_MEMBERS_UPDATED: "topic:members:updated",
+  MOD_FLAG_COUNT: "mod:flag:count",
+  SESSION_BOOTSTRAP: "session:bootstrap",
 
   // client -> server
   MESSAGE_SEND: "message:send",
@@ -75,6 +77,7 @@ export const REDIS_CHANNELS = {
   DM_REQUEST_NEW: "legends:dm:request:new",
   DM_CONVERSATION_UPDATED: "legends:dm:conversation:updated",
   TOPIC_MEMBERS_UPDATED: "legends:topic:members:updated",
+  MOD_FLAG_COUNT: "legends:mod:flag:count",
 } as const;
 
 export const REDIS_KEYS = {

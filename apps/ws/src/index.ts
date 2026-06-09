@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
-import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or, inArray } from "drizzle-orm";
 import { Server, type Socket, type DefaultEventsMap } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
-import { users, topicPrincipalGrants } from "@legends/db/schema";
+import { users, topicPrincipalGrants, rolesPermissions, principalPermissionOverrides } from "@legends/db/schema";
 import { db } from "./db";
 import { cacheClient } from "./redis";
 
@@ -53,7 +53,7 @@ async function maybeProcessLinks(text: string, senderUserId: string | null): Pro
   }
 }
 import {
-  ACCESS_COOKIE,
+  PERMISSIONS,
   REDIS_CHANNELS,
   WS_EVENTS,
   createPollSchema,
@@ -62,6 +62,7 @@ import {
   pollCloseSchema,
   pollVoteSchema,
   reactionToggleSchema,
+  resolvePermissions,
   sendMessageSchema,
   topicReadSchema,
   stripMarkdownPreview,
@@ -73,8 +74,10 @@ import {
   type GrantEffect,
 } from "@legends/shared";
 import { getAllSettings } from "@legends/db/system-settings";
-import { isJtiRevoked, parseCookie, verifyAccessToken } from "./auth";
+import { authenticateSocket } from "./socket-auth";
+import { buildSessionBootstrap, buildTopicBootstrap } from "./bootstrap";
 import { pubClient, subClient } from "./redis";
+import { runAsLeader } from "./leader-lock";
 import { purgeCountModeForTopic, startAutoDelete } from "./autodelete";
 import { getTopicAutoDelete } from "./messages";
 import { notifyTopicMembers } from "./push";
@@ -129,20 +132,44 @@ io.adapter(createAdapter(pubClient, subClient));
 
 io.use(async (socket, next) => {
   try {
-    const token = parseCookie(socket.handshake.headers.cookie, ACCESS_COOKIE);
-    if (!token) return next(new Error("no auth cookie"));
-    const payload = await verifyAccessToken(token);
-    if (await isJtiRevoked(payload.jti)) return next(new Error("token revoked"));
-    socket.data.user = payload;
+    socket.data.user = await authenticateSocket(socket);
     next();
   } catch (err) {
     next(err instanceof Error ? err : new Error("auth failed"));
   }
 });
 
+async function userHasModQueuePerm(userId: string, role: string): Promise<boolean> {
+  const now = new Date();
+  const [rolePerms, overrideRows] = await Promise.all([
+    db.select({ permission: rolesPermissions.permission })
+      .from(rolesPermissions)
+      .where(eq(rolesPermissions.role, role)),
+    db.select({ permission: principalPermissionOverrides.permission, effect: principalPermissionOverrides.effect })
+      .from(principalPermissionOverrides)
+      .where(
+        and(
+          eq(principalPermissionOverrides.principalType, "user"),
+          eq(principalPermissionOverrides.principalId, userId),
+          or(isNull(principalPermissionOverrides.expiresAt), gt(principalPermissionOverrides.expiresAt, now)),
+        ),
+      ),
+  ]);
+  const set = resolvePermissions(
+    rolePerms.map((p) => p.permission),
+    overrideRows as { permission: string; effect: "allow" | "deny" }[],
+  );
+  return set.has(PERMISSIONS.MODERATION_QUEUE_REVIEW);
+}
+
+const MOD_ROOM = "mod:queue";
+
 io.on("connection", async (socket: AuthedSocket) => {
   const user = socket.data.user;
   socket.join(`user:${user.sub}`);
+  userHasModQueuePerm(user.sub, user.role)
+    .then((ok) => { if (ok) socket.join(MOD_ROOM); })
+    .catch(() => {});
   registerP2PHandlers(io, socket);
 
   // Track online presence (skip if user opted out)
@@ -153,6 +180,13 @@ io.on("connection", async (socket: AuthedSocket) => {
     socket.broadcast.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: true });
   }
 
+  // Once-per-connect global bootstrap. Symbols / VAPID / notifications /
+  // mod-flag count rarely change, so a single push at connect saves four
+  // REST round trips on every page open. Live deltas keep these fresh.
+  buildSessionBootstrap(user)
+    .then((payload) => { socket.emit(WS_EVENTS.SESSION_BOOTSTRAP, payload); })
+    .catch((err) => { console.error("[session-bootstrap] failed", err); });
+
   socket.on("disconnect", async () => {
     if (!optOut) {
       await markOffline(user.sub).catch(() => {});
@@ -160,8 +194,11 @@ io.on("connection", async (socket: AuthedSocket) => {
     }
   });
 
-  socket.on(WS_EVENTS.TOPIC_JOIN, async (topicId: string, ack?: (res: unknown) => void) => {
+  socket.on(WS_EVENTS.TOPIC_JOIN, async (slugOrId: string, ack?: (res: unknown) => void) => {
     try {
+      const bootstrap = await buildTopicBootstrap(user, slugOrId);
+      if (!bootstrap.ok) { ack?.({ ok: false, error: bootstrap.error }); return; }
+      const topicId = bootstrap.topicId;
       await ensureTopicMembership(user.sub, topicId);
       socket.join(`topic:${topicId}`);
       const [recent, reactions, onlineIds] = await Promise.all([
@@ -171,9 +208,20 @@ io.on("connection", async (socket: AuthedSocket) => {
       ]);
       const pollIds = recent.filter((m) => m.poll).map((m) => m.poll!.id);
       const myPollVotes = await getMyPollVotes(user.sub, pollIds);
-      ack?.({ ok: true, messages: recent, reactions, onlineUserIds: optOut ? [] : onlineIds, myPollVotes });
+      // `data` carries the TopicBootstrap that replaces the seven per-nav
+      // REST round trips. The legacy fields (messages/reactions/etc) ride
+      // along — they were never part of those round trips, just the
+      // existing socket join ack.
+      ack?.({
+        ok: true,
+        data: bootstrap.data,
+        messages: recent,
+        reactions,
+        onlineUserIds: optOut ? [] : onlineIds,
+        myPollVotes,
+      });
     } catch (err) {
-      ack?.({ ok: false, error: (err as Error).message });
+      ack?.({ ok: false, error: "error", detail: (err as Error).message });
     }
   });
 
@@ -505,6 +553,7 @@ subClient.subscribe(
   REDIS_CHANNELS.DM_MESSAGE_NEW,
   REDIS_CHANNELS.DM_CONVERSATION_UPDATED,
   REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED,
+  REDIS_CHANNELS.MOD_FLAG_COUNT,
   (err) => { if (err) console.error("redis subscribe failed", err); },
 );
 
@@ -604,13 +653,18 @@ subClient.on("message", (channel, message) => {
       });
     } else if (channel === REDIS_CHANNELS.SYMBOLS_UPDATE) {
       io.emit(WS_EVENTS.SYMBOLS_UPDATE, {});
+    } else if (channel === REDIS_CHANNELS.MOD_FLAG_COUNT) {
+      const { count } = JSON.parse(message) as { count: number };
+      // mod:queue room contains every connected user whose JWT has
+      // MODERATION_QUEUE_REVIEW — join logic lives in the connection handler.
+      io.to(MOD_ROOM).emit(WS_EVENTS.MOD_FLAG_COUNT, { count });
     }
   } catch (e) {
     console.error("pubsub parse failed", e);
   }
 });
 
-startAutoDelete(io);
+const cancelAutoDelete = startAutoDelete(io);
 
 // Purge expired anon identities once per hour.
 async function purgeExpiredAnonUsers() {
@@ -626,8 +680,22 @@ async function purgeExpiredAnonUsers() {
     console.error("[anon-cleanup] failed", err);
   }
 }
-purgeExpiredAnonUsers();
-setInterval(purgeExpiredAnonUsers, 60 * 60 * 1000);
+
+const ANON_PURGE_INTERVAL_MS = 60 * 60 * 1000;
+const cancelAnonPurge = runAsLeader({
+  key: "legends:leader:anon-cleanup",
+  intervalMs: ANON_PURGE_INTERVAL_MS,
+  lockTtlMs: ANON_PURGE_INTERVAL_MS * 3,
+  label: "anon-cleanup",
+  tick: purgeExpiredAnonUsers,
+});
+
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    cancelAutoDelete();
+    cancelAnonPurge();
+  });
+}
 
 const port = Number(process.env.WS_PORT ?? 3001);
 httpServer.listen(port, () => {

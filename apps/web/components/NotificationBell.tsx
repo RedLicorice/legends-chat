@@ -1,14 +1,13 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { io } from "socket.io-client";
 import { Bell, Megaphone, Lock } from "lucide-react";
-import { WS_EVENTS } from "@legends/shared";
 import { cn } from "@/lib/cn";
 import type { DmRequestPayload } from "@/lib/dm-requests";
+import { useSessionBootstrap } from "@/contexts/SessionBootstrapContext";
 
 // Mention/reply/broadcast share the same camelCase preview-style payload.
 // dm_request rides on the same row but ships a snake_case payload mirrored
@@ -50,42 +49,28 @@ function timeAgo(date: string): string {
 
 export function NotificationBell({ align = "right" }: { align?: "left" | "right" }) {
   const router = useRouter();
+  const { bootstrap, markNotificationsRead } = useSessionBootstrap();
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Notification[]>([]);
-  const [unread, setUnread] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   // Per-notification action state for dm_request rows. Keyed by notif.id so
   // multiple pending requests can be acted on independently.
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<Record<string, string>>({});
+  // Local optimistic mask: ids whose row we've collapsed (e.g. after
+  // accept/decline) so they hide before the next bootstrap delta arrives.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
-  const load = useCallback(async () => {
-    const res = await apiFetch("/api/user/notifications");
-    if (!res.ok) return;
-    const data = await res.json() as { items: Notification[]; unread: number };
-    setItems(data.items);
-    setUnread(data.unread);
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
-  // Own socket connection — bell is always in AppSidebar (no prop to thread through)
-  useEffect(() => {
-    const socket = io(window.location.origin, {
-      withCredentials: true,
-      transports: ["polling", "websocket"],
-    });
-    socket.on(WS_EVENTS.NOTIFICATION_NEW, (notif: Notification) => {
-      setItems((prev) => [notif, ...prev].slice(0, 50));
-      setUnread((n) => n + 1);
-    });
-    return () => { socket.disconnect(); };
-  }, []);
+  // Items + unread now ride on the shared session bootstrap. NOTIFICATION_NEW
+  // pushes through SessionBootstrapContext, which prepends to .items and
+  // increments .unread — no per-bell socket or REST hit needed.
+  const itemsRaw = (bootstrap?.notifications.items ?? []) as Notification[];
+  const items = itemsRaw.filter((n) => !collapsed.has(n.id));
+  const unread = bootstrap?.notifications.unread ?? 0;
 
   useEffect(() => {
     if (!open) return;
@@ -121,25 +106,21 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
     setPanelStyle(computeStyle());
     setOpen(nextOpen);
     if (nextOpen && unread > 0) {
-      setUnread(0);
-      setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
+      markNotificationsRead();
       await apiFetch("/api/user/notifications", { method: "PATCH" });
     }
   }
 
-  // Mark a single notification as read locally and decrement the unread badge
-  // if it wasn't already read. The server-side PATCH /api/user/notifications
-  // is a "mark all read" bulk op fired on panel-open; accept/decline already
-  // mark the matching dm_request row read server-side, so we just sync UI.
+  // Mark a single dm_request row as collapsed after accept/decline. The
+  // server already marked the underlying notification row read, and the
+  // bulk "mark all" PATCH (above) also fires on panel-open — this just
+  // hides the row optimistically.
   function markLocalRead(id: string) {
-    setItems((prev) =>
-      prev.map((it) => {
-        if (it.id !== id) return it;
-        if (it.readAt) return it;
-        setUnread((n) => Math.max(0, n - 1));
-        return { ...it, readAt: new Date().toISOString() };
-      }),
-    );
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }
 
   async function handleAccept(n: Notification, convId: string) {

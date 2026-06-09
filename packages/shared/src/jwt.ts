@@ -3,6 +3,11 @@ import { z } from "zod";
 export const accessTokenPayloadSchema = z.object({
   sub: z.string().uuid(),
   role: z.string(),
+  permissions: z.array(z.string()),
+  displayName: z.string(),
+  avatarUrl: z.string().nullable(),
+  isAnon: z.boolean(),
+  presenceOptOut: z.boolean(),
   jti: z.string(),
   iat: z.number(),
   exp: z.number(),

@@ -5,6 +5,7 @@ import { passkeyCredentials, userBans, userMutes, users } from "@legends/db/sche
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { revokeUserJtis } from "@/lib/auth-revoke";
 import { logDeviceChange } from "@/lib/device-change-log";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -108,6 +109,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  await revokeUserJtis(id);
+
   return NextResponse.json({ ok: true });
 }
 
@@ -123,6 +126,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: "cannot delete own account" }, { status: 400 });
   }
 
+  await revokeUserJtis(id);
   await db.delete(users).where(eq(users.id, id));
 
   return NextResponse.json({ ok: true });

@@ -26,6 +26,7 @@ import type { EncryptedEnvelope, IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
 import { useTopicHashtags } from "@/hooks/useTopicHashtags";
+import type { TopicBootstrapHashtag, TopicBootstrapMember } from "@legends/shared";
 
 interface Attachment {
   type: "image" | "gif" | "file";
@@ -120,6 +121,12 @@ interface TopicViewProps {
   onSidebarUpdate?: (update: SidebarTopicUpdate) => void;
   canPost: boolean;
   canReply: boolean;
+  /** Members list from the topic bootstrap. Live updates from
+   *  TOPIC_MEMBERS_UPDATED still patch this in-place. */
+  initialMembers: TopicBootstrapMember[];
+  /** Hashtag cloud from the topic bootstrap. HASHTAG_CLOUD_UPDATE keeps it
+   *  fresh once mounted. */
+  initialHashtags: TopicBootstrapHashtag[];
 }
 
 async function processLinks(text: string): Promise<string> {
@@ -177,7 +184,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
   );
 }
 
-export function TopicView({ topic, currentUser, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate, canPost, canReply }: TopicViewProps) {
+export function TopicView({ topic, currentUser, mute, giphyEnabled, communityName, communityIconUrl, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar, onSidebarUpdate, canPost, canReply, initialMembers, initialHashtags }: TopicViewProps) {
   const draftKey = `legends-draft-${topic.id}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -189,9 +196,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [showComposeEmoji, setShowComposeEmoji] = useState(false);
   const [showUsers, setShowUsers] = useState(false);
-  const [members, setMembers] = useState<Member[]>([]);
+  const [members, setMembers] = useState<Member[]>(initialMembers);
   const [membersSearch, setMembersSearch] = useState("");
-  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersLoading] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -262,7 +269,7 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
 
   const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
 
-  const { tags: topicTags } = useTopicHashtags(topic.id, socketRef.current);
+  const { tags: topicTags } = useTopicHashtags(topic.id, socketRef.current, initialHashtags);
   const { symbols, refetch: refetchSymbols } = useSymbols();
 
   const canCreatePoll = currentUser.role !== "user";
@@ -534,7 +541,16 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         (res: { ok: boolean; messages?: Message[]; reactions?: ReactionRow[]; onlineUserIds?: string[]; myPollVotes?: Record<string, string[]>; error?: string }) => {
           if (!active) return;
           if (res.ok) {
-            if (res.messages) setMessages(res.messages);
+            if (res.messages) {
+              setMessages(res.messages);
+              // Seed the pending Set with every E2EE row so the periodic
+              // drain picks them up regardless of when keys arrive.
+              for (const m of res.messages) {
+                if (m.ciphertextJson && !decryptedRef.current.has(m.id)) {
+                  pendingDecryptRef.current.add(m.id);
+                }
+              }
+            }
             if (res.reactions) setReactions(res.reactions);
             if (res.onlineUserIds && !currentUser.presenceOptOut) setOnlineUsers(new Set(res.onlineUserIds));
             if (res.myPollVotes) setMyPollVotes(res.myPollVotes);
@@ -546,6 +562,11 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     socket.on(WS_EVENTS.MESSAGE_NEW, (msg: Message) => {
       if (!active || msg.topicId !== topic.id) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      // E2EE rows: enqueue for the drain interval to decrypt as soon as we
+      // either already have the room key or get it on the next pollSync.
+      if (msg.ciphertextJson && !decryptedRef.current.has(msg.id)) {
+        pendingDecryptRef.current.add(msg.id);
+      }
       if (msg.replyToMessageId && topic.isFeed) {
         setExpandedThreads((prev) => new Set([...prev, String(msg.replyToMessageId)]));
       }
@@ -588,12 +609,15 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
           next.delete(updated.id);
           return next;
         });
+        // Re-enqueue so the drain picks up the new envelope.
+        pendingDecryptRef.current.add(updated.id);
       }
     });
     socket.on(WS_EVENTS.MESSAGE_DELETE, (d: { id: string; topicId: string }) => {
       if (!active || d.topicId !== topic.id) return;
       setMessages((prev) => prev.filter((m) => m.id !== d.id));
       setReactions((prev) => prev.filter((r) => r.messageId !== d.id));
+      pendingDecryptRef.current.delete(d.id);
     });
     socket.on(WS_EVENTS.PRESENCE_UPDATE, (d: { userId: string; online: boolean }) => {
       if (!active || currentUser.presenceOptOut) return;
@@ -702,15 +726,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
     if (last) socketRef.current?.emit(WS_EVENTS.TOPIC_READ, { topicId: topic.id, lastReadMessageId: last.id });
   }, [messages, topic.id, highlightMessageId]);
 
-  // Load members eagerly for mention autocomplete (also drives the members panel)
+  // Members ride on the topic bootstrap (TOPIC_JOIN ack). When the slug
+  // changes, swap to the new initial list. Live deltas land via
+  // TOPIC_MEMBERS_UPDATED, which is wired to the socket listener below.
   useEffect(() => {
-    setMembersLoading(true);
-    apiFetch(`/api/topics/${topic.id}/members`)
-      .then((r) => r.json())
-      .then((data) => setMembers(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setMembersLoading(false));
-  }, [topic.id]);
+    setMembers(initialMembers);
+  }, [initialMembers]);
 
   useEffect(() => {
     if (!hashtagFilter) {
@@ -894,6 +915,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
   const messagesRef = useRef<Message[]>([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  // Event-driven decrypt queue: every message that arrives with a ciphertext
+  // and has not yet been decrypted gets dropped in this Set. The /api/crypto/
+  // sync interval drains the Set instead of scanning the entire messages
+  // array on each tick — O(pending) vs O(messages).
+  const pendingDecryptRef = useRef<Set<string>>(new Set());
+
   // Build an IncomingEnvelope for `decryptRoom`. Sender id is mapped through
   // `toMatrixUserId` — `decryptRoomEvent` cross-references this with the
   // device that signed the to-device room key.
@@ -912,18 +939,26 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       : args.createdAt.getTime(),
   }), [currentUser.id]);
 
-  // Initial-batch decrypt: when messages change AND crypto is ready, decrypt
-  // every E2EE row that we don't have plaintext for yet.
+  // Initial-batch decrypt: when crypto becomes ready, attempt every queued
+  // ciphertext id once. Rows that still lack a room key stay in the Set so
+  // the periodic drain picks them up on the next pollSync tick.
   useEffect(() => {
     if (!topic.isE2ee || !e2eeReady || !e2eeRoomId) return;
     const mod = cryptoRef.current;
     if (!mod) return;
+    // Seed any messages already on screen that haven't been queued yet —
+    // covers cases where the messages array landed before crypto was ready.
+    for (const m of messagesRef.current) {
+      if (m.ciphertextJson && !decryptedRef.current.has(m.id)) {
+        pendingDecryptRef.current.add(m.id);
+      }
+    }
     let cancelled = false;
     void (async () => {
       const newly: Record<string, string> = {};
-      for (const m of messages) {
-        if (!m.ciphertextJson) continue;
-        if (decryptedRef.current.has(m.id)) continue;
+      for (const id of Array.from(pendingDecryptRef.current)) {
+        const m = messagesRef.current.find((x) => x.id === id);
+        if (!m?.ciphertextJson) { pendingDecryptRef.current.delete(id); continue; }
         try {
           const env = toIncomingTopicEnvelope({
             envelope: m.ciphertextJson,
@@ -933,8 +968,9 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
           });
           const plain = await mod.decryptRoom(e2eeRoomId, env);
           newly[m.id] = plain;
+          pendingDecryptRef.current.delete(id);
         } catch {
-          // Locked row — pollSync will fan in the missing room key later.
+          // Locked row — leave in Set; drain will retry after next pollSync.
         }
       }
       if (cancelled) return;
@@ -948,10 +984,13 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
       }
     })();
     return () => { cancelled = true; };
-  }, [topic.isE2ee, e2eeReady, e2eeRoomId, messages, toIncomingTopicEnvelope]);
+  }, [topic.isE2ee, e2eeReady, e2eeRoomId, toIncomingTopicEnvelope]);
 
   // Periodic /api/crypto/sync poll while the tab is visible. Each tick we
-  // also retry decrypting any still-locked rows. Mirrors DmThreadPane.
+  // drain the pending Set (O(pending) instead of O(messages)) — newly-arrived
+  // ciphertexts get pushed into the Set by MESSAGE_NEW / MESSAGE_EDIT, and
+  // anything still locked stays in the Set until a future pollSync delivers
+  // its room key. Mirrors DmThreadPane.
   useEffect(() => {
     if (!topic.isE2ee || !e2eeReady || !e2eeRoomId) return;
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -961,10 +1000,12 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
         const mod = cryptoRef.current;
         if (!mod) return;
         try { await mod.pollSync(); } catch { return; }
+        if (pendingDecryptRef.current.size === 0) return;
         const newly: Record<string, string> = {};
-        for (const m of messagesRef.current) {
-          if (!m.ciphertextJson) continue;
-          if (decryptedRef.current.has(m.id)) continue;
+        for (const id of Array.from(pendingDecryptRef.current)) {
+          const m = messagesRef.current.find((x) => x.id === id);
+          if (!m?.ciphertextJson) { pendingDecryptRef.current.delete(id); continue; }
+          if (decryptedRef.current.has(id)) { pendingDecryptRef.current.delete(id); continue; }
           try {
             const env = toIncomingTopicEnvelope({
               envelope: m.ciphertextJson,
@@ -974,7 +1015,8 @@ export function TopicView({ topic, currentUser, mute, giphyEnabled, communityNam
             });
             const plain = await mod.decryptRoom(e2eeRoomId, env);
             newly[m.id] = plain;
-          } catch { /* still missing key */ }
+            pendingDecryptRef.current.delete(id);
+          } catch { /* leave in Set; retry next drain */ }
         }
         const keys = Object.keys(newly);
         if (keys.length > 0) {

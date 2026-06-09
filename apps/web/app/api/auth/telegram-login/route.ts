@@ -43,7 +43,14 @@ export async function POST(req: NextRequest) {
   const [u] = await db.select().from(users).where(eq(users.id, row.userId)).limit(1);
   if (!u) return NextResponse.json({ error: "user not found" }, { status: 404 });
 
-  const { accessJwt, refreshJwt } = await issueSession(u.id, u.role);
+  const { accessJwt, refreshJwt } = await issueSession({
+    id: u.id,
+    role: u.role,
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl ?? null,
+    isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
+  });
   await setAuthCookies(accessJwt, refreshJwt);
 
   // Mirror behaviour of /auth/callback — notify bot so it can edit its message.

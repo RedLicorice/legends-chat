@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -13,9 +12,16 @@ import {
   type AccessTokenPayload,
   type Role,
 } from "@legends/shared";
-import { sessions, userBans, userMutes, users, rolesPermissions, principalPermissionOverrides } from "@legends/db/schema";
+import { sessions, users } from "@legends/db/schema";
 import { db } from "./db";
 import { redis } from "./redis";
+import {
+  psRolePermissions,
+  psUserById,
+  psUserBan,
+  psUserMute,
+  psUserPermissionOverrides,
+} from "./db-prepared";
 
 const accessSecret = new TextEncoder().encode(
   process.env.JWT_ACCESS_SECRET ?? (() => { throw new Error("JWT_ACCESS_SECRET not set"); })(),
@@ -29,18 +35,63 @@ const ACCESS_TTL = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 900);
 // the user to re-authenticate via the Telegram bot.
 const REFRESH_TTL = Number(process.env.JWT_REFRESH_TTL_SECONDS ?? 86_400);
 
-export async function issueSession(userId: string, role: Role): Promise<{ accessJwt: string; refreshJwt: string }> {
+export interface SessionProfile {
+  id: string;
+  role: Role;
+  displayName: string;
+  avatarUrl: string | null;
+  isAnon: boolean;
+  presenceOptOut: boolean;
+}
+
+async function loadPermissionsForRole(userId: string, role: Role): Promise<string[]> {
+  const [rolePerms, overrides] = await Promise.all([
+    psRolePermissions.execute({ role }),
+    psUserPermissionOverrides.execute({ principalId: userId }),
+  ]);
+  const set = resolvePermissions(
+    rolePerms.map((p) => p.permission),
+    overrides as { permission: string; effect: "allow" | "deny" }[],
+  );
+  return [...set];
+}
+
+async function loadSessionProfile(userId: string): Promise<SessionProfile | null> {
+  const [u] = await psUserById.execute({ id: userId });
+  if (!u) return null;
+  return {
+    id: u.id,
+    role: u.role as Role,
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl ?? null,
+    isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
+  };
+}
+
+export async function issueSession(profile: SessionProfile): Promise<{ accessJwt: string; refreshJwt: string }> {
   const jti = randomUUID();
   const sid = randomUUID();
   const refreshJti = randomUUID();
 
+  const permissions = await loadPermissionsForRole(profile.id, profile.role);
+
   const [accessJwt, refreshJwt] = await Promise.all([
-    new SignJWT({ sub: userId, role, jti })
+    new SignJWT({
+      sub: profile.id,
+      role: profile.role,
+      permissions,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+      isAnon: profile.isAnon,
+      presenceOptOut: profile.presenceOptOut,
+      jti,
+    })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime(`${ACCESS_TTL}s`)
       .sign(accessSecret),
-    new SignJWT({ sub: userId, jti: refreshJti, sid })
+    new SignJWT({ sub: profile.id, jti: refreshJti, sid })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime(`${REFRESH_TTL}s`)
@@ -49,8 +100,10 @@ export async function issueSession(userId: string, role: Role): Promise<{ access
 
   await db.insert(sessions).values({
     id: sid,
-    userId,
+    userId: profile.id,
     refreshTokenHash: refreshJti,
+    accessJti: jti,
+    accessExpiresAt: new Date(Date.now() + ACCESS_TTL * 1000),
   });
 
   return { accessJwt, refreshJwt };
@@ -115,11 +168,7 @@ export async function refreshAccessCookie(): Promise<boolean> {
 
   if (await isUserBanned(payload.sub)) return false;
 
-  const [u] = await db
-    .select({ id: users.id, role: users.role, isAnon: users.isAnon, anonExpiresAt: users.anonExpiresAt, roleExpiresAt: users.roleExpiresAt, roleFallback: users.roleFallback })
-    .from(users)
-    .where(eq(users.id, payload.sub))
-    .limit(1);
+  const [u] = await psUserById.execute({ id: payload.sub });
   if (!u) return false;
 
   // Anon users expire 48 h after their last refresh — extend the window each time.
@@ -129,13 +178,32 @@ export async function refreshAccessCookie(): Promise<boolean> {
   }
 
   const effectiveRole = await checkAndRevertExpiredRole(u);
+  const permissions = await loadPermissionsForRole(u.id, effectiveRole);
 
   const newJti = randomUUID();
-  const accessJwt = await new SignJWT({ sub: u.id, role: effectiveRole, jti: newJti })
+  const accessJwt = await new SignJWT({
+    sub: u.id,
+    role: effectiveRole,
+    permissions,
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl ?? null,
+    isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
+    jti: newJti,
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${ACCESS_TTL}s`)
     .sign(accessSecret);
+
+  await db
+    .update(sessions)
+    .set({
+      accessJti: newJti,
+      accessExpiresAt: new Date(Date.now() + ACCESS_TTL * 1000),
+      lastUsedAt: new Date(),
+    })
+    .where(eq(sessions.id, payload.sid));
 
   const secure = process.env.NODE_ENV === "production";
   jar.set(ACCESS_COOKIE, accessJwt, {
@@ -161,15 +229,11 @@ export interface CurrentUser {
   permissions: Set<string>;
   displayName: string;
   avatarUrl: string | null;
-  bannerUrl: string | null;
-  email: string | null;
   isAnon: boolean;
   presenceOptOut: boolean;
 }
 
-export const getCurrentUser = cache(getCurrentUserImpl);
-
-async function getCurrentUserImpl(): Promise<CurrentUser | null> {
+export async function getCurrentUser(): Promise<CurrentUser | null> {
   const jar = await cookies();
   const tok = jar.get(ACCESS_COOKIE)?.value;
   if (!tok) return null;
@@ -184,75 +248,31 @@ async function getCurrentUserImpl(): Promise<CurrentUser | null> {
   if (revoked) return null;
   if (await isUserBanned(payload.sub)) return null;
 
-  const [u] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
-  if (!u) return null;
-
-  const effectiveRole = await checkAndRevertExpiredRole(u);
-
-  const now = new Date();
-  const [perms, overrideRows] = await Promise.all([
-    db.select({ permission: rolesPermissions.permission })
-      .from(rolesPermissions)
-      .where(eq(rolesPermissions.role, effectiveRole)),
-    db.select({ permission: principalPermissionOverrides.permission, effect: principalPermissionOverrides.effect })
-      .from(principalPermissionOverrides)
-      .where(
-        and(
-          eq(principalPermissionOverrides.principalType, "user"),
-          eq(principalPermissionOverrides.principalId, u.id),
-          or(isNull(principalPermissionOverrides.expiresAt), gt(principalPermissionOverrides.expiresAt, now)),
-        ),
-      ),
-  ]);
-
   return {
-    id: u.id,
-    role: effectiveRole as Role,
-    permissions: resolvePermissions(perms.map((p) => p.permission), overrideRows as { permission: string; effect: "allow" | "deny" }[]),
-    displayName: u.displayName,
-    avatarUrl: u.avatarUrl,
-    bannerUrl: u.bannerUrl ?? null,
-    email: u.email ?? null,
-    isAnon: u.isAnon,
-    presenceOptOut: u.presenceOptOut,
+    id: payload.sub,
+    role: payload.role as Role,
+    permissions: new Set(payload.permissions),
+    displayName: payload.displayName,
+    avatarUrl: payload.avatarUrl,
+    isAnon: payload.isAnon,
+    presenceOptOut: payload.presenceOptOut,
   };
 }
+
+export { loadSessionProfile };
 
 export async function isUserBanned(userId: string): Promise<boolean> {
   const cached = await redis.get(REDIS_KEYS.BAN_CACHE(userId));
   if (cached === "1") return true;
   if (cached === "0") return false;
-  const now = new Date();
-  const rows = await db
-    .select({ id: userBans.id })
-    .from(userBans)
-    .where(
-      and(
-        eq(userBans.userId, userId),
-        isNull(userBans.liftedAt),
-        or(isNull(userBans.expiresAt), gt(userBans.expiresAt, now)),
-      ),
-    )
-    .limit(1);
+  const rows = await psUserBan.execute({ userId });
   const banned = rows.length > 0;
   await redis.set(REDIS_KEYS.BAN_CACHE(userId), banned ? "1" : "0", "EX", 60);
   return banned;
 }
 
 export async function getUserMute(userId: string): Promise<{ reason: string; expiresAt: Date | null } | null> {
-  const now = new Date();
-  const rows = await db
-    .select()
-    .from(userMutes)
-    .where(
-      and(
-        eq(userMutes.userId, userId),
-        isNull(userMutes.liftedAt),
-        or(isNull(userMutes.expiresAt), gt(userMutes.expiresAt, now)),
-      ),
-    )
-    .orderBy(desc(userMutes.createdAt))
-    .limit(1);
+  const rows = await psUserMute.execute({ userId });
   const row = rows[0];
   if (!row) return null;
   return { reason: row.reason, expiresAt: row.expiresAt };

@@ -61,13 +61,27 @@ export async function POST(req: NextRequest) {
   await redis.del(`passkey:pending_reg:${body.userId}`);
 
   const [u] = await db
-    .select({ id: users.id, role: users.role })
+    .select({
+      id: users.id,
+      role: users.role,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      isAnon: users.isAnon,
+      presenceOptOut: users.presenceOptOut,
+    })
     .from(users)
     .where(eq(users.id, body.userId))
     .limit(1);
   if (!u) return NextResponse.json({ error: "User not found." }, { status: 404 });
 
-  const { accessJwt, refreshJwt } = await issueSession(u.id, u.role);
+  const { accessJwt, refreshJwt } = await issueSession({
+    id: u.id,
+    role: u.role,
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl ?? null,
+    isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
+  });
   await setAuthCookies(accessJwt, refreshJwt);
 
   return NextResponse.json({ ok: true });

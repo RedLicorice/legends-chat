@@ -4,6 +4,7 @@ import { messageFlags } from "@legends/db/schema";
 import { PERMISSIONS, flagReasonSchema } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser, getUserMute } from "@/lib/auth";
+import { publishPendingFlagCount } from "@/lib/moderation-queue";
 
 const bodySchema = z.object({
   messageId: z.string().regex(/^\d+$/),
@@ -27,5 +28,7 @@ export async function POST(req: NextRequest) {
     reporterUserId: user.id,
     reason: parsed.data.reason,
   });
+  // Live update to moderators' badges via the `mod:queue` room.
+  await publishPendingFlagCount();
   return NextResponse.json({ ok: true });
 }

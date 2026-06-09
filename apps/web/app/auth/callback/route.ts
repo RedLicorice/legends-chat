@@ -70,7 +70,14 @@ export async function GET(req: NextRequest) {
     return errorRedirect("user-not-found");
   }
 
-  const { accessJwt, refreshJwt } = await issueSession(u.id, u.role);
+  const { accessJwt, refreshJwt } = await issueSession({
+    id: u.id,
+    role: u.role,
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl ?? null,
+    isAnon: u.isAnon,
+    presenceOptOut: u.presenceOptOut,
+  });
   log.info("session issued", { userId: u.id, role: u.role });
 
   // Tell the bot so it can edit its own message. Best-effort, non-blocking-ish.

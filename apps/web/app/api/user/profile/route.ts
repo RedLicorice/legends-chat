@@ -4,6 +4,7 @@ import { z } from "zod";
 import { users } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { revokeUserJtis } from "@/lib/auth-revoke";
 
 const patchSchema = z.object({
   displayName: z.string().trim().min(1).max(64).optional(),
@@ -15,14 +16,19 @@ const patchSchema = z.object({
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const [row] = await db
+    .select({ bannerUrl: users.bannerUrl, email: users.email })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
   return NextResponse.json({
     id: user.id,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
-    bannerUrl: user.bannerUrl ?? null,
+    bannerUrl: row?.bannerUrl ?? null,
     role: user.role,
     presenceOptOut: user.presenceOptOut,
-    email: user.email ?? null,
+    email: row?.email ?? null,
   });
 }
 
@@ -43,5 +49,13 @@ export async function PATCH(req: Request) {
   if (Object.keys(updates).length === 0) return NextResponse.json({ ok: true });
 
   await db.update(users).set(updates).where(eq(users.id, user.id));
+
+  const profileFieldsInJwt =
+    updates.displayName !== undefined ||
+    updates.avatarUrl !== undefined ||
+    updates.presenceOptOut !== undefined;
+  if (profileFieldsInJwt) {
+    await revokeUserJtis(user.id);
+  }
   return NextResponse.json({ ok: true });
 }
