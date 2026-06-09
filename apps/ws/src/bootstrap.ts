@@ -29,17 +29,9 @@ export type TopicBootstrapResult =
   | { ok: true; data: TopicBootstrap; topicId: string }
   | { ok: false; error: "not_found" | "forbidden" };
 
-/**
- * Resolves the full topic-bootstrap payload for a freshly-joining socket.
- *
- * Mirrors the gating contract of `apps/web/app/api/topic/[slug]/route.ts`
- * (404 collapses missing-topic and forbidden-by-role into one response;
- * non-admin reply-role checks branch on `isFeed`). The REST route stays
- * for cold-load fallback — keep both in sync if the gating ever changes.
- *
- * Runs one bundled round of queries (topic → grants/mute/passkey/members/
- * hashtags) instead of seven separate REST hits.
- */
+// Mirrors the gating contract of apps/web/app/api/topic/[slug]/route.ts —
+// keep both in sync if the gating ever changes. The REST route stays for
+// cold-load fallback when no socket is connected yet.
 export async function buildTopicBootstrap(
   user: AccessTokenPayload,
   slugOrId: string,
@@ -136,12 +128,6 @@ async function loadTopicHashtags(topicId: string): Promise<{ tag: string; count:
   return Array.from(rows).map((r) => ({ tag: r.tag, count: Number(r.count) }));
 }
 
-/**
- * Per-connect global state push. Symbols, VAPID, notifications, and the
- * mod-queue flag count all flip rarely enough that one shot at connect
- * time covers the SPA's full lifetime — live deltas keep them in sync via
- * dedicated WS events.
- */
 export async function buildSessionBootstrap(user: AccessTokenPayload): Promise<SessionBootstrap> {
   const canModQueue = user.permissions.includes(PERMISSIONS.MODERATION_QUEUE_REVIEW);
   const [symbols, notifRows, modFlagRows] = await Promise.all([

@@ -134,15 +134,8 @@ export async function clearAuthCookies(): Promise<void> {
   jar.delete(REFRESH_COOKIE);
 }
 
-/**
- * Reads the refresh cookie, verifies it, checks the matching `sessions`
- * row is still active, and mints a new access JWT that it writes back to
- * the cookie jar. Returns true on success, false on any failure (caller
- * should treat the user as unauthenticated).
- *
- * The refresh JWT itself is not rotated — its expiry is the hard 24h
- * limit after which the user must go through the bot again.
- */
+// Refresh JWT itself is not rotated — its expiry is the hard 24h limit after
+// which the user must re-auth via the bot.
 export async function refreshAccessCookie(): Promise<boolean> {
   const jar = await cookies();
   const refreshCookie = jar.get(REFRESH_COOKIE)?.value;

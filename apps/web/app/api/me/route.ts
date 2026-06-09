@@ -8,11 +8,8 @@ import { getCurrentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Decode the JWT payload section without verifying. The token was already
- * verified by getCurrentUser; this is a base64url+JSON read just to surface
- * the exp claim so the client can schedule a single refresh timer.
- */
+// Decode-only — token was already verified by getCurrentUser; we just need
+// the exp claim so the client can schedule its refresh timer.
 function readAccessTokenExp(jwt: string | undefined): number | null {
   if (!jwt) return null;
   const parts = jwt.split(".");

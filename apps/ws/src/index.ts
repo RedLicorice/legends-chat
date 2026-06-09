@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { and, eq, gt, isNull, lt, or, inArray } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { Server, type Socket, type DefaultEventsMap } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { users, topicPrincipalGrants, rolesPermissions, principalPermissionOverrides } from "@legends/db/schema";

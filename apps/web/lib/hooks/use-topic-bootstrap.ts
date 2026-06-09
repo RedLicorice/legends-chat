@@ -24,14 +24,9 @@ export interface UseTopicBootstrapResult {
   status: ResourceStatus;
 }
 
-/**
- * Topic-open data loader. Default path: emit TOPIC_JOIN on the shared
- * session socket and await the ack. Cold-start path: when no socket
- * exists yet (first paint, before SessionBootstrapProvider has wired up),
- * fall back to the REST /api/topic/<slug> route so we don't block on
- * websocket setup. The REST path is for cold-start only — it does NOT
- * include members/hashtags; those still resolve on the live socket.
- */
+// Default path: TOPIC_JOIN ack on the shared session socket. Cold-start
+// fallback: REST /api/topic/<slug> (no members/hashtags; the socket fills
+// those in once it connects).
 export function useTopicBootstrap(slug: string | undefined): UseTopicBootstrapResult {
   const { socket } = useSessionBootstrap();
   const [data, setData] = useState<TopicBootstrapPayload | null>(null);

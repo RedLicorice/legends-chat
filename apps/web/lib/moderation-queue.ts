@@ -105,12 +105,6 @@ export async function softDeleteMessage(messageId: string): Promise<void> {
     .where(eq(messages.id, BigInt(messageId)));
 }
 
-/**
- * Recompute pending-flag count and broadcast it on REDIS_CHANNELS.MOD_FLAG_COUNT.
- * The WS server fans this out to the `mod:queue` room so every connected
- * moderator's badge updates without polling. Call from every flag-mutation
- * path (file/resolve/delete) right after the DB write commits.
- */
 export async function publishPendingFlagCount(): Promise<void> {
   const [row] = await db
     .select({ n: count() })

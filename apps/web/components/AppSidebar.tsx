@@ -118,7 +118,6 @@ export function AppSidebar({
 
   const has = (p: string) => user.permissions.includes(p);
   const isStaff = has(PERMISSIONS.MODERATION_QUEUE_REVIEW) || has(PERMISSIONS.ADMIN_CONFIG);
-  const isAdmin = has(PERMISSIONS.ADMIN_CONFIG);
   const canModQueue = has(PERMISSIONS.MODERATION_QUEUE_REVIEW);
 
   const initials = profile.displayName.slice(0, 1).toUpperCase();

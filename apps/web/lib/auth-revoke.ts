@@ -19,14 +19,6 @@ async function revokeJtiBatch(rows: Array<{ accessJti: string | null; accessExpi
   await pipe.exec();
 }
 
-/**
- * Revokes every live access JTI belonging to `userId` (Redis flag with TTL =
- * remaining JWT lifetime so it auto-expires) and deletes their sessions rows
- * so the next /auth/refresh fails too. Idempotent.
- *
- * Called from every endpoint that mutates a user's role / permission overrides
- * / ban status / cached profile fields — anything baked into the access JWT.
- */
 export async function revokeUserJtis(userId: string): Promise<void> {
   const rows = await db
     .select({ accessJti: sessions.accessJti, accessExpiresAt: sessions.accessExpiresAt })
@@ -36,11 +28,6 @@ export async function revokeUserJtis(userId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
 }
 
-/**
- * Bulk version of revokeUserJtis() for "role permissions changed → kick
- * everyone with that role". Same Redis flag + sessions wipe semantics, just
- * scoped via users.role.
- */
 export async function revokeJtisForRole(role: string): Promise<void> {
   const userRows = await db.select({ id: users.id }).from(users).where(eq(users.role, role));
   if (userRows.length === 0) return;
