@@ -3,19 +3,18 @@ import { and, eq, gt, count, isNull, or } from "drizzle-orm";
 import { topics, passkeyCredentials, topicPrincipalGrants } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser, getUserMute } from "@/lib/auth";
-import { listChatItems } from "@/lib/chat-list";
-import { getSetting } from "@legends/db/system-settings";
+import { getSettingCached } from "@/lib/settings-cache";
 import { canPrincipal, type TopicGrant, type GrantEffect } from "@legends/shared";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/topic/[slug]
-// Returns the full payload needed to render <TopicLayout /> on the client.
-// Mirrors the server-side gating that the previous SSR page.tsx performed:
-//   - 401 if unauthenticated (defence-in-depth on top of middleware)
-//   - 404 if the topic does not exist
-//   - 404 if the user's role isn't allowed to view or read the topic
-//     (admins bypass these role gates, matching the SSR behaviour)
+// Lean topic payload. Sidebar (chatItems), identity (user), and global
+// branding/feature flags are NOT included here — they're fetched once per
+// session via /api/chat-list, /api/me, and /api/branding respectively.
+//
+// 401 → unauthenticated. 404 → topic missing OR user's role can't view/read it
+// (admins bypass role gates).
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ slug: string }> },
@@ -24,14 +23,11 @@ export async function GET(
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const [topic, chatItems, mute, giphySetting, passkeyCount, communityName, communityIconUrl] = await Promise.all([
+  const [topic, mute, giphySetting, passkeyCount] = await Promise.all([
     db.select().from(topics).where(eq(topics.slug, slug)).limit(1).then((r) => r[0]),
-    listChatItems(user.id, user.role, user.permissions),
     getUserMute(user.id),
-    getSetting(db, "giphy_enabled"),
+    getSettingCached("giphy_enabled"),
     db.select({ n: count() }).from(passkeyCredentials).where(eq(passkeyCredentials.userId, user.id)).then((r) => r[0]?.n ?? 0),
-    getSetting(db, "community_name").catch(() => null),
-    getSetting(db, "pwa_icon_url").catch(() => null),
   ]);
   if (!topic) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
@@ -64,15 +60,6 @@ export async function GET(
     : canPost;
 
   return NextResponse.json({
-    user: {
-      id: user.id,
-      displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
-      role: user.role,
-      permissions: [...user.permissions],
-      presenceOptOut: user.presenceOptOut,
-    },
-    chatItems,
     topic: {
       id: topic.id,
       slug: topic.slug,
@@ -93,8 +80,6 @@ export async function GET(
     mute: mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null,
     hasPasskey: passkeyCount > 0,
     giphyEnabled: giphySetting === "true",
-    communityName: communityName ?? null,
-    communityIconUrl: communityIconUrl ?? null,
     canPost,
     canReply,
   });

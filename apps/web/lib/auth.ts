@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
@@ -166,7 +167,9 @@ export interface CurrentUser {
   presenceOptOut: boolean;
 }
 
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+export const getCurrentUser = cache(getCurrentUserImpl);
+
+async function getCurrentUserImpl(): Promise<CurrentUser | null> {
   const jar = await cookies();
   const tok = jar.get(ACCESS_COOKIE)?.value;
   if (!tok) return null;

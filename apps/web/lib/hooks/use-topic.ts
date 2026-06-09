@@ -1,18 +1,8 @@
 "use client";
 
 import { useApiResource } from "@/lib/hooks/use-api-resource";
-import type { ChatItem } from "@/components/ChatListItem";
 
 export interface TopicPayload {
-  user: {
-    id: string;
-    displayName: string;
-    avatarUrl: string | null;
-    role: string;
-    permissions: string[];
-    presenceOptOut: boolean;
-  };
-  chatItems: ChatItem[];
   topic: {
     id: string;
     slug: string;
@@ -33,8 +23,6 @@ export interface TopicPayload {
   mute: { reason: string; expiresAt: string | null } | null;
   hasPasskey: boolean;
   giphyEnabled: boolean;
-  communityName: string | null;
-  communityIconUrl: string | null;
   canPost: boolean;
   canReply: boolean;
 }

@@ -5,20 +5,23 @@ import { useSearchParams } from "next/navigation";
 import { TopicLayout } from "@/components/TopicLayout";
 import { PWASplash } from "@/components/PWASplash";
 import { useTopic } from "@/lib/hooks/use-topic";
+import { useMe } from "@/lib/hooks/use-me";
+import { useChatList } from "@/lib/hooks/use-chat-list";
 
 export function TopicView({ slug }: { slug: string | undefined }) {
   const searchParams = useSearchParams();
   const highlightMessageId = searchParams?.get("msg") ?? undefined;
 
   const { data, status } = useTopic(slug);
+  const { me, status: meStatus } = useMe();
+  const { data: list } = useChatList();
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (status === "unauthenticated" || meStatus === "unauthenticated") {
       window.location.replace("/login");
     }
-  }, [status]);
+  }, [status, meStatus]);
 
-  // Hard-state UI for terminal failures.
   if (status === "notFound") {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 bg-bg p-6 text-center text-fg">
@@ -43,23 +46,26 @@ export function TopicView({ slug }: { slug: string | undefined }) {
       </div>
     );
   }
-  // First load (no prior data) — show splash. While re-fetching for a new
-  // slug, keep rendering the previous topic so the UI never flashes black.
-  if (!data || status === "unauthenticated" || !slug) {
-    return <PWASplash />;
-  }
+  if (!data || !me || !list || !slug) return <PWASplash />;
 
   return (
     <TopicLayout
-      user={data.user}
-      chatItems={data.chatItems}
+      user={{
+        id: me.id,
+        displayName: me.displayName,
+        avatarUrl: me.avatarUrl,
+        role: me.role,
+        permissions: me.permissions,
+        presenceOptOut: me.presenceOptOut,
+      }}
+      chatItems={list.chatItems}
       currentSlug={slug}
       topic={data.topic}
       mute={data.mute}
       hasPasskey={data.hasPasskey}
       giphyEnabled={data.giphyEnabled}
-      communityName={data.communityName}
-      communityIconUrl={data.communityIconUrl}
+      communityName={list.communityName}
+      communityIconUrl={null}
       highlightMessageId={highlightMessageId}
       canPost={data.canPost}
       canReply={data.canReply}
