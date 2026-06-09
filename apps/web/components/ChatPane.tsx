@@ -142,6 +142,17 @@ export type ChatPaneMode = ChatPaneTopicMode | ChatPaneDmMode;
 const EMPTY_MEMBERS: TopicBootstrapMember[] = [];
 const EMPTY_HASHTAGS: TopicBootstrapHashtag[] = [];
 
+// Stable empty arrays passed to RichTextEditor when the corresponding cap is
+// disabled. The editor mirrors these props into refs via useEffect; passing a
+// fresh `[]` per render fires those effects on every parent render even
+// though no state actually changes. Same fix shape as EMPTY_MEMBERS / EMPTY_HASHTAGS.
+type RteMentionMember = { id: string; displayName: string; avatarUrl: string | null };
+type RteTagEntry = { tag: string; count: number };
+type RteSymbolEntry = { symbol: string; name: string; avatarUrl: string | null };
+const EMPTY_RTE_MEMBERS: RteMentionMember[] = [];
+const EMPTY_RTE_TAGS: RteTagEntry[] = [];
+const EMPTY_RTE_SYMBOLS: RteSymbolEntry[] = [];
+
 // Maps numeric DecryptionErrorCode (from @matrix-org/matrix-sdk-crypto-wasm)
 // to a stable textual tag we can match on in getEncryptedReason. The wasm
 // proxy object isn't JSON-serialisable (only exposes `__wbg_ptr`), so we
@@ -915,6 +926,13 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     }
     return counts;
   }, [messages]);
+
+  // Reshape global symbol entries into RichTextEditor's row shape — kept stable
+  // across renders so the editor's mirror-ref effects don't re-fire every tick.
+  const rteSymbols = useMemo<RteSymbolEntry[]>(
+    () => symbols.map((s) => ({ symbol: s.symbol, name: s.name, avatarUrl: s.linkedUserAvatarUrl })),
+    [symbols],
+  );
 
   const reactionsByMessage = useMemo(() => {
     const map = new Map<string, Map<string, string[]>>();
@@ -2367,13 +2385,9 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                 compact={!isFeed}
                 enterSends={isFeed ? false : enterSends}
                 disabled={uploading}
-                members={caps.mentions ? members : []}
-                topicTags={caps.hashtags ? topicTags : []}
-                symbols={caps.hashtags ? symbols.map((s) => ({
-                  symbol: s.symbol,
-                  name: s.name,
-                  avatarUrl: s.linkedUserAvatarUrl,
-                })) : []}
+                members={caps.mentions ? members : EMPTY_RTE_MEMBERS}
+                topicTags={caps.hashtags ? topicTags : EMPTY_RTE_TAGS}
+                symbols={caps.hashtags ? rteSymbols : EMPTY_RTE_SYMBOLS}
               />
               <div className="flex items-center gap-2">
                 {canAttach && (
