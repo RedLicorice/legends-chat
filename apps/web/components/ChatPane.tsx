@@ -340,7 +340,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     const saved = localStorage.getItem("legends-enter-sends");
     return saved !== null ? saved === "true" : !isFeed;
   });
-  const [contextMenu, setContextMenu] = useState<{ msg: Message; kbOffset: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    msg: Message;
+    kbOffset: number;
+    /** Non-null = desktop right-click; render as cursor-anchored popover at these viewport coords. Null = mobile long-press; render as bottom sheet. */
+    anchor: { x: number; y: number } | null;
+  } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressMoved = useRef(false);
@@ -366,26 +371,24 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const canEditAny = currentUser.permissions.includes(PERMISSIONS.MESSAGES_EDIT_ANY);
 
   // Context menu helpers
-  function openContextMenu(msg: Message, _clientX: number, _clientY: number) {
+  function openContextMenu(msg: Message, anchor: { x: number; y: number } | null) {
     const kbOffset = Math.max(0, window.innerHeight - (window.visualViewport?.height ?? window.innerHeight));
-    setContextMenu({ msg, kbOffset });
+    setContextMenu({ msg, kbOffset, anchor });
   }
 
   function handleMsgContextMenu(e: React.MouseEvent, msg: Message) {
     e.preventDefault();
     if (isStillEncrypted(msg)) return;
-    openContextMenu(msg, e.clientX, e.clientY);
+    openContextMenu(msg, { x: e.clientX, y: e.clientY });
   }
 
   function handleTouchStart(e: React.TouchEvent, msg: Message) {
     if (isStillEncrypted(msg)) return;
-    const t = e.touches[0];
-    const tx = t?.clientX ?? 0;
-    const ty = t?.clientY ?? 0;
     longPressMoved.current = false;
     longPressTimer.current = setTimeout(() => {
       if (!longPressMoved.current) {
-        openContextMenu(msg, tx, ty);
+        // Touch path: render as a bottom sheet — anchor=null.
+        openContextMenu(msg, null);
       }
     }, 500);
   }
@@ -2476,85 +2479,135 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         />
       )}
 
-      {/* Context menu portal — Telegram-style bottom sheet */}
-      {contextMenu && typeof document !== "undefined" && createPortal(
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-[9989] bg-black/60"
-            onClick={() => setContextMenu(null)}
-          />
-          {/* Sheet — translated up by keyboard height so it sits at visual viewport bottom */}
-          <div
-            className="fixed bottom-0 left-0 right-0 z-[9998] rounded-t-2xl border-t border-border bg-panel shadow-2xl overflow-hidden"
-            style={{ transform: `translateY(-${contextMenu.kbOffset}px)` }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Message preview */}
-            <div className="px-4 pt-3 pb-2.5 border-b border-border">
-              {contextMenu.msg.senderDisplayName && (
-                <p className="text-xs font-semibold text-accent2 mb-0.5 truncate">{contextMenu.msg.senderDisplayName}</p>
-              )}
-              <p className="text-sm text-muted line-clamp-2 break-words">
-                {getDisplayText(contextMenu.msg).trim() || (contextMenu.msg.attachments.length > 0 ? "📎 Attachment" : "")}
-              </p>
-            </div>
-            {caps.reactions && (
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-                {QUICK_REACTIONS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    className="flex h-10 w-10 items-center justify-center rounded-full text-xl hover:bg-panel2 active:scale-90 transition"
-                    onClick={() => { toggleReaction(contextMenu.msg.id, emoji); setContextMenu(null); }}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-                <button
-                  ref={(el) => { if (el) reactionBtnRefs.current.set(`ctx-${contextMenu.msg.id}`, el); else reactionBtnRefs.current.delete(`ctx-${contextMenu.msg.id}`); }}
-                  type="button"
-                  className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-panel2 transition text-muted hover:text-text"
-                  onClick={() => { setPickerFor(contextMenu.msg.id); setContextMenu(null); }}
-                >
-                  <SmilePlus className="h-5 w-5" />
-                </button>
-              </div>
+      {/* Context menu portal — desktop = cursor-anchored popover, mobile = bottom sheet. Both render the same content (preview header + quick-reactions row + action list); only the container chrome differs. */}
+      {contextMenu && typeof document !== "undefined" && (() => {
+        const items = [
+          ...(caps.threads ? [{ icon: CornerDownLeft, label: "Reply", action: () => { setReplyingTo(contextMenu.msg); setContextMenu(null); } }] : []),
+          { icon: Copy, label: "Copy", action: () => { void copyMessage(getDisplayText(contextMenu.msg)); setContextMenu(null); } },
+          ...(!isSelecting ? [{ icon: CheckSquare, label: "Select", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } }] : [
+            { icon: CheckSquare, label: selectedIds.has(contextMenu.msg.id) ? "Deselect" : "Add to selection", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } },
+          ]),
+          ...((caps.edit && (((contextMenu.msg.senderUserId === currentUser.id && canEditOwn) || canEditAny) && !contextMenu.msg.poll))
+            ? [{ icon: Pencil, label: "Edit", action: () => { startEdit(contextMenu.msg, getDisplayText(contextMenu.msg)); setContextMenu(null); } }]
+            : []),
+          ...((caps.delete && ((contextMenu.msg.senderUserId === currentUser.id && canDeleteOwn) || canDeleteAny))
+            ? [{ icon: Trash2, label: "Delete", danger: true as const, action: () => { deleteMessage(contextMenu.msg.id); setContextMenu(null); } }]
+            : []),
+          { icon: Flag, label: "Report", danger: true as const, action: () => { void reportMessage(contextMenu.msg.id); setContextMenu(null); } },
+        ];
+
+        const isDesktop = contextMenu.anchor !== null;
+
+        const Preview = (
+          <div className="px-4 pt-3 pb-2.5 border-b border-border">
+            {contextMenu.msg.senderDisplayName && (
+              <p className="text-xs font-semibold text-accent2 mb-0.5 truncate">{contextMenu.msg.senderDisplayName}</p>
             )}
-            <div className="py-1 pb-[max(0.25rem,var(--sab))]">
-              {[
-                ...(caps.threads ? [{ icon: CornerDownLeft, label: "Reply", action: () => { setReplyingTo(contextMenu.msg); setContextMenu(null); } }] : []),
-                { icon: Copy, label: "Copy", action: () => { void copyMessage(getDisplayText(contextMenu.msg)); setContextMenu(null); } },
-                ...(!isSelecting ? [{ icon: CheckSquare, label: "Select", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } }] : [
-                  { icon: CheckSquare, label: selectedIds.has(contextMenu.msg.id) ? "Deselect" : "Add to selection", action: () => { toggleSelection(contextMenu.msg.id); setContextMenu(null); } },
-                ]),
-                ...((caps.edit && (((contextMenu.msg.senderUserId === currentUser.id && canEditOwn) || canEditAny) && !contextMenu.msg.poll))
-                  ? [{ icon: Pencil, label: "Edit", action: () => { startEdit(contextMenu.msg, getDisplayText(contextMenu.msg)); setContextMenu(null); } }]
-                  : []),
-                ...((caps.delete && ((contextMenu.msg.senderUserId === currentUser.id && canDeleteOwn) || canDeleteAny))
-                  ? [{ icon: Trash2, label: "Delete", danger: true, action: () => { deleteMessage(contextMenu.msg.id); setContextMenu(null); } }]
-                  : []),
-                { icon: Flag, label: "Report", danger: true, action: () => { void reportMessage(contextMenu.msg.id); setContextMenu(null); } },
-              ].map(({ icon: Icon, label, action, danger }) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={action}
-                  className={cn(
-                    "flex w-full items-center gap-3 px-5 py-3 text-sm transition hover:bg-panel2 active:bg-panel2",
-                    danger ? "text-danger" : "text-text",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {label}
-                </button>
-              ))}
-            </div>
+            <p className="text-sm text-muted line-clamp-2 break-words">
+              {getDisplayText(contextMenu.msg).trim() || (contextMenu.msg.attachments.length > 0 ? "📎 Attachment" : "")}
+            </p>
           </div>
-        </>,
-        document.body,
-      )}
+        );
+
+        const QuickReactionsRow = caps.reactions ? (
+          <div className="flex items-center justify-between px-2 py-2 border-b border-border">
+            {QUICK_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className={cn(
+                  "flex items-center justify-center rounded-full hover:bg-panel2 active:scale-90 transition",
+                  isDesktop ? "h-8 w-8 text-base" : "h-10 w-10 text-xl",
+                )}
+                onClick={() => { toggleReaction(contextMenu.msg.id, emoji); setContextMenu(null); }}
+              >
+                {emoji}
+              </button>
+            ))}
+            <button
+              ref={(el) => { if (el) reactionBtnRefs.current.set(`ctx-${contextMenu.msg.id}`, el); else reactionBtnRefs.current.delete(`ctx-${contextMenu.msg.id}`); }}
+              type="button"
+              className={cn(
+                "flex items-center justify-center rounded-full hover:bg-panel2 transition text-muted hover:text-text",
+                isDesktop ? "h-8 w-8" : "h-10 w-10",
+              )}
+              onClick={() => { setPickerFor(contextMenu.msg.id); setContextMenu(null); }}
+            >
+              <SmilePlus className={isDesktop ? "h-4 w-4" : "h-5 w-5"} />
+            </button>
+          </div>
+        ) : null;
+
+        const Actions = (
+          <div className={isDesktop ? "py-1" : "py-1 pb-[max(0.25rem,var(--sab))]"}>
+            {items.map(({ icon: Icon, label, action, danger }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={action}
+                className={cn(
+                  "flex w-full items-center transition hover:bg-panel2 active:bg-panel2 text-left",
+                  isDesktop ? "gap-2.5 px-3 py-1.5 text-sm" : "gap-3 px-5 py-3 text-sm",
+                  danger ? "text-danger" : "text-text",
+                )}
+              >
+                <Icon className={isDesktop ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
+                {label}
+              </button>
+            ))}
+          </div>
+        );
+
+        // ── Desktop: small popover anchored to the cursor, flipped into the viewport if needed.
+        if (isDesktop) {
+          const W = 260;
+          const H = (caps.reactions ? 56 : 0) + 62 /* preview */ + items.length * 34 + 8;
+          const x = Math.min(contextMenu.anchor!.x, window.innerWidth - W - 8);
+          const y = Math.min(contextMenu.anchor!.y, window.innerHeight - H - 8);
+          return createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[9989]"
+                onMouseDown={() => setContextMenu(null)}
+                onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+              />
+              <div
+                role="menu"
+                className="fixed z-[9998] w-[260px] overflow-hidden rounded-md border border-border bg-panel shadow-lg"
+                style={{ top: y, left: x }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                {Preview}
+                {QuickReactionsRow}
+                {Actions}
+              </div>
+            </>,
+            document.body,
+          );
+        }
+
+        // ── Mobile: full-width bottom sheet (Telegram-style).
+        return createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[9989] bg-black/60"
+              onClick={() => setContextMenu(null)}
+            />
+            <div
+              className="fixed bottom-0 left-0 right-0 z-[9998] rounded-t-2xl border-t border-border bg-panel shadow-2xl overflow-hidden"
+              style={{ transform: `translateY(-${contextMenu.kbOffset}px)` }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {Preview}
+              {QuickReactionsRow}
+              {Actions}
+            </div>
+          </>,
+          document.body,
+        );
+      })()}
     </>
     </HashtagClickContext.Provider>
   );

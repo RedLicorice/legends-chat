@@ -66,6 +66,12 @@ const PRE_REACT_BOOT_SCRIPT = `
   document.addEventListener("gesturechange", function (e) { e.preventDefault(); }, { passive: false });
   document.addEventListener("gestureend", function (e) { e.preventDefault(); }, { passive: false });
   document.addEventListener("touchmove", function (e) { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  // Suppress the native right-click menu everywhere. Components that want to
+  // own the context menu (e.g. the chat bubble) call preventDefault in their
+  // own onContextMenu handler during the target/capture phase before this
+  // bubble-phase listener fires; preventDefault here just keeps the browser
+  // chrome from appearing on everything else.
+  document.addEventListener("contextmenu", function (e) { e.preventDefault(); }, { passive: false });
 })();
 `.trim();
 
