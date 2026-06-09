@@ -20,6 +20,8 @@ import { SearchModal } from "@/components/SearchModal";
 import { ThreadPanel } from "@/components/ThreadPanel";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { TopicInfoModal } from "@/components/TopicInfoModal";
+import { EncryptedMessageContent } from "@/components/EncryptedMessageContent";
+import { EncryptedReasonModal, type EncryptedReason } from "@/components/EncryptedReasonModal";
 import type { IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
@@ -139,6 +141,51 @@ export type ChatPaneMode = ChatPaneTopicMode | ChatPaneDmMode;
 // loop and triggered React's "Maximum update depth exceeded" guard.
 const EMPTY_MEMBERS: TopicBootstrapMember[] = [];
 const EMPTY_HASHTAGS: TopicBootstrapHashtag[] = [];
+
+// Maps numeric DecryptionErrorCode (from @matrix-org/matrix-sdk-crypto-wasm)
+// to a stable textual tag we can match on in getEncryptedReason. The wasm
+// proxy object isn't JSON-serialisable (only exposes `__wbg_ptr`), so we
+// read its getters directly here.
+const DECRYPT_CODE_NAMES: Record<number, string> = {
+  0: "MissingRoomKey",
+  1: "UnknownMessageIndex",
+  2: "MismatchedIdentityKeys",
+  3: "UnknownSenderDevice",
+  4: "UnsignedSenderDevice",
+  5: "SenderIdentityVerificationViolation",
+  6: "UnableToDecrypt",
+};
+
+function describeDecryptError(err: unknown): string {
+  if (err == null) return "Unknown error";
+  if (err instanceof Error) return err.message || err.name || "Decryption failed";
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    const obj = err as {
+      code?: unknown; description?: unknown; message?: unknown;
+      error?: unknown; reason?: unknown; kind?: unknown; name?: unknown;
+      toString?: () => string;
+    };
+    const code = typeof obj.code === "number" ? obj.code : null;
+    const desc = typeof obj.description === "string" ? obj.description : null;
+    const codeName = code != null ? DECRYPT_CODE_NAMES[code] ?? `code${code}` : null;
+    if (codeName && desc) return `${codeName}: ${desc}`;
+    if (codeName) return codeName;
+    if (desc) return desc;
+    for (const k of ["message", "error", "reason", "kind", "name"] as const) {
+      const v = obj[k];
+      if (typeof v === "string" && v) return v;
+    }
+    if (typeof obj.toString === "function") {
+      try {
+        const s = obj.toString();
+        if (s && s !== "[object Object]") return s;
+      } catch {}
+    }
+    return "Decryption failed";
+  }
+  return String(err);
+}
 
 interface ChatPaneProps {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut: boolean; permissions: string[] };
@@ -878,6 +925,16 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const decryptedRef = useRef(decryptedTexts);
   useEffect(() => { decryptedRef.current = decryptedTexts; }, [decryptedTexts]);
 
+  // Last decrypt error per message id. Populated by the drain loops below so
+  // the lock-overlay reason modal can show a meaningful explanation.
+  const [decryptErrors, setDecryptErrors] = useState<Map<string, string>>(new Map());
+  const decryptErrorsRef = useRef(decryptErrors);
+  useEffect(() => { decryptErrorsRef.current = decryptErrors; }, [decryptErrors]);
+
+  // Which message's "why is this still encrypted?" modal is open, if any.
+  const [encryptedReasonFor, setEncryptedReasonFor] =
+    useState<{ messageId: string; reason: EncryptedReason } | null>(null);
+
   const messagesRef = useRef<Message[]>([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
@@ -932,8 +989,18 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           const plain = await cc.decrypt(env);
           newly[m.id] = plain;
           pendingDecryptRef.current.delete(id);
-        } catch {
+        } catch (err) {
           /* Locked row — retry on next drain. */
+          const errMsg = describeDecryptError(err);
+          if (typeof console !== "undefined" && !decryptErrorsRef.current.has(m.id)) {
+            console.warn("[e2ee] decrypt failed", { messageId: m.id, err });
+          }
+          setDecryptErrors((prev) => {
+            if (prev.get(m.id) === errMsg) return prev;
+            const next = new Map(prev);
+            next.set(m.id, errMsg);
+            return next;
+          });
         }
       }
       if (cancelled) return;
@@ -943,6 +1010,16 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           const next = new Map(prev);
           for (const k of keys) next.set(k, newly[k]!);
           return next;
+        });
+        setDecryptErrors((prev) => {
+          let next: Map<string, string> | null = null;
+          for (const k of keys) {
+            if (prev.has(k)) {
+              if (!next) next = new Map(prev);
+              next.delete(k);
+            }
+          }
+          return next ?? prev;
         });
       }
     })();
@@ -975,7 +1052,16 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
             const plain = await cc.decrypt(env);
             newly[m.id] = plain;
             pendingDecryptRef.current.delete(id);
-          } catch { /* leave in Set; retry next drain */ }
+          } catch (err) {
+            /* leave in Set; retry next drain */
+            const errMsg = describeDecryptError(err);
+            setDecryptErrors((prev) => {
+              if (prev.get(m.id) === errMsg) return prev;
+              const next = new Map(prev);
+              next.set(m.id, errMsg);
+              return next;
+            });
+          }
         }
         const keys = Object.keys(newly);
         if (keys.length > 0) {
@@ -983,6 +1069,16 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
             const next = new Map(prev);
             for (const k of keys) next.set(k, newly[k]!);
             return next;
+          });
+          setDecryptErrors((prev) => {
+            let next: Map<string, string> | null = null;
+            for (const k of keys) {
+              if (prev.has(k)) {
+                if (!next) next = new Map(prev);
+                next.delete(k);
+              }
+            }
+            return next ?? prev;
           });
         }
       }, 5000);
@@ -1008,6 +1104,39 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     if (!isE2ee) return msg.text;
     if (!msg.ciphertextJson) return msg.text;
     return decryptedTexts.get(msg.id) ?? "(encrypted…)";
+  }
+
+  function isStillEncrypted(msg: Message): boolean {
+    return isE2ee && !!msg.ciphertextJson && !decryptedTexts.has(msg.id);
+  }
+
+  function getEncryptedReason(msg: Message): EncryptedReason {
+    if (e2eeSetupNeeded) return { kind: "setup-required" };
+    if (!e2eeReady && e2eeError) return { kind: "bootstrap-failed", error: e2eeError };
+    if (!e2eeReady) return { kind: "initializing" };
+    const err = decryptErrors.get(msg.id);
+    if (err === undefined) return { kind: "missing-key" };
+    if (/^UnknownMessageIndex\b/.test(err)) {
+      return { kind: "predates-room-key", detail: err };
+    }
+    // A MissingRoomKey *may* carry a non-"None" withheld code, in which case
+    // the sender's device deliberately withheld the key. Otherwise the key
+    // simply hasn't arrived yet.
+    if (/^MissingRoomKey\b/.test(err)) {
+      const m = err.match(/withheld code:\s*([^\s,)]+)/i);
+      if (m && m[1] && m[1].toLowerCase() !== "none") {
+        return { kind: "withheld", detail: err };
+      }
+      return { kind: "missing-key", detail: err };
+    }
+    if (
+      /MissingSessionKey|missing.*key|no.*inbound.*session|unknown.*(inbound.*)?session|UNKNOWN_OLM_MESSAGE|m\.no_olm/i.test(
+        err,
+      )
+    ) {
+      return { kind: "missing-key", detail: err };
+    }
+    return { kind: "decrypt-error", error: err };
   }
 
   async function uploadFile(file: File, bucket: "uploads" | "files" = "uploads", preserveOriginal = false): Promise<Attachment | null> {
@@ -1305,6 +1434,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     <>
       {showSearch && caps.members && isTopicMode && topic && <SearchModal onClose={() => setShowSearch(false)} currentTopicId={topic.id} />}
       {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      <EncryptedReasonModal
+        open={encryptedReasonFor !== null}
+        onClose={() => setEncryptedReasonFor(null)}
+        reason={encryptedReasonFor?.reason ?? null}
+      />
       {dragActive && (
         <div
           className="fixed inset-0 z-[9990] flex flex-col bg-black/60 backdrop-blur-sm p-4 gap-3"
@@ -1559,9 +1693,9 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                       </div>
                     )}
                     <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
-                      getDisplayText(msg).trim() === "" && msg.attachments.length > 0 && "p-1")}>
+                      !isStillEncrypted(msg) && getDisplayText(msg).trim() === "" && msg.attachments.length > 0 && "p-1")}>
                       {msg.attachments.length > 0 && (
-                        <div className={cn("flex flex-col gap-1", getDisplayText(msg).trim() && "mb-2")}>
+                        <div className={cn("flex flex-col gap-1", (isStillEncrypted(msg) || getDisplayText(msg).trim()) && "mb-2")}>
                           {msg.attachments.map((att, ai) =>
                             att.type === "file" ? (
                               <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
@@ -1576,7 +1710,14 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                           )}
                         </div>
                       )}
-                      {getDisplayText(msg).trim() && (
+                      {isStillEncrypted(msg) ? (
+                        <EncryptedMessageContent
+                          messageId={msg.id}
+                          mine={mine}
+                          reasonKind={getEncryptedReason(msg).kind}
+                          onShowReason={() => setEncryptedReasonFor({ messageId: msg.id, reason: getEncryptedReason(msg) })}
+                        />
+                      ) : getDisplayText(msg).trim() && (
                         <MarkdownContent content={getDisplayText(msg)} className={cn("text-sm break-words", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
                       )}
                       <div suppressHydrationWarning className={cn("mt-1 flex items-center gap-1 text-[10px]", mine ? "text-white/70 justify-end" : "text-muted")}>
@@ -1720,7 +1861,14 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                     </div>
                   )}
 
-                  {getDisplayText(m).trim() && (
+                  {isStillEncrypted(m) ? (
+                    <EncryptedMessageContent
+                      messageId={m.id}
+                      mine={false}
+                      reasonKind={getEncryptedReason(m).kind}
+                      onShowReason={() => setEncryptedReasonFor({ messageId: m.id, reason: getEncryptedReason(m) })}
+                    />
+                  ) : getDisplayText(m).trim() && (
                     <MarkdownContent content={getDisplayText(m)} className="text-sm" />
                   )}
 
@@ -1921,7 +2069,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                           {!parent?.text.trim() && parentImg ? (
                             <span className="opacity-70 italic">📷 Image</span>
                           ) : (
-                            <span className="opacity-70">{parent ? getDisplayText(parent).slice(0, 60) : "(message)"}</span>
+                            <span className="opacity-70">{parent ? (isStillEncrypted(parent) ? "(encrypted)" : getDisplayText(parent).slice(0, 60)) : "(message)"}</span>
                           )}
                         </div>
                       </div>
@@ -1963,7 +2111,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                   ) : (
                   <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
                     !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
-                    getDisplayText(m).trim() === "" && m.attachments.length > 0 && "p-1")}>
+                    !isStillEncrypted(m) && getDisplayText(m).trim() === "" && m.attachments.length > 0 && "p-1")}>
                     {caps.reactions && (
                       <button
                         ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
@@ -1996,7 +2144,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                       </button>
                     )}
                     {m.attachments.length > 0 && (
-                      <div className={cn("flex flex-col gap-1", getDisplayText(m).trim() && "mb-2")}>
+                      <div className={cn("flex flex-col gap-1", (isStillEncrypted(m) || getDisplayText(m).trim()) && "mb-2")}>
                         {m.attachments.map((att, ai) =>
                           att.type === "file" ? (
                             <a key={ai} href={att.url} download={att.filename} target="_blank" rel="noopener noreferrer"
@@ -2011,7 +2159,14 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                         )}
                       </div>
                     )}
-                    {getDisplayText(m).trim() && (
+                    {isStillEncrypted(m) ? (
+                      <EncryptedMessageContent
+                        messageId={m.id}
+                        mine={mine}
+                        reasonKind={getEncryptedReason(m).kind}
+                        onShowReason={() => setEncryptedReasonFor({ messageId: m.id, reason: getEncryptedReason(m) })}
+                      />
+                    ) : getDisplayText(m).trim() && (
                       <MarkdownContent content={getDisplayText(m)} className={cn("text-sm break-words", mine && "[&_*]:text-white [&_code]:bg-white/20 [&_pre]:bg-white/20")} />
                     )}
                     {m.inlineKeyboard && m.inlineKeyboard.length > 0 && (
