@@ -64,8 +64,13 @@ export function EncryptedMessageContent({
   // changing the reason should not change the blur text underneath.)
   const placeholder = useMemo(() => buildPlaceholder(messageId), [messageId]);
 
+  // Render as a Fragment: the blurred placeholder flows normally inside the
+  // bubble so it contributes to the bubble's intrinsic size, and the lock
+  // button is positioned absolute against the bubble itself (the closest
+  // `relative` ancestor), so it lands at the bubble's dead center — including
+  // the padding and the metadata row underneath.
   return (
-    <span className="relative inline-block max-w-full">
+    <>
       <span
         aria-hidden="true"
         className="select-none pointer-events-none block break-words text-sm filter blur-[4px]"
@@ -76,7 +81,7 @@ export function EncryptedMessageContent({
         type="button"
         onClick={onShowReason}
         aria-label="Why is this message still encrypted?"
-        className="absolute inset-0 flex items-center justify-center"
+        className="absolute inset-0 z-10 flex items-center justify-center"
       >
         <span
           className={cn(
@@ -90,6 +95,6 @@ export function EncryptedMessageContent({
           Locked
         </span>
       </button>
-    </span>
+    </>
   );
 }

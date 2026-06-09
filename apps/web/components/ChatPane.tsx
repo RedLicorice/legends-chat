@@ -373,10 +373,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
 
   function handleMsgContextMenu(e: React.MouseEvent, msg: Message) {
     e.preventDefault();
+    if (isStillEncrypted(msg)) return;
     openContextMenu(msg, e.clientX, e.clientY);
   }
 
   function handleTouchStart(e: React.TouchEvent, msg: Message) {
+    if (isStillEncrypted(msg)) return;
     const t = e.touches[0];
     const tx = t?.clientX ?? 0;
     const ty = t?.clientY ?? 0;
@@ -1831,7 +1833,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                       <div className="text-sm font-medium">{m.senderDisplayName ?? communityName ?? "System"}</div>
                       <div suppressHydrationWarning className="text-xs text-muted">{friendlyTime(m.createdAt)}</div>
                     </div>
-                    {caps.reactions && (
+                    {caps.reactions && !isStillEncrypted(m) && (
                       <div className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100">
                         <button
                           ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
@@ -1895,7 +1897,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                     />
                   )}
 
-                  {caps.threads && (() => {
+                  {caps.threads && !isStillEncrypted(m) && (() => {
                     const postId = String(m.id);
                     const replies = repliesByParent.get(postId) ?? [];
                     const isExpanded = expandedThreads.has(postId);
@@ -2112,7 +2114,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                   <div className={cn("relative group/bubble rounded-2xl px-4 py-2 text-sm min-w-0 max-w-full", mine ? "bg-accent text-white" : "bg-panel2 text-text",
                     !mine && m.senderIsAnon && currentUser.role === "admin" && "opacity-70",
                     !isStillEncrypted(m) && getDisplayText(m).trim() === "" && m.attachments.length > 0 && "p-1")}>
-                    {caps.reactions && (
+                    {caps.reactions && !isStillEncrypted(m) && (
                       <button
                         ref={(el) => { if (el) reactionBtnRefs.current.set(m.id, el); else reactionBtnRefs.current.delete(m.id); }}
                         type="button"
@@ -2128,7 +2130,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                         <SmilePlus className="h-3.5 w-3.5 text-muted" />
                       </button>
                     )}
-                    {caps.threads && (
+                    {caps.threads && !isStillEncrypted(m) && (
                       <button
                         type="button"
                         title="Reply"
