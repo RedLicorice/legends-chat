@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ChatShellMobileBar } from "@/components/AppShell";
+import { AppShellMobileBar } from "@/components/AppShell";
 import { PWASplash } from "@/components/PWASplash";
 import { useMe } from "@/lib/hooks/use-me";
 import { useChatList } from "@/lib/hooks/use-chat-list";
@@ -10,7 +10,7 @@ import { useChatList } from "@/lib/hooks/use-chat-list";
 /**
  * `/` right pane. Banner + welcome card + "no chats yet" empty state.
  *
- * ChatShell upstream already gates auth + `me` + `chatList` readiness, but
+ * AppShell upstream already gates auth + `me` + `chatList` readiness, but
  * because we also auto-redirect to a configured `homeTopicSlug`, we keep our
  * own splash until either that effect fires or we render the welcome.
  */
@@ -35,7 +35,7 @@ export function HomeRightPane() {
 
   return (
     <>
-      <ChatShellMobileBar />
+      <AppShellMobileBar />
       <div className="relative flex flex-1 min-h-0 flex-col overflow-y-auto overflow-x-hidden">
         {bannerConfig ? (
           <>

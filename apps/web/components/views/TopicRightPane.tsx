@@ -7,7 +7,7 @@ import { P2PView } from "@/components/P2PView";
 import { PasskeyBanner } from "@/components/PasskeyBanner";
 import { TopicPasswordGate } from "@/components/TopicPasswordGate";
 import { PWASplash } from "@/components/PWASplash";
-import { useChatShell } from "@/components/AppShell";
+import { useAppShell } from "@/components/AppShell";
 import { createTopicChatSource } from "@/lib/chat-source/topic";
 import { createMegolmChatCrypto } from "@/lib/chat-crypto";
 import { toMatrixRoomId } from "@/lib/crypto-matrix";
@@ -26,7 +26,7 @@ interface Props {
 /**
  * `/t/<slug>` right pane. Fetches topic bootstrap, gates on passkey/password,
  * and routes to either P2PView or ChatPane. The outer shell + sidebar are
- * owned by `<ChatShell>` upstream — this component only renders content for
+ * owned by `<AppShell>` upstream — this component only renders content for
  * `<main>`.
  */
 export function TopicRightPane({ slug }: Props) {
@@ -37,7 +37,7 @@ export function TopicRightPane({ slug }: Props) {
   const { me } = useMe();
   const { data: list } = useChatList();
   const { openSidebar, expandDesktopSidebar, desktopCollapsed, compactMode } =
-    useChatShell();
+    useAppShell();
   const showExpandSidebar = desktopCollapsed && compactMode === "minimal";
 
   if (status === "notFound") {

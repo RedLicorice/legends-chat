@@ -55,22 +55,22 @@ import { AdminUsersView } from "@/components/views/AdminUsersView";
  */
 
 // ---------------------------------------------------------------------------
-// useChatShell — context published to right panes for mobile menu / expand
+// useAppShell — context published to right panes for mobile menu / expand
 // ---------------------------------------------------------------------------
 
-interface ChatShellContextValue {
+interface AppShellContextValue {
   openSidebar: () => void;
   expandDesktopSidebar: () => void;
   desktopCollapsed: boolean;
   compactMode: "minimal" | "strip";
 }
 
-const ChatShellContext = createContext<ChatShellContextValue | null>(null);
+const AppShellContext = createContext<AppShellContextValue | null>(null);
 
-export function useChatShell(): ChatShellContextValue {
-  const ctx = useContext(ChatShellContext);
+export function useAppShell(): AppShellContextValue {
+  const ctx = useContext(AppShellContext);
   if (!ctx) {
-    throw new Error("useChatShell must be used inside <AppShell>");
+    throw new Error("useAppShell must be used inside <AppShell>");
   }
   return ctx;
 }
@@ -78,12 +78,12 @@ export function useChatShell(): ChatShellContextValue {
 /**
  * Tiny header strip with the mobile hamburger + desktop "expand sidebar" arrow.
  * Extracted so right panes that want custom chrome (e.g. the homepage banner)
- * can position their own content beneath it. Consumes `useChatShell()` — no
+ * can position their own content beneath it. Consumes `useAppShell()` — no
  * props needed.
  */
-export function ChatShellMobileBar() {
+export function AppShellMobileBar() {
   const { openSidebar, expandDesktopSidebar, desktopCollapsed, compactMode } =
-    useChatShell();
+    useAppShell();
   const showExpand = desktopCollapsed && compactMode === "minimal";
   if (!showExpand) {
     return (
@@ -335,7 +335,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
-  const contextValue = useMemo<ChatShellContextValue>(
+  const contextValue = useMemo<AppShellContextValue>(
     () => ({
       openSidebar,
       expandDesktopSidebar: expand,
@@ -497,7 +497,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   markSpaPainted();
 
   return (
-    <ChatShellContext.Provider value={contextValue}>
+    <AppShellContext.Provider value={contextValue}>
       <div
         className="fixed left-0 right-0 flex overflow-hidden"
         style={{ top: "var(--vvy)", height: "var(--vvh)" }}
@@ -519,6 +519,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           <Suspense fallback={null}>{route.mainContent}</Suspense>
         </main>
       </div>
-    </ChatShellContext.Provider>
+    </AppShellContext.Provider>
   );
 }

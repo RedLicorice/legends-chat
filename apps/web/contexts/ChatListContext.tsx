@@ -110,7 +110,7 @@ export function ChatListProvider({ children }: { children: React.ReactNode }) {
   // ChatListPane (or any other consumer) dispatches `chatlist:refresh` when it
   // needs the server snapshot rebuilt (e.g. an accept/decline arrived for a
   // conversation we don't yet have in the list). router.refresh() reruns the
-  // server tree. Moved here from ChatShell so the listener survives navigation
+  // server tree. Moved here from the former ChatShell so the listener survives navigation
   // away from chat routes.
   useEffect(() => {
     const onRefresh = () => router.refresh();

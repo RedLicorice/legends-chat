@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { ChatPane } from "@/components/ChatPane";
 import { PWASplash } from "@/components/PWASplash";
-import { useChatShell } from "@/components/AppShell";
+import { useAppShell } from "@/components/AppShell";
 import { useDm } from "@/lib/hooks/use-dm";
 import { createDmChatSource } from "@/lib/chat-source/dm";
 import { createOlmChatCrypto } from "@/lib/chat-crypto";
@@ -13,13 +13,13 @@ interface Props {
 }
 
 /**
- * `/c/<id>` right pane. ChatShell upstream owns the sidebar + chat list;
+ * `/c/<id>` right pane. AppShell upstream owns the sidebar + chat list;
  * this component only owns the ChatPane and its source/crypto.
  */
 export function DmRightPane({ id }: Props) {
   const { data, status } = useDm(id);
   const { openSidebar, expandDesktopSidebar, desktopCollapsed, compactMode } =
-    useChatShell();
+    useAppShell();
   const showExpandSidebar = desktopCollapsed && compactMode === "minimal";
 
   const peer = data?.conversation.peer ?? null;
