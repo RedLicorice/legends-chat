@@ -40,6 +40,10 @@ interface Props {
   compactMode?: "minimal" | "strip";
   // Icon-only content for strip mode middle section
   iconChildren?: React.ReactNode;
+  // When true, the sidebar collapses to zero width and renders no contents,
+  // but the <aside> element stays in the DOM so React identity persists
+  // across navigation. Used by AppShell for /settings.
+  hidden?: boolean;
 }
 
 const STORAGE_KEY = "sidebar-collapsed";
@@ -55,6 +59,7 @@ export function AppSidebar({
   onCollapseChange,
   compactMode: compactModeProp,
   iconChildren,
+  hidden = false,
 }: Props) {
   const [internalOpen, setInternalOpen] = useState(false);
   const controlledMobile = isOpenProp !== undefined;
@@ -123,14 +128,24 @@ export function AppSidebar({
   const initials = profile.displayName.slice(0, 1).toUpperCase();
 
   // Strip mode: collapsed desktop shows icon strip
-  const showStrip = desktopCollapsed && effectiveCompactMode === "strip";
+  const showStripBase = desktopCollapsed && effectiveCompactMode === "strip";
   // Minimal mode: collapsed desktop hides sidebar entirely
-  const showMinimalHidden = desktopCollapsed && effectiveCompactMode === "minimal";
+  const showMinimalHiddenBase = desktopCollapsed && effectiveCompactMode === "minimal";
+
+  // When `hidden`, override every visible-state path: behave as if minimal-hidden
+  // unconditionally. The <aside> stays in the DOM (so React identity persists),
+  // but it has zero width and no contents render. Strip mode is also disabled
+  // so no admin icon strip shows for /settings.
+  const showStrip = hidden ? false : showStripBase;
+  const showMinimalHidden = hidden ? true : showMinimalHiddenBase;
+  // On mobile we also force the overlay closed when hidden so the slide-in panel
+  // doesn't bleed in from a state we couldn't clear.
+  const effectiveIsOpen = hidden ? false : isOpen;
 
   return (
     <>
       {/* Uncontrolled mobile hamburger */}
-      {!controlledMobile && (
+      {!controlledMobile && !hidden && (
         <button
           type="button"
           onClick={() => setInternalOpen(true)}
@@ -141,7 +156,7 @@ export function AppSidebar({
         </button>
       )}
 
-      {isOpen && (
+      {effectiveIsOpen && (
         <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={close} />
       )}
 
@@ -149,12 +164,14 @@ export function AppSidebar({
         "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200 overflow-x-hidden",
         "md:relative md:z-auto",
         // Mobile: controlled by isOpen (always full width)
-        isOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full md:translate-x-0",
-        // Desktop: width depends on collapse mode
+        effectiveIsOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full md:translate-x-0",
+        // Desktop: width depends on collapse mode (also zero when hidden)
         showMinimalHidden ? "md:w-0 md:border-r-0" : showStrip ? "md:w-12" : "md:w-72",
+        // When hidden, the mobile slide-in panel is also collapsed
+        hidden && "w-0 border-r-0",
       )}>
         {/* Strip mode: collapsed icon strip — desktop only */}
-        {showStrip && (
+        {!hidden && showStrip && (
           <div className="hidden md:flex flex-col items-center h-full">
             {/* Expand button at top */}
             <div className="shrink-0 py-2">
@@ -193,7 +210,10 @@ export function AppSidebar({
           </div>
         )}
 
-        {/* Full sidebar — always on mobile, hidden on desktop when collapsed */}
+        {/* Full sidebar — always on mobile, hidden on desktop when collapsed.
+            When the sidebar is fully hidden (e.g. /settings), suppress the
+            entire content block including the mobile drawer so nothing paints. */}
+        {!hidden && (
         <div className={cn("flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden", (showStrip || showMinimalHidden) && "md:hidden")}>
           {/* Header */}
           <div className="flex items-center gap-1 border-b border-border px-3 pb-3 pt-[calc(0.75rem+var(--sat))]">
@@ -315,9 +335,10 @@ export function AppSidebar({
             )}
           </div>
         </div>
+        )}
       </aside>
 
-      {showProfile && (
+      {!hidden && showProfile && (
         <UserProfileModal
           user={{ ...user, ...profile }}
           onClose={() => setShowProfile(false)}
@@ -325,14 +346,14 @@ export function AppSidebar({
         />
       )}
 
-      {showModQueue && (
+      {!hidden && showModQueue && (
         <ModQueueModal
           onClose={() => setShowModQueue(false)}
           onCountChange={(n) => setModFlagCount(n)}
         />
       )}
 
-      {showIosInstall && (
+      {!hidden && showIosInstall && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 md:items-center">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-panel p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -366,7 +387,7 @@ export function AppSidebar({
         </div>
       )}
 
-      {showAndroidInstall && (
+      {!hidden && showAndroidInstall && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 md:items-center">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-panel p-6 space-y-4">
             <div className="flex items-center justify-between">

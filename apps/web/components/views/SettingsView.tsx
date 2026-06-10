@@ -13,6 +13,12 @@ import { SettingsClient } from "@/components/SettingsClient";
 import { useMe } from "@/lib/hooks/use-me";
 import { useSettings } from "@/lib/hooks/use-settings";
 
+/**
+ * `/settings` body. The outer fullscreen container is owned by the persistent
+ * `AppShell` `<main>`; this component only renders the form contents and
+ * provides its own scroll wrapper inside that `<main>`. The sidebar is
+ * collapsed to zero width via `hidden` so the form appears fullscreen.
+ */
 export function SettingsView() {
   const { status: meStatus } = useMe();
   const { data, status: settingsStatus } = useSettings();
@@ -28,7 +34,7 @@ export function SettingsView() {
   }
 
   return (
-    <main className="selectable fixed inset-0 overflow-y-auto flex items-start justify-center px-8 pb-8 pt-[calc(2rem+var(--sat))]">
+    <div className="selectable flex-1 overflow-y-auto flex items-start justify-center px-8 pb-8 pt-[calc(2rem+var(--sat))]">
       <div className="w-full max-w-lg space-y-8">
         <div>
           <Link
@@ -65,6 +71,6 @@ export function SettingsView() {
           }
         />
       </div>
-    </main>
+    </div>
   );
 }

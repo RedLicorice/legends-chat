@@ -7,7 +7,7 @@ import { P2PView } from "@/components/P2PView";
 import { PasskeyBanner } from "@/components/PasskeyBanner";
 import { TopicPasswordGate } from "@/components/TopicPasswordGate";
 import { PWASplash } from "@/components/PWASplash";
-import { useChatShell } from "@/components/ChatShell";
+import { useChatShell } from "@/components/AppShell";
 import { createTopicChatSource } from "@/lib/chat-source/topic";
 import { createMegolmChatCrypto } from "@/lib/chat-crypto";
 import { toMatrixRoomId } from "@/lib/crypto-matrix";

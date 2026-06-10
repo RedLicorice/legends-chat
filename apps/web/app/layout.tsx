@@ -4,10 +4,11 @@ import { PushSetup } from "@/components/PushSetup";
 import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
 import { SessionBootstrapProvider } from "@/contexts/SessionBootstrapContext";
+import { ChatListProvider } from "@/contexts/ChatListContext";
 import { ExternalLinkBootstrap } from "@/components/ExternalLinkBootstrap";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
 import { LinkContextMenu } from "@/components/LinkContextMenu";
-import { RootShell } from "@/components/RootShell";
+import { AppShell } from "@/components/AppShell";
 
 // Strict-SPA root layout: pure, sync, no cookies(), no DB. Dynamic data
 // (theme attributes, branding, external-link config) is resolved on the
@@ -95,7 +96,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <TokenRefresh />
           <ExternalLinkBootstrap>
             <SymbolsProvider>
-              <RootShell>{children}</RootShell>
+              <ChatListProvider>
+                <AppShell>{children}</AppShell>
+              </ChatListProvider>
             </SymbolsProvider>
             <ExternalLinkDialog />
             <LinkContextMenu />

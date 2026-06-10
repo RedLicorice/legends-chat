@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ChatShellMobileBar } from "@/components/ChatShell";
+import { ChatShellMobileBar } from "@/components/AppShell";
 import { PWASplash } from "@/components/PWASplash";
 import { useMe } from "@/lib/hooks/use-me";
 import { useChatList } from "@/lib/hooks/use-chat-list";

@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { ChatPane } from "@/components/ChatPane";
 import { PWASplash } from "@/components/PWASplash";
-import { useChatShell } from "@/components/ChatShell";
+import { useChatShell } from "@/components/AppShell";
 import { useDm } from "@/lib/hooks/use-dm";
 import { createDmChatSource } from "@/lib/chat-source/dm";
 import { createOlmChatCrypto } from "@/lib/chat-crypto";
