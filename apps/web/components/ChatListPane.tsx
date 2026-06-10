@@ -125,7 +125,7 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Search */}
-      <div className="sticky top-0 z-10 border-b border-border bg-panel pb-2">
+      <div className="sticky top-0 z-10 border-b border-border bg-panel">
         <div className="flex items-center gap-1.5">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
@@ -149,7 +149,7 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
         </div>
 
         {/* Filter chips */}
-        <div className="flex items-center gap-2 py-2">
+        <div className="flex items-center gap-1 pt-1 pb-1">
           {FILTERS.map((f) => {
             const isActive = filter === f.key;
             return (
@@ -158,7 +158,7 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
                 type="button"
                 onClick={() => setFilter(f.key)}
                 className={cn(
-                  "rounded-full px-2.5 py-1 text-xs font-medium transition",
+                  "rounded-full px-2 py-0.5 text-[11px] font-medium transition",
                   isActive
                     ? "bg-accent text-white"
                     : "bg-panel2 text-muted hover:text-text",
@@ -176,7 +176,7 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
       <NewChatModal open={newChatOpen} onClose={() => setNewChatOpen(false)} />
 
       {/* List */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto pt-2">
         {noResults ? (
           <div className="px-3 py-8 text-center text-xs text-muted">
             {totalItems === 0 ? "No chats yet" : "No chats match"}
