@@ -11,11 +11,11 @@ export function AdminBansView() {
 
   return (
     <AdminPanel status={status}>
-      <main className="flex-1 p-8 max-w-3xl">
+      <section className="flex-1 p-4 sm:p-8">
         <h1 className="mb-2 text-2xl font-semibold">Bans & Mutes</h1>
         <p className="mb-6 text-sm text-muted">Active sanctions. Lift them to restore access.</p>
         <BansPanel />
-      </main>
+      </section>
     </AdminPanel>
   );
 }

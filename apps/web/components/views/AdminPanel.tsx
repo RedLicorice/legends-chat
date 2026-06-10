@@ -26,16 +26,16 @@ export function AdminPanel({
 
   if (status === "forbidden") {
     return (
-      <main className="flex-1 p-8">
+      <section className="flex-1 p-4 sm:p-8">
         <p className="text-sm text-muted">{forbiddenMessage}</p>
-      </main>
+      </section>
     );
   }
   if (status === "error" && !hasData) {
     return (
-      <main className="flex-1 p-8">
+      <section className="flex-1 p-4 sm:p-8">
         <p className="text-sm text-muted">{errorMessage}</p>
-      </main>
+      </section>
     );
   }
   // Splash only on FIRST load — once we have prior data OR the request is

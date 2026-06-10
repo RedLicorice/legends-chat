@@ -16,7 +16,7 @@ export function AdminOverviewView() {
       forbiddenMessage="You don't have permission to view the admin dashboard."
     >
       {data && (
-        <main className="flex-1 p-8 max-w-4xl">
+        <section className="flex-1 p-4 sm:p-8">
           <h1 className="mb-6 text-2xl font-semibold">Dashboard</h1>
 
           <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -73,7 +73,7 @@ export function AdminOverviewView() {
               </tbody>
             </table>
           </div>
-        </main>
+        </section>
       )}
     </AdminPanel>
   );

@@ -16,11 +16,11 @@ export function AdminSettingsView() {
   return (
     <AdminPanel status={status} hasData={!!data} errorMessage="Failed to load settings. Try refreshing.">
       {data && settings && (
-        <main className="flex-1 p-8 max-w-xl">
+        <section className="flex-1 p-4 sm:p-8">
           <h1 className="mb-2 text-2xl font-semibold">Community Settings</h1>
           <p className="mb-6 text-sm text-muted">Configure the default channel and automated system messages.</p>
           <AdminSettingsForm settings={settings} topics={data.topics} />
-        </main>
+        </section>
       )}
     </AdminPanel>
   );
