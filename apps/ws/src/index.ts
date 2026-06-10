@@ -308,6 +308,7 @@ io.on("connection", async (socket: AuthedSocket) => {
         const sidebarPayload = {
           topicId: parsed.topicId,
           preview: sidebarPreview,
+          senderId: user.sub,
           senderName: msg.senderDisplayName ?? null,
           at: typeof msg.createdAt === "string" ? msg.createdAt : (msg.createdAt as Date).toISOString(),
         };
@@ -572,6 +573,7 @@ subClient.on("message", (channel, message) => {
         const sidebarPayload = {
           topicId,
           preview: stripMarkdownPreview(msg.text ?? ""),
+          senderId: null as string | null,
           senderName: msg.senderDisplayName ?? null,
           at: msg.createdAt ?? new Date().toISOString(),
         };

@@ -25,6 +25,9 @@ import type { ChatItem } from "@/components/ChatListItem";
 type SidebarUpdate = {
   topicId: string;
   preview: string;
+  /** Null for bot-sourced messages; the sender's user id otherwise. We use
+   *  this to skip bumping unreadCount when our own send echoes back. */
+  senderId: string | null;
   senderName: string | null;
   at: string;
 };
@@ -138,6 +141,10 @@ export function ChatListProvider({ children }: { children: React.ReactNode }) {
 
     // Topic last-message bump (mirrors HomeLayout).
     socket.on(WS_EVENTS.SIDEBAR_UPDATE, (u: SidebarUpdate) => {
+      // Server fans out to every topic member including the sender. The row
+      // should still bump (preview + lastAt + sort), but unread must NOT
+      // increment on our own send.
+      const isOutgoing = !!u.senderId && u.senderId === me.id;
       setItems((prev) => {
         const idx = prev.findIndex(
           (it) => it.kind === "topic" && it.id === u.topicId,
@@ -153,7 +160,7 @@ export function ChatListProvider({ children }: { children: React.ReactNode }) {
           // server already ships an empty string for these, but null-coerce
           // defensively in case an older payload arrives.
           lastPreview: cur.isE2ee ? null : u.preview,
-          unreadCount: cur.unreadCount + 1,
+          unreadCount: isOutgoing ? cur.unreadCount : cur.unreadCount + 1,
         };
         return next.sort(compareChatItems);
       });
