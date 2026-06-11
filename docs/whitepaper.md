@@ -1,124 +1,373 @@
 # Legends Chat: Technical Whitepaper
 
-Legends Chat is a private, self-hosted community chat application built for groups that want control over their own data and communications. This document explains how the application works, what security and privacy protections it provides, and where its limitations lie.
+Legends Chat is a private, self-hosted community chat application built
+for groups that want control over their own data and communications.
+This document explains how the application works, what security and
+privacy protections it provides, and where its limitations lie.
+
+It is written for community members who want to understand what their
+chat does and does not protect, not just for engineers.
+
+---
+
+## Trust Model in One Page
+
+Before any technical detail, the single most important thing to
+internalise: **Legends Chat is self-hosted**. Whoever runs the server
+(your community's "operator") controls the database, the encryption
+keys for at-rest storage, the network, the backups, the moderation
+tools, and the deployment configuration. That operator is the root of
+trust for everything in this document.
+
+That has three concrete consequences:
+
+1. **In regular channels, the operator can read your messages.**
+   End-to-end encryption is opt-in per channel.
+2. **In end-to-end encrypted topic channels, the community admin is a
+   permanent recipient** of the encryption keys so moderation still
+   works. Encryption keeps messages private from the public internet
+   and from anyone without a key — it does not keep them private from
+   your moderators.
+3. **There is no central company watching the operator.** If you do
+   not trust the people running your community, cryptography in the
+   app cannot fix that.
+
+The rest of this document gives you the detail to verify those claims
+and understand exactly where each one applies.
 
 ---
 
 ## How It Works
 
-Legends Chat runs on infrastructure you or your community operator controls. The core components are:
+Legends Chat runs on infrastructure you or your operator control.
+There are no third-party analytics, tracking pixels, or advertising
+services embedded in the application.
 
-- **Frontend:** A Next.js 15 application served to your browser.
-- **Real-time messaging:** A Node.js server using Socket.io handles live message delivery over WebSockets.
-- **Database:** PostgreSQL stores messages, user accounts, and community configuration.
-- **Sessions:** Redis handles session state and message routing between server processes.
-- **Deployment:** The entire stack is packaged as a self-hosted Docker container. There are no third-party analytics, tracking pixels, or advertising services embedded in the application.
+- **Frontend**: a Next.js 15 application served to your browser. The
+  interface is a single-page web app — when you sign in, the entire
+  shell (sidebar, chrome, live server connection) loads once and stays
+  loaded as you move between channels, DMs, settings, and admin.
+  Switching screens does not tear down your session or your live
+  socket. This is the same contract a native app gives you, and it is
+  what makes the installed **PWA (Progressive Web App)** feel like a
+  real app on your phone or laptop.
+- **Real-time messaging**: a small Node.js server uses WebSockets to
+  push live messages, presence, and other events. There is no polling.
+- **Database**: PostgreSQL stores messages, accounts, channel
+  configuration, and moderation records. Message bodies are encrypted
+  at rest before they are written to disk.
+- **Sessions and routing**: Redis holds short-lived session state,
+  rate-limit counters, and fan-out routing between server processes.
+  Nothing sensitive lives in Redis long term — it is cache, not the
+  system of record.
+- **PWA architecture**: a **service worker** caches the application
+  shell so the app opens instantly even on a slow connection, and a
+  single persistent in-browser shell handles every internal
+  navigation. Cold launch shows a brand splash once; moving between
+  screens does not.
+- **Deployment**: the entire stack is packaged as a self-hosted Docker
+  bundle. There is no external SaaS to depend on; operators can run
+  it on a home server, a VPS, or a Raspberry Pi.
 
-Because the application is self-hosted, whoever runs the server (the "server operator") controls the infrastructure, the data, and the configuration. This is a key factor in how you should think about trust and privacy.
+### Public surface
+
+Before you sign in, only a small set of URLs is reachable: `/login`,
+`/register` (when registration is open), `/auth/landing`,
+`/auth/callback`, `/auth/browser-open`, `/auth/refresh`, and
+`/docs/whitepaper`. Everything else requires an authenticated session.
 
 ---
 
 ## Authentication
 
-Legends Chat supports several ways to verify your identity when signing in.
+Legends Chat supports several ways to verify your identity. They can
+be mixed on the same account.
 
 ### Passkeys (WebAuthn / FIDO2)
 
-Passkeys use your device's built-in security hardware (fingerprint sensor, face ID, or a hardware security key) to authenticate you without a password. Because authentication is cryptographically tied to the specific website, passkeys are resistant to phishing attacks — a fake login page cannot steal a passkey credential.
+Passkeys use your device's built-in security hardware — fingerprint
+sensor, face ID, or a hardware security key — to authenticate without
+a password. Because the credential is cryptographically tied to the
+specific website it was registered against, passkeys are
+**phishing-resistant**: a lookalike login page cannot trick your
+device into handing over the credential.
 
-### Email and Password
+### Email and password
 
-Standard email and password login is supported. Passwords are hashed using bcrypt before being stored; the plaintext password is never written to the database. You can optionally enable TOTP two-factor authentication (a time-based one-time code from an authenticator app) on email accounts for an additional layer of protection.
+Standard email and password login is supported. Passwords are hashed
+using **bcrypt**; the plaintext password is never written to the
+database, and offline cracking is computationally expensive even if a
+dump leaks. You can optionally enable **TOTP two-factor authentication**
+(a time-based code from an app like Aegis or 1Password) on email
+accounts.
 
 ### Telegram
 
-You can authenticate by messaging the community's Telegram bot. The bot sends you a magic link, which you click to verify your identity and log in. No password is required.
+You can authenticate by messaging the community's Telegram bot. The
+bot sends you a **magic link**; clicking it logs you in. No password
+on your end.
 
-### Session Tokens
+### Session tokens
 
-After logging in, the application issues a short-lived JWT access token and a longer-lived refresh token. Refresh tokens are stored hashed in the database, not in plaintext.
+After sign-in, the application issues a short-lived **JWT access
+token** and a longer-lived **refresh token**. The access token carries
+your identity and permissions so most page loads do not need a
+database lookup; revocations are enforced through a fast in-memory
+list. **Refresh tokens are stored hashed** in the database, not in
+plaintext.
 
 ---
 
-## Message Privacy and Encryption
+## Channels and Message Privacy
 
-Not all channels in Legends Chat offer the same level of privacy. Understanding the differences matters.
+Not all channels in Legends Chat offer the same level of privacy.
+This is the most important section in the document.
 
-### Regular Channels
+### Regular channels (server-side encryption at rest)
 
-Messages in regular channels are encrypted at rest using AES-256 (XChaCha20-Poly1305). This means the data sitting in the database is not stored as plain readable text. However, the server holds the encryption key. This is server-side encryption, not end-to-end encryption. The server operator has the technical ability to decrypt and read messages in these channels. This is comparable to how most mainstream chat applications work.
+Messages in regular channels are encrypted at rest using
+**XChaCha20-Poly1305**, an authenticated stream cipher. Data sitting
+in the database is not plain readable text. **The server holds the
+encryption key**, however — this is server-side encryption at rest,
+not end-to-end encryption. The server operator has the technical
+ability to decrypt and read messages in these channels. This is
+comparable to most mainstream chat applications: it protects against
+a stolen disk or a leaked backup, not against the operator
+themselves.
 
-### End-to-End Encrypted (E2EE) Channels
+Use this for normal community conversation where the trust model is
+"private from the public, fine for moderators to read."
 
-E2EE channels use a Signal-protocol-style sender key scheme. When you join an E2EE channel, your device generates a key bundle — an identity key and a set of prekeys — which is published to the server. When someone sends a message, their client encrypts the message content and distributes the sender key to each recipient, encrypted individually for that recipient. The server stores only ciphertext and does not have the keys needed to decrypt it. The server operator cannot read message content in E2EE channels.
+### End-to-end encrypted (E2EE) topic channels
 
-### What is protected
+Sensitive channels can be marked **end-to-end encrypted**. These use
+**Matrix Megolm sessions via the `matrix-sdk-crypto-wasm` library**,
+the same vodozemac implementation Element and other Matrix clients
+use. The library is open source and has been independently audited by
+NCC Group.
 
-- **Session-level forward secrecy:** Your sender key rotates on every password or passkey login. If your current session's key is ever compromised after you log out, past sessions' messages remain protected — the server no longer holds the old encrypted key copies.
-- **TOFU identity key pinning:** The first time your client sees another user's identity key, it pins the fingerprint locally. On every subsequent contact, the fingerprint is compared against the pin. If the server ever substitutes a different key, you will see a warning banner before that user's messages are encrypted to the new key.
+When you join an E2EE topic, your device generates an **Olm identity
+key** and a set of one-time keys, then uploads them to the server.
+When someone sends a message, their client encrypts the message with
+a fresh Megolm session, then distributes the session key to each
+recipient encrypted individually for that recipient's Olm identity.
+The server stores only ciphertext and routes the per-recipient key
+envelopes; **it never holds the keys needed to decrypt the actual
+message content**.
 
-### Known limitations
+**Admin recipient is permanent.** E2EE topics include the community
+admin as a permanent key recipient so moderation remains possible.
+Every Megolm session key distribution includes the admin's devices in
+the recipient set. This is a deliberate design choice — the threat
+model is "private from the public internet, fine for our community
+moderator to be able to see" — and a non-dismissible banner inside
+the channel lists the moderator names who can decrypt. If you need a
+conversation your admin cannot read, use an E2EE 1:1 DM or a P2P
+channel.
 
-- **First contact:** TOFU cannot protect the very first message exchange. If the server substitutes a key before you have ever contacted that user, the pin will record the fake key. To fully verify, compare **safety numbers** out-of-band (voice call, in-person, another channel). Safety numbers are available in the member list under "Verify identity."
-- **No per-message forward secrecy:** A full Double Ratchet (like Signal) would protect individual messages within a session. This implementation rotates at the session level only — if your device is seized while a session is active, the attacker could decrypt messages from that session. Per-message ratcheting is planned for a future phase.
-- **Device compromise:** End-to-end encryption protects data in transit and at rest on the server. It does not protect against an attacker with physical access to your unlocked device or browser.
+**What is protected:**
 
-### P2P Channels
+- **The server cannot read message content** in an E2EE topic.
+- **Session-level forward secrecy.** Megolm sessions rotate by default
+  every week, every 100 messages, and on membership changes. Once a
+  session rotates, the previous key is not used for new traffic.
+- **New members see forward-only.** Joining an E2EE topic does not
+  retroactively unlock prior messages. Enforced at the database level,
+  not by trusting the client.
+- **TOFU identity pinning + safety numbers.** The first time your
+  client sees another user's identity key, it pins the fingerprint
+  locally; future contacts compare against the pin and warn on
+  mismatch. You can compare **safety numbers** out-of-band (voice
+  call, in person) to fully verify.
 
-P2P channels establish a direct peer-to-peer WebRTC connection between participants. Messages are not transmitted through or stored on the server. An optional end-to-end encryption layer is available on top of the P2P connection.
+**Locked messages.** If you don't have the key for a message — you
+joined late, the sender's key hasn't arrived yet, or the sender's
+device explicitly declined to share — the message renders as a
+**blurred placeholder** with a lock pill. Clicking it opens a modal
+that names the specific reason. You cannot react to, reply to, or
+quote a locked message; those interactions are disabled so you don't
+accidentally amplify ciphertext you can't read.
 
-**Important limitation:** Even though message content is not stored on the server, connection metadata is — the server can see who connected to whom and when.
+**Known limitations:**
+
+- **First contact (TOFU).** TOFU pinning cannot protect the very first
+  exchange. If the server substitutes a key before you have ever
+  contacted that user, the pin records the substituted key. Compare
+  safety numbers out-of-band to verify.
+- **No per-message forward secrecy.** Megolm rotates at the session
+  level. Within a session, prior messages are decryptable by anyone
+  holding the current session key. A full Double Ratchet would
+  protect individual messages within a session; that is a future
+  direction.
+- **Device compromise.** E2EE protects data in transit and at rest on
+  the server. It does not protect against an attacker with physical
+  access to your unlocked device.
+
+### 1:1 Direct Messages
+
+DMs come in **three flavors**, decided when the conversation is
+opened and shown on every chat-list row.
+
+- **Plaintext user-to-user DMs.** Encrypted at rest with
+  XChaCha20-Poly1305; the server can read them. Same trust model as a
+  regular channel — fine for casual conversation.
+- **End-to-end encrypted user-to-user DMs.** Flip the **Encrypted**
+  toggle when you open the DM. Uses Matrix Olm sessions via
+  `matrix-sdk-crypto-wasm`. **The server only sees ciphertext**, and
+  **there is no admin recipient** — the admin-recipient rule applies
+  only to topic channels. A safety-number modal lets you verify the
+  peer's Ed25519 fingerprint out-of-band. Locked messages render the
+  same blurred placeholder + reason modal as E2EE topics. The same
+  limitations apply: TOFU on first contact, no per-message forward
+  secrecy, no protection against an attacker who has your unlocked
+  device.
+- **Plaintext bot DMs.** Bots can sit on either side of a DM if an
+  admin has enabled them as a DM principal. **Bot DMs are always
+  plaintext** — the same server-side at-rest encryption as regular
+  channels, no end-to-end layer. Bots typically run on the operator's
+  infrastructure; adding E2EE between you and a bot the operator
+  wrote would add complexity without changing the trust model. If you
+  would not say something in front of the bot author, do not say it
+  in a bot DM.
+
+### Peer-to-peer (P2P) channels
+
+P2P channels establish a direct **WebRTC** connection between
+participants. Messages do not pass through or get stored on the chat
+server. An optional end-to-end encryption layer can run on top of the
+P2P transport.
+
+**Important limitation:** even when message content never touches the
+server, **connection metadata does**. The server brokers WebRTC
+signalling, so it sees who connected to whom and when. P2P is not the
+right tool for hiding the fact that two people talked.
 
 ---
 
 ## Privacy Features
 
-### Presence Control
-
-Users can opt out of presence indicators and hide their online status from other community members.
-
-### Anonymous Sessions
-
-Administrators can configure time-limited anonymous participation, allowing people to join and participate without creating a persistent account.
-
-### Message Auto-Delete
-
-Individual topics can be configured to automatically delete messages after a set period of time or once a message count threshold is reached.
-
-### Invite-Only Registration
-
-Administrators can require invite codes to join the community, limiting who can create an account.
-
-### Role-Based Access
-
-Topics can be restricted so that only users with specific roles can view or post in them.
+- **Presence control**: opt out of presence indicators and hide your
+  online status from other members.
+- **Anonymous sessions**: admins can configure time-limited anonymous
+  participation. Pruned automatically once the window expires.
+- **Message auto-delete**: per-channel age or count thresholds. Runs
+  on a single elected server process to avoid duplicate work.
+- **Invite-only registration**: per-code validity windows, max-uses,
+  notes, and a disable/re-enable toggle.
+- **Role-based access**: channels can be restricted by role for view,
+  post, or reply. Fine-grained per-user, per-bot, and per-topic
+  permission overrides.
 
 ---
 
-## Security
+## Upload Pipeline and Metadata Handling
 
-- **Phishing resistance:** Passkey authentication cannot be stolen by fake login pages.
-- **Password protection:** bcrypt hashing makes offline password cracking expensive even if the database is exposed.
-- **Two-factor authentication:** TOTP 2FA is available for email-based accounts.
-- **Token security:** Refresh tokens are stored hashed; access tokens are short-lived.
-- **Audit log:** Administrative actions are recorded in an audit log.
-- **Moderation:** A moderation queue is available for flagged messages.
+Image and file uploads run through two stages so private metadata
+does not leak with the picture you share.
+
+- **Client-side strip**: when you attach an image, the browser
+  **strips EXIF, XMP, ICC, and GPS metadata** by re-encoding through a
+  canvas. The image is also **resized to a configurable longest-edge
+  cap** (default 2560 px) and **compressed** (default JPEG quality
+  0.85). GIFs and WebP pass through unchanged to preserve animation.
+- **Server-side defense in depth**: the server **scans every uploaded
+  image for stripping artifacts** (JPEG EXIF / XMP / IPTC, PNG text
+  chunks, WebP EXIF) and rejects uploads that still carry that
+  metadata. Catches clients that didn't strip — old browsers,
+  non-browser tools.
+- **Original-quality opt-out**: an admin-configurable opt-out lets you
+  upload originals if you genuinely need them (pixel-perfect
+  screenshot, photo with a color profile that matters). The path is
+  **rate-limited per user per hour and per day** and admins can turn
+  it off entirely.
+
+---
+
+## Link Safety
+
+Links posted in chat run through a small pipeline before they reach
+other members.
+
+- **Tracking-parameter strip**. Common tracking parameters are
+  stripped from outgoing URLs: `utm_*`, `fbclid`, `gclid`, `gclsrc`,
+  `dclid`, `msclkid`, `yclid`, `igsh`, `igshid`, `mc_cid`, `mc_eid`,
+  plus host-specific parameters for Twitter/X, YouTube, TikTok, and
+  Amazon. Stripping runs both client-side at send time and
+  server-side as defense in depth.
+- **Optional Shlink shortener**. Admins can configure the community's
+  own **Shlink** instance as a link shortener. A regex filter lets
+  admins decide which URLs get wrapped — empty means wrap nothing,
+  matching the modern chat-industry default (Discord and Slack don't
+  wrap; Twitter does). Self-hosting Shlink keeps shortlink resolution
+  under operator control.
+- **External-link interstitial**. When you click a link that goes
+  outside the community, a **dialog** shows the full destination URL
+  with the host bolded, plus Cancel / Open. It opens links with
+  `window.open(url, "_blank", "noopener,noreferrer")` — strips your
+  referrer and breaks the new tab's reference back to chat. Admins
+  can whitelist domains that bypass the dialog. On by default;
+  per-community toggle.
+- **Referrer + identity scrub**. Every HTTP response sends
+  `Referrer-Policy: no-referrer` and `X-Content-Type-Options:
+  nosniff`. Rendered links carry `rel="noopener noreferrer nofollow"`
+  and a per-tag `referrerpolicy="no-referrer"`. Triple-redundant
+  defense against telling a third-party site which community you
+  came from.
+
+---
+
+## Security Baseline
+
+- **Phishing resistance**: passkey authentication cannot be stolen by
+  fake login pages.
+- **Password protection**: bcrypt hashing makes offline cracking
+  expensive.
+- **Two-factor**: TOTP 2FA available on email accounts.
+- **Refresh tokens hashed** at rest; access tokens short-lived;
+  per-user JWT revocation enforced through a fast in-memory list.
+- **Audit log** for administrative actions.
+- **Moderation queue** for flagged messages with role-gated review.
+- **Defense in depth** on uploads (client strip + server detect +
+  rate limit) and links (client strip + server strip + interstitial
+  + referer policy + rel attributes).
 
 ---
 
 ## Limitations and Trust Model
 
-Honesty about limitations is part of how Legends Chat is designed. You should understand what this application does not protect against.
+Honesty about limitations is part of how Legends Chat is designed.
+This list is not exhaustive but covers the most important points.
 
-**Regular channels:** The server operator can read your messages. If you need content privacy from the operator, use E2EE or P2P channels.
-
-**P2P metadata:** Even in P2P channels where message content never touches the server, the server knows who connected to whom and at what times.
-
-**IP addresses:** Legends Chat does not include any anonymous network layer. Your IP address is visible to the server operator when you connect.
-
-**Database backups:** If the server operator maintains database backups, encrypted message ciphertext is included in those backups. The security of that data depends on how backups are secured.
-
-**Push notifications:** If mobile push notifications are enabled, notification previews may pass through Apple or Google push notification infrastructure, which is outside the server operator's control.
+- **Regular channels.** The server operator can read messages in
+  regular channels. If you need content privacy from the operator,
+  use an E2EE topic, an E2EE 1:1 DM, or a P2P channel.
+- **Admin recipient on E2EE topics.** E2EE topics include the
+  community admin as a permanent recipient so moderation works. There
+  is no way to send a message in an E2EE topic that the admin cannot
+  decrypt. If you need a conversation the admin cannot read, use an
+  E2EE 1:1 DM (no admin recipient) or a P2P channel.
+- **P2P metadata.** P2P channels do not put message content on the
+  server, but the server still brokers the WebRTC handshake. It sees
+  who connected to whom and when.
+- **IP addresses.** Legends Chat does not include any anonymous
+  network layer. Your IP address is visible to the operator on
+  connect.
+- **Database backups.** If the operator maintains database backups,
+  encrypted ciphertext is included. The security of that data depends
+  on how the backups are stored and who has access.
+- **Push notifications.** If mobile push is enabled, notification
+  previews may pass through Apple or Google push infrastructure,
+  outside the operator's control. Push previews are kept deliberately
+  short and never contain ciphertext.
+- **No per-message forward secrecy on E2EE.** Megolm rotates at the
+  session level. Within a session, prior messages are decryptable by
+  anyone holding the current session key.
+- **TOFU at first contact.** End-to-end identity pinning uses
+  Trust-On-First-Use. Compare **safety numbers** out-of-band to
+  verify that the key your device accepted is actually theirs.
+- **Device compromise.** E2EE protects data in transit and at rest on
+  the server. It does not protect against an attacker with physical
+  access to your unlocked device or browser.
 
 ---
 
@@ -131,7 +380,19 @@ Because Legends Chat is self-hosted, the community operator controls:
 - Whether backups are taken and how they are protected.
 - Whether the application is kept up to date with security patches.
 - Network access policies and firewall configuration.
+- Whether optional features (Shlink, interstitial, original-quality
+  uploads, anonymous sessions, registration mode, E2EE topics) are
+  enabled.
 
-This model gives communities genuine control over their data, but it also means the trustworthiness of the application is directly tied to the trustworthiness and competence of the operator running it. There is no central company with independent oversight of server operators.
+This model gives communities genuine control over their data, but it
+also means the trustworthiness of the application is directly tied to
+the trustworthiness and competence of the operator running it.
+**There is no central company with independent oversight of server
+operators.**
 
-If you have questions about how a specific deployment is configured — including backup policies, admin access, or encryption key management — you should ask your community administrator directly.
+If you have questions about how a specific deployment is configured —
+backup policies, admin access, the admin-recipient list on E2EE
+topics, encryption key management — ask your community administrator
+directly. The right answer to "is this safe to say in here?" depends
+on who is on the other side of the server, not just on what the
+protocol guarantees.
