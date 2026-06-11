@@ -221,14 +221,22 @@ opened and shown on every chat-list row.
   limitations apply: TOFU on first contact, no per-message forward
   secrecy, no protection against an attacker who has your unlocked
   device.
-- **Plaintext bot DMs.** Bots can sit on either side of a DM if an
-  admin has enabled them as a DM principal. **Bot DMs are always
-  plaintext** — the same server-side at-rest encryption as regular
-  channels, no end-to-end layer. Bots typically run on the operator's
-  infrastructure; adding E2EE between you and a bot the operator
-  wrote would add complexity without changing the trust model. If you
-  would not say something in front of the bot author, do not say it
-  in a bot DM.
+- **Bot DMs.** Bots can sit on either side of a DM if an admin has
+  enabled them as a DM principal. By default, **bot DMs are
+  plaintext** with the same server-side at-rest encryption as regular
+  channels and no end-to-end layer. Bots are **external entities** —
+  they run as independent processes (often off the chat operator's
+  infrastructure) and talk to the server through the bot API.
+  - **E2EE bot DMs (planned).** Bot E2EE is on the roadmap and follows
+    the same trust model as user E2EE: the bot's SDK holds its own Olm
+    identity key and prekeys, the chat server stores only the bot's
+    **public** key, and the server never sees plaintext. E2EE
+    participation is opt-in per bot, enabled by an admin in the bot's
+    settings. Until a bot is configured this way and its operator
+    deploys an E2EE-capable SDK build, attempting to open an E2EE DM
+    with that bot is refused. Today's bots are still plaintext-only;
+    if you would not say something in front of the bot author, do not
+    say it in a bot DM.
 
 ### Peer-to-peer (P2P) channels
 
