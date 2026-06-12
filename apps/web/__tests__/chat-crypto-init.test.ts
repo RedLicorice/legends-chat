@@ -20,6 +20,7 @@ const initCryptoMock = vi.fn(async (_userId: string) => {});
 const bootstrapMock = vi.fn(async () => {});
 const ensurePeerTrackedMock = vi.fn(async (_peer: string) => {});
 const ensureSessionWithPeerMock = vi.fn(async (_peer: string) => {});
+const ensureDmSessionMock = vi.fn(async (_roomKey: string, _peer: string) => {});
 const encryptDmMock = vi.fn(async (_roomKey: string, _plaintext: string) => ({
   algorithm: "m.olm.v1.curve25519-aes-sha2" as const,
   sender_key: "sk",
@@ -32,6 +33,7 @@ vi.mock("@/lib/crypto", () => ({
   bootstrap: () => bootstrapMock(),
   ensurePeerTracked: (...args: [string]) => ensurePeerTrackedMock(...args),
   ensureSessionWithPeer: (...args: [string]) => ensureSessionWithPeerMock(...args),
+  ensureDmSession: (...args: [string, string]) => ensureDmSessionMock(...args),
   encryptDm: (...args: [string, string]) => encryptDmMock(...args),
   decryptDm: vi.fn(async () => "plaintext"),
   pumpOutgoing: vi.fn(async () => {}),
@@ -50,6 +52,7 @@ beforeEach(() => {
   bootstrapMock.mockClear();
   ensurePeerTrackedMock.mockClear();
   ensureSessionWithPeerMock.mockClear();
+  ensureDmSessionMock.mockClear();
   encryptDmMock.mockClear();
 });
 

@@ -108,7 +108,11 @@ export function createOlmChatCrypto(roomKey: string, peerMatrixId: string): Chat
     async ensureSession(_memberUserIds: string[]) {
       if (!mod) throw new Error("chat-crypto: not initialized");
       await mod.ensurePeerTracked(peerMatrixId);
-      await mod.ensureSessionWithPeer(peerMatrixId);
+      // Full DM bringup: track + claim + shareRoomKey. Must NOT call the
+      // shorter `ensureSessionWithPeer` here — it skips shareRoomKey and
+      // the subsequent `encryptRoomEvent` would panic with "Session wasn't
+      // created nor shared" in matrix-sdk-crypto-wasm.
+      await mod.ensureDmSession(roomKey, peerMatrixId);
     },
     async encrypt(plaintext: string): Promise<EncryptedEnvelope> {
       if (!mod) throw new Error("chat-crypto: not initialized");

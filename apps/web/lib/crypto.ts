@@ -19,7 +19,11 @@
 //   (`@bot.<uuid>:legends.local`). Use `crypto-matrix.ts` helpers to build
 //   the right namespace from a peer principal.
 //     - ensurePeerTracked(peerMatrixId)         -> updateTrackedUsers + queryKeys flush
-//     - ensureSessionWithPeer(peerMatrixId)     -> ensureRoomMembers(roomId, [peer]) shortcut
+//     - ensureSessionWithPeer(peerMatrixId)     -> peer track + Olm session claim only
+//     - ensureDmSession(roomKey, peerMatrixId)  -> full DM bringup: track + claim +
+//                                                  shareRoomKey for the per-conversation
+//                                                  roomKey so encryptRoomEvent has an
+//                                                  outbound Megolm session.
 //     - encryptDm(roomId, plaintext)            -> delegates to encryptRoom
 //     - decryptDm(roomId, envelope)             -> delegates to decryptRoom
 //     - getPeerFingerprint(peerMatrixId)        -> formatted ed25519 for safety modal
@@ -404,13 +408,79 @@ export async function ensurePeerTracked(peerMatrixId: string): Promise<void> {
 }
 
 export async function ensureSessionWithPeer(peerMatrixId: string): Promise<void> {
-  // DM convenience: delegate to the group-aware helper with a single peer.
-  // The self device is implicit (OlmMachine internally treats "us" via userId).
-  // The roomId is not needed for ensureRoomMembers's session-claim step —
-  // that step only requires the peer set — so we pass a placeholder. The
-  // actual shareRoomKey runs later from encryptRoom() / encryptDm() where the
-  // real roomId is known.
+  // DM convenience for the Olm-only (pairwise, no Megolm room) handshake:
+  // tracks the peer and claims an Olm 1:1 session. This does NOT call
+  // `shareRoomKey`, so it cannot be used as a prerequisite for
+  // `encryptRoomEvent` (which requires a Megolm outbound session). For
+  // E2EE DMs that go through encryptDm/encryptRoom, callers MUST use
+  // `ensureDmSession` instead — otherwise `encryptRoomEvent` panics with
+  // "Session wasn't created nor shared" in matrix-sdk-crypto-wasm.
   await ensureRoomMembersPeers([peerMatrixId]);
+}
+
+/**
+ * Full DM-room bringup: track devices, claim Olm sessions, AND share the
+ * Megolm room key for `roomKey` so a subsequent `encryptRoom` /
+ * `encryptDm(roomKey, ...)` has an outbound session to encrypt with.
+ *
+ * The DM "roomKey" is a stable per-conversation identifier (e.g.
+ * `!<convId>:legends.local`) both participants agree on. shareRoomKey
+ * targets the peer's devices via the Olm sessions established in step 2,
+ * matching the topic-room flow (`ensureRoomMembers`) for the single-peer
+ * case.
+ *
+ * Without this call the DM encrypt path panics deep inside the wasm SDK:
+ *
+ *     src/session_manager/group_sessions/mod.rs:218:54
+ *     panicked: "Session wasn't created nor shared"
+ *
+ * and the wasm instance dies (Uncaught RuntimeError: unreachable). All
+ * subsequent crypto ops in the tab then fail until reload.
+ */
+export async function ensureDmSession(
+  roomKey: string,
+  peerMatrixId: string,
+): Promise<void> {
+  const machine = await getMachine();
+  if (!cachedSession) throw new Error("crypto: not initialized");
+  // Include self in the recipient set so any second device the user owns
+  // also receives the room key. Mirrors the topic-room path's precedent of
+  // passing the full member list (including self) to share/track.
+  const selfMatrixId = cachedSession.matrixUserId;
+  // 1) Track current device lists for peer + self. updateTrackedUsers
+  //    schedules a /keys/query; drained in the final pump.
+  await machine.updateTrackedUsers([
+    new UserId(peerMatrixId),
+    new UserId(selfMatrixId),
+  ]);
+  // 2) Establish Olm 1:1 sessions with every missing device. The wasm
+  //    SDK consumes UserId handles, so rebuild fresh lists for each call.
+  const claim = await machine.getMissingSessions([
+    new UserId(peerMatrixId),
+    new UserId(selfMatrixId),
+  ]);
+  if (claim) {
+    const resp = await postJson<unknown>("/api/crypto/keys/claim", claim.body);
+    await machine.markRequestAsSent(claim.id, claim.type, JSON.stringify(resp));
+  }
+  // 3) Share the Megolm outbound session for `roomKey`. This is the step
+  //    `ensureSessionWithPeer` skipped — and the reason encryptRoomEvent
+  //    used to panic on first send to a freshly-paired DM.
+  const todeviceReqs = await machine.shareRoomKey(
+    new RoomId(roomKey),
+    [new UserId(peerMatrixId), new UserId(selfMatrixId)],
+    buildEncryptionSettings(),
+  );
+  for (const req of todeviceReqs) {
+    const path = `/api/crypto/sendToDevice/${encodeURIComponent(
+      req.event_type,
+    )}/${encodeURIComponent(req.txn_id)}`;
+    const resp = await putJson<unknown>(path, req.body);
+    await machine.markRequestAsSent(req.id, req.type, JSON.stringify(resp));
+  }
+  // 4) Final drain — KeysQuery scheduled by updateTrackedUsers, any
+  //    follow-up KeysUpload, etc. Routed through the single-flight mutex.
+  await pumpOutgoing();
 }
 
 /**
