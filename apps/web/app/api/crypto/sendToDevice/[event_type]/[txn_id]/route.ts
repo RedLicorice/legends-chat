@@ -1,28 +1,37 @@
 // PUT /api/crypto/sendToDevice/:event_type/:txn_id
 // Matrix-shaped to-device fan-out. The OlmMachine on the sender's client
-// hands us a per-request `txn_id` and a `{ user_id: { device_id: content } }`
-// map; we drop one row per (user, device) into user_to_device_queue and the
-// recipient drains it via GET /api/crypto/sync.
+// hands us a per-request `txn_id` and a `{ matrix_id: { device_id: content } }`
+// map; we drop one row per (recipient, device) into whichever queue matches
+// the recipient principal type:
+//   - user recipient → user_to_device_queue
+//   - bot recipient  → bot_to_device_queue (sender_user_id = caller, no bot
+//                      sender column populated since sender is a user)
+// The recipient drains the appropriate queue via its sync endpoint.
 //
 // Idempotency: a single sendToDevice request can produce N queue rows but
 // shares one txn_id. The queue's existing UNIQUE on (sender, txn_id) would
 // only let the first recipient row land. We track applied txns separately
 // in `crypto_sent_txns` (migration 0039), check it up front, and skip the
-// whole fan-out if we've already serviced this txn.
+// whole fan-out if we've already serviced this txn. Sender is always a user
+// here, so `crypto_sent_txns` (user-side) is the right idempotency table.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { cryptoSentTxns, userToDeviceQueue } from "@legends/db/schema";
+import {
+  botToDeviceQueue,
+  cryptoSentTxns,
+  userToDeviceQueue,
+} from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
-import { fromMatrixUserId } from "@/lib/crypto-matrix";
+import { parsePrincipalFromMatrixId } from "@/lib/crypto-principal";
 
 const DEVICE_HEADER = "x-legends-crypto-device-id";
 
 const bodySchema = z.object({
   messages: z.record(
-    z.string().min(1).max(256), // matrix user id
+    z.string().min(1).max(256), // matrix id (user or bot namespace)
     z.record(z.string().min(1).max(128), z.record(z.string(), z.unknown())),
   ),
 });
@@ -80,47 +89,61 @@ export async function PUT(
     return NextResponse.json({});
   }
 
-  // Fan out queue rows. We pre-resolve every matrix user id and skip any
-  // that are malformed (rather than failing the whole request) so a single
-  // bad entry can't break otherwise-good sends.
-  const rowsToInsert: {
-    recipientUserId: string;
-    recipientDeviceId: string;
-    senderUserId: string;
-    senderDeviceId: string;
-    eventType: string;
-    contentJson: Record<string, unknown>;
-    txnId: string;
-  }[] = [];
+  // Fan out per principal type. Unparseable matrix ids are skipped (rather
+  // than failing the whole request) so a single bad entry can't break
+  // otherwise-good sends — same forgiveness rule as the pre-dispatch route.
+  const userRows: (typeof userToDeviceQueue.$inferInsert)[] = [];
+  const botRows: (typeof botToDeviceQueue.$inferInsert)[] = [];
 
-  for (const [matrixUserId, devices] of Object.entries(parsed.data.messages)) {
-    const rawUserId = fromMatrixUserId(matrixUserId);
-    if (!rawUserId) continue;
+  for (const [matrixId, devices] of Object.entries(parsed.data.messages)) {
+    const principal = parsePrincipalFromMatrixId(matrixId);
+    if (!principal) continue;
+
     for (const [deviceId, content] of Object.entries(devices)) {
-      if (typeof deviceId !== "string" || deviceId.length === 0 || deviceId.length > 128) continue;
-      rowsToInsert.push({
-        recipientUserId: rawUserId,
-        recipientDeviceId: deviceId, // "*" means broadcast to all of the recipient's devices
-        senderUserId: user.id,
-        senderDeviceId,
-        eventType,
-        contentJson: content as Record<string, unknown>,
-        txnId,
-      });
+      if (typeof deviceId !== "string" || deviceId.length === 0 || deviceId.length > 128) {
+        continue;
+      }
+      if (principal.type === "user") {
+        userRows.push({
+          recipientUserId: principal.id,
+          // "*" means broadcast to all of the recipient's devices.
+          recipientDeviceId: deviceId,
+          senderUserId: user.id,
+          senderDeviceId,
+          eventType,
+          contentJson: content as Record<string, unknown>,
+          txnId,
+        });
+      } else {
+        botRows.push({
+          botId: principal.id,
+          deviceId,
+          eventType,
+          // Sender is always a user on this user-facing route — the bot-side
+          // sender path lives under /api/bot/v1/crypto/sendToDevice.
+          senderUserId: user.id,
+          senderBotId: null,
+          payload: content as Record<string, unknown>,
+        });
+      }
     }
   }
 
-  if (rowsToInsert.length > 0) {
-    // Chunk inserts to avoid hitting parameter limits on very large fan-outs.
-    const CHUNK = 200;
-    for (let i = 0; i < rowsToInsert.length; i += CHUNK) {
-      const chunk = rowsToInsert.slice(i, i + CHUNK);
-      // We don't onConflictDoNothing here because the queue's UNIQUE on
-      // (sender, sender_device, txn_id) would collide on the SECOND row of
-      // any fan-out. With the cryptoSentTxns gate above, we should never
-      // re-enter this block for the same txn — so a plain insert is correct
-      // and any collision is a real bug we want surfaced.
-      await db.insert(userToDeviceQueue).values(chunk);
+  // Chunk inserts to avoid hitting parameter limits on very large fan-outs.
+  // We don't onConflictDoNothing here because the queue's UNIQUE on
+  // (sender, sender_device, txn_id) would collide on the SECOND row of any
+  // fan-out. With the cryptoSentTxns gate above, we should never re-enter
+  // this block for the same txn — so a plain insert is correct and any
+  // collision is a real bug we want surfaced.
+  const CHUNK = 200;
+  if (userRows.length > 0) {
+    for (let i = 0; i < userRows.length; i += CHUNK) {
+      await db.insert(userToDeviceQueue).values(userRows.slice(i, i + CHUNK));
+    }
+  }
+  if (botRows.length > 0) {
+    for (let i = 0; i < botRows.length; i += CHUNK) {
+      await db.insert(botToDeviceQueue).values(botRows.slice(i, i + CHUNK));
     }
   }
 
