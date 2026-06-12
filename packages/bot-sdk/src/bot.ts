@@ -298,6 +298,15 @@ export class LegendsBot {
    * surface through `_onError`. The loop exits when `stop()` flips
    * `_running` to false.
    */
+  /**
+   * Low-water threshold for `signed_curve25519` one-time keys. When the
+   * server-reported count drops below this in a sync response we log a
+   * visible warning; the wasm itself handles the actual top-up by
+   * emitting a fresh `keys_upload` in `outgoingRequests()`. Per spec §8
+   * step 6 the threshold is 5.
+   */
+  private static readonly OTK_LOW_WATER = 5;
+
   private async _cryptoSyncLoop(): Promise<void> {
     if (!this._crypto) return;
     const backoffSteps = [500, 1_000, 2_000, 4_000, 8_000];
@@ -309,6 +318,19 @@ export class LegendsBot {
           toDevice: JSON.stringify(sync.to_device.events),
           otkCounts: sync.device_one_time_keys_count,
         });
+
+        // Visible low-water guard: the wasm's OTK accounting is internal,
+        // so we surface a log when the server says we're running low. The
+        // actual top-up happens implicitly via the next outgoingRequests()
+        // drain — the wasm emits a fresh keys_upload once it sees the
+        // reduced count.
+        const otkCount = sync.device_one_time_keys_count.signed_curve25519 ?? 0;
+        if (otkCount < LegendsBot.OTK_LOW_WATER) {
+          console.log(
+            `[bot] OTK low (signed_curve25519=${otkCount} < ${LegendsBot.OTK_LOW_WATER}); machine will top up via outgoingRequests`,
+          );
+        }
+
         await this._drainOutgoingRequests();
         await this._crypto.persist();
         backoffIdx = 0;
