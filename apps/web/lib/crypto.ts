@@ -419,23 +419,33 @@ export async function ensureSessionWithPeer(peerMatrixId: string): Promise<void>
 }
 
 /**
- * Full DM-room bringup: track devices, claim Olm sessions, AND share the
- * Megolm room key for `roomKey` so a subsequent `encryptRoom` /
- * `encryptDm(roomKey, ...)` has an outbound session to encrypt with.
+ * Full DM-room bringup: track devices, **drain the resulting KeysQuery**,
+ * claim Olm sessions, AND share the Megolm room key for `roomKey` so a
+ * subsequent `encryptRoom` / `encryptDm(roomKey, ...)` has an outbound
+ * session to encrypt with.
  *
  * The DM "roomKey" is a stable per-conversation identifier (e.g.
  * `!<convId>:legends.local`) both participants agree on. shareRoomKey
- * targets the peer's devices via the Olm sessions established in step 2,
+ * targets the peer's devices via the Olm sessions established in step 3,
  * matching the topic-room flow (`ensureRoomMembers`) for the single-peer
  * case.
  *
- * Without this call the DM encrypt path panics deep inside the wasm SDK:
+ * Ordering rationale — track → query → claim → share — taken verbatim
+ * from the bot SDK's `_sendEncrypted` flow (packages/bot-sdk/src/bot.ts).
+ * Without the **explicit pump after `updateTrackedUsers`** the
+ * OlmMachine has no device list for the peer yet, so
+ * `getMissingSessions` returns `null`, no `keys/claim` runs, no Olm 1:1
+ * session is established, and `shareRoomKey` panics with:
  *
  *     src/session_manager/group_sessions/mod.rs:218:54
  *     panicked: "Session wasn't created nor shared"
  *
- * and the wasm instance dies (Uncaught RuntimeError: unreachable). All
- * subsequent crypto ops in the tab then fail until reload.
+ * (the wasm instance dies — `RuntimeError: unreachable` — and every
+ * subsequent crypto op in the tab fails until reload).
+ *
+ * The single-flight mutex inside `pumpOutgoing` makes the
+ * post-`updateTrackedUsers` pump safe to call from inside a longer
+ * sequence — concurrent callers all share the same in-flight cycle.
  */
 export async function ensureDmSession(
   roomKey: string,
@@ -448,12 +458,21 @@ export async function ensureDmSession(
   // passing the full member list (including self) to share/track.
   const selfMatrixId = cachedSession.matrixUserId;
   // 1) Track current device lists for peer + self. updateTrackedUsers
-  //    schedules a /keys/query; drained in the final pump.
+  //    schedules a /keys/query — but it does NOT dispatch it. The next
+  //    pump cycle below is what actually fetches the device list from
+  //    the server so the machine knows which devices to claim OTKs for.
   await machine.updateTrackedUsers([
     new UserId(peerMatrixId),
     new UserId(selfMatrixId),
   ]);
-  // 2) Establish Olm 1:1 sessions with every missing device. The wasm
+  // 2) Drain the queued KeysQuery (and any follow-up KeysUpload, etc.)
+  //    BEFORE asking for missing sessions. This is the critical step
+  //    that was missing in the first version of this helper — without
+  //    it the machine has no peer device list and `getMissingSessions`
+  //    returns null, so no Olm sessions get established and the
+  //    subsequent shareRoomKey panics on a missing session.
+  await pumpOutgoing();
+  // 3) Establish Olm 1:1 sessions with every missing device. The wasm
   //    SDK consumes UserId handles, so rebuild fresh lists for each call.
   const claim = await machine.getMissingSessions([
     new UserId(peerMatrixId),
@@ -463,9 +482,10 @@ export async function ensureDmSession(
     const resp = await postJson<unknown>("/api/crypto/keys/claim", claim.body);
     await machine.markRequestAsSent(claim.id, claim.type, JSON.stringify(resp));
   }
-  // 3) Share the Megolm outbound session for `roomKey`. This is the step
-  //    `ensureSessionWithPeer` skipped — and the reason encryptRoomEvent
-  //    used to panic on first send to a freshly-paired DM.
+  // 4) Share the Megolm outbound session for `roomKey`. With step 2's
+  //    pump having populated the device list and step 3 having
+  //    established the Olm 1:1 sessions, this can now safely wrap the
+  //    room key for each recipient device.
   const todeviceReqs = await machine.shareRoomKey(
     new RoomId(roomKey),
     [new UserId(peerMatrixId), new UserId(selfMatrixId)],
@@ -478,8 +498,9 @@ export async function ensureDmSession(
     const resp = await putJson<unknown>(path, req.body);
     await machine.markRequestAsSent(req.id, req.type, JSON.stringify(resp));
   }
-  // 4) Final drain — KeysQuery scheduled by updateTrackedUsers, any
-  //    follow-up KeysUpload, etc. Routed through the single-flight mutex.
+  // 5) Final drain — anything still queued (e.g. a follow-up KeysUpload
+  //    to top up OTKs consumed during the claim). Routed through the
+  //    single-flight mutex.
   await pumpOutgoing();
 }
 
