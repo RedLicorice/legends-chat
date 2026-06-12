@@ -4,11 +4,14 @@
 // try/catch at each call site (or rely on this helper's swallow).
 //
 // Current reasons (kept loose / text, not an enum):
-//   'keys_upload'   — POST /api/crypto/keys/upload
-//   'topic_join'    — user joined a topic (also the joining user)
-//   'topic_leave'   — user left a topic
-//   'admin_grant'   — user gained role='admin'
-//   'admin_revoke'  — user lost role='admin'
+//   'keys_upload'        — POST /api/crypto/keys/upload
+//   'topic_join'         — user joined a topic (also the joining user)
+//   'topic_leave'        — user left a topic
+//   'admin_grant'        — user gained role='admin'
+//   'admin_revoke'       — user lost role='admin'
+//   'topic_bot_add:<id>' — bot was added to an E2EE topic; members must
+//                          rotate the outbound Megolm session.
+//   'topic_bot_remove:<id>' — bot was removed from an E2EE topic; same.
 
 import { userDeviceChangeLog } from "@legends/db/schema";
 import { db } from "@/lib/db";
@@ -18,7 +21,12 @@ export type DeviceChangeReason =
   | "topic_join"
   | "topic_leave"
   | "admin_grant"
-  | "admin_revoke";
+  | "admin_revoke"
+  // The bot-add/remove reasons embed the bot id (`topic_bot_add:<uuid>`); we
+  // accept any string with the prefix at the type level so call sites can
+  // keep the bot id in the audit row without resorting to a cast.
+  | `topic_bot_add:${string}`
+  | `topic_bot_remove:${string}`;
 
 export async function logDeviceChange(
   userId: string,
