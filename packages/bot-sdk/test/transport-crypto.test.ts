@@ -103,12 +103,19 @@ describe("BotCryptoTransport", () => {
     expect(url).toBe("https://chat.test/api/bot/v1/crypto/sync");
   });
 
-  it("roomMembers GETs /api/bot/v1/crypto/rooms/<roomId>", async () => {
+  it("roomMembers URL-encodes the room id (Matrix room ids contain reserved ':' which proxies misparse)", async () => {
     fetchSpy.mockResolvedValueOnce(okResponse({ members: [{ matrix_id: "@u:legends.local", device_ids: ["DEV"] }] }));
     const t = new BotCryptoTransport({ token: "tok", baseUrl: "https://chat.test" });
-    const out = await t.roomMembers("!r:legends.local");
+    const out = await t.roomMembers("!abc-uuid:legends.local");
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://chat.test/api/bot/v1/crypto/rooms/!r:legends.local");
+    // ':' is a gen-delim (RFC 3986) — it must be encoded so intermediaries
+    // (CDN, Next.js router) don't treat the trailing `:server` as a port.
+    // encodeURIComponent leaves '!' raw (it's a sub-delim that's safe in
+    // path segments per RFC 3986 §2.3), so we don't assert on it.
+    expect(url).toBe(
+      `https://chat.test/api/bot/v1/crypto/rooms/${encodeURIComponent("!abc-uuid:legends.local")}`,
+    );
+    expect(url).toContain("%3A");
     expect(init.method).toBe("GET");
     expect(init.headers).toMatchObject({ authorization: "Bearer tok" });
     expect(init.body).toBeUndefined();

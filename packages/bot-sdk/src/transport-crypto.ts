@@ -160,9 +160,15 @@ export class BotCryptoTransport {
   }
 
   async roomMembers(roomId: string): Promise<RoomMembersResponse> {
+    // Matrix room ids look like `!<opaque>:<server>`. Both `!` (sub-delim) and
+    // `:` (gen-delim) are RFC 3986 reserved characters in a path segment — if
+    // we let them through raw, intermediaries (CDN, Next.js router, proxies)
+    // can misparse the URL. encodeURIComponent normalises them to %21 / %3A
+    // and the server-side decode in /api/bot/v1/crypto/rooms/[roomId]/route.ts
+    // already calls decodeURIComponent on the param.
     return this.request<RoomMembersResponse>(
       "GET",
-      `/api/bot/v1/crypto/rooms/${roomId}`,
+      `/api/bot/v1/crypto/rooms/${encodeURIComponent(roomId)}`,
     );
   }
 
