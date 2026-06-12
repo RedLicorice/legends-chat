@@ -110,11 +110,11 @@ describe("/api/bot/v1/sendDmMessage", () => {
     ]);
   });
 
-  it("ciphertext to E2EE convo: 201 + publishes DM_NEW with ciphertext", async () => {
+  it("ciphertext (JSON string per wire format) to E2EE convo: 201 + publishes DM_NEW with ciphertext", async () => {
     published.length = 0;
     const res = await post({
       conversationId: e2eeConvId,
-      ciphertext: { algorithm: "m.olm.v1.curve25519-aes-sha2", x: 1 },
+      ciphertext: JSON.stringify({ algorithm: "m.olm.v1.curve25519-aes-sha2", x: 1 }),
     });
     expect(res.status).toBe(201);
     const body = await res.json();
@@ -125,6 +125,22 @@ describe("/api/bot/v1/sendDmMessage", () => {
     expect(env.conversationId).toBe(e2eeConvId);
     expect(env.isE2ee).toBe(true);
     expect(env.message.ciphertext).toBeDefined();
+  });
+
+  it("ciphertext as object (legacy) is rejected — wire format is string", async () => {
+    const res = await post({
+      conversationId: e2eeConvId,
+      ciphertext: { algorithm: "m.olm.v1.curve25519-aes-sha2", x: 1 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("ciphertext that is not parseable JSON is rejected", async () => {
+    const res = await post({
+      conversationId: e2eeConvId,
+      ciphertext: "not-json-at-all",
+    });
+    expect(res.status).toBe(400);
   });
 
   it("plaintext to plaintext convo: 201", async () => {
@@ -138,7 +154,7 @@ describe("/api/bot/v1/sendDmMessage", () => {
   });
 
   it("ciphertext to plaintext convo: 400", async () => {
-    const res = await post({ conversationId: plaintextConvId, ciphertext: { x: 1 } });
+    const res = await post({ conversationId: plaintextConvId, ciphertext: JSON.stringify({ x: 1 }) });
     expect(res.status).toBe(400);
   });
 
@@ -148,7 +164,7 @@ describe("/api/bot/v1/sendDmMessage", () => {
   });
 
   it("both text and ciphertext: 400", async () => {
-    const res = await post({ conversationId: plaintextConvId, text: "x", ciphertext: { x: 1 } });
+    const res = await post({ conversationId: plaintextConvId, text: "x", ciphertext: JSON.stringify({ x: 1 }) });
     expect(res.status).toBe(400);
   });
 

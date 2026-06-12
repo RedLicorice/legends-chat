@@ -107,11 +107,11 @@ describe("/api/bot/v1/sendMessage — ciphertext support", () => {
     expect(res.status).toBe(201);
   });
 
-  it("ciphertext to E2EE convo: 201 + WS DM_NEW carries ciphertext", async () => {
+  it("ciphertext (JSON string per wire format) to E2EE convo: 201 + WS DM_NEW carries ciphertext", async () => {
     published.length = 0;
     const res = await post({
       conversationId: e2eeConvId,
-      ciphertext: { algorithm: "m.olm.v1.curve25519-aes-sha2", x: 1 },
+      ciphertext: JSON.stringify({ algorithm: "m.olm.v1.curve25519-aes-sha2", x: 1 }),
     });
     expect(res.status).toBe(201);
     expect(published.length).toBeGreaterThanOrEqual(1);
@@ -121,13 +121,21 @@ describe("/api/bot/v1/sendMessage — ciphertext support", () => {
     expect(env.message.ciphertext).toBeDefined();
   });
 
+  it("ciphertext as object (legacy) is rejected — wire format is string", async () => {
+    const res = await post({
+      conversationId: e2eeConvId,
+      ciphertext: { algorithm: "m.olm.v1.curve25519-aes-sha2", x: 1 },
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("plaintext to E2EE convo: 400", async () => {
     const res = await post({ conversationId: e2eeConvId, text: "hi" });
     expect(res.status).toBe(400);
   });
 
   it("ciphertext to plaintext convo: 400", async () => {
-    const res = await post({ conversationId: plaintextConvId, ciphertext: { x: 1 } });
+    const res = await post({ conversationId: plaintextConvId, ciphertext: JSON.stringify({ x: 1 }) });
     expect(res.status).toBe(400);
   });
 });

@@ -44,7 +44,9 @@ export async function POST(req: Request) {
     topicId?: string;
     conversationId?: string;
     text?: string;
-    ciphertext?: Record<string, unknown>;
+    // Per the wire-format contract (see olm-machine.ts) `ciphertext` is a
+    // JSON-stringified m.room.encrypted CONTENT object on the bot API.
+    ciphertext?: string;
     replyToMessageId?: string;
     inlineKeyboard?: InlineKeyboardButton[][];
   };
@@ -55,7 +57,34 @@ export async function POST(req: Request) {
   // enforced after we know `isE2ee` (DM branch only — topic branch still
   // requires text).
   const hasText = typeof body.text === "string" && body.text.trim().length > 0;
-  const hasCiphertext = body.ciphertext != null && typeof body.ciphertext === "object";
+  // Parse ciphertext into a jsonb object now — the wire field is a string but
+  // dm_messages.ciphertext_json is jsonb. Rejecting non-string / non-parseable
+  // bodies here is what catches the legacy object shape (the live-stack bug).
+  let ciphertextJson: Record<string, unknown> | null = null;
+  if (body.ciphertext != null) {
+    if (typeof body.ciphertext !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "ciphertext must be a JSON-stringified string" },
+        { status: 400 },
+      );
+    }
+    try {
+      const parsed = JSON.parse(body.ciphertext) as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return NextResponse.json(
+          { ok: false, error: "ciphertext must parse to a JSON object" },
+          { status: 400 },
+        );
+      }
+      ciphertextJson = parsed as Record<string, unknown>;
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "ciphertext must parse to a JSON object" },
+        { status: 400 },
+      );
+    }
+  }
+  const hasCiphertext = ciphertextJson != null;
   if (hasText === hasCiphertext) {
     return NextResponse.json(
       { ok: false, error: "exactly one of `text` or `ciphertext` required" },
@@ -103,7 +132,7 @@ export async function POST(req: Request) {
       senderType: "bot",
       senderId: bot.id,
       text: hasText ? body.text!.trim() : undefined,
-      ciphertext: hasCiphertext ? body.ciphertext : undefined,
+      ciphertext: ciphertextJson ?? undefined,
       replyToMessageId:
         body.replyToMessageId && /^\d+$/.test(body.replyToMessageId)
           ? body.replyToMessageId

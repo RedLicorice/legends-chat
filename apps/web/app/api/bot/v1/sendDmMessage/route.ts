@@ -28,11 +28,31 @@ import { redis } from "@/lib/redis";
 import { getBotFromRequest } from "@/lib/bot-auth";
 import { insertDmMessage, recipientUserIds } from "@/lib/dm";
 
+// `ciphertext` arrives as a JSON-stringified m.room.encrypted CONTENT
+// object — matches the bot SDK's wasm output and what its decrypt path
+// expects on incoming envelopes (see packages/bot-sdk/src/crypto/olm-machine.ts).
+// We refine that the string parses to a JSON object so a bot can't
+// accidentally smuggle a non-Matrix body through the field.
 const sendSchema = z
   .object({
     conversationId: z.string().uuid(),
     text: z.string().min(1).max(8000).optional(),
-    ciphertext: z.record(z.unknown()).optional(),
+    ciphertext: z
+      .string()
+      .min(1)
+      .max(64_000)
+      .refine(
+        (s) => {
+          try {
+            const v = JSON.parse(s) as unknown;
+            return typeof v === "object" && v !== null && !Array.isArray(v);
+          } catch {
+            return false;
+          }
+        },
+        { message: "ciphertext must be a JSON-stringified object" },
+      )
+      .optional(),
     replyToMessageId: z.string().regex(/^\d+$/).optional().nullable(),
   })
   .refine((d) => (d.text != null) !== (d.ciphertext != null), {
@@ -105,12 +125,20 @@ export async function POST(req: Request) {
     );
   }
 
+  // Ciphertext arrives as a JSON string on the wire; the DB stores it as a
+  // jsonb object. Parse once here so the DM row keeps the existing shape
+  // (also the shape the user-facing /api/dm/[id]/messages route persists).
+  // The refine in `sendSchema` already guaranteed it's a parseable object.
+  const ciphertextJson = parsed.data.ciphertext
+    ? (JSON.parse(parsed.data.ciphertext) as Record<string, unknown>)
+    : undefined;
+
   const msg = await insertDmMessage({
     conversationId,
     senderType: "bot",
     senderId: bot.id,
     text: parsed.data.text,
-    ciphertext: parsed.data.ciphertext,
+    ciphertext: ciphertextJson,
     replyToMessageId: parsed.data.replyToMessageId ?? null,
   });
 
