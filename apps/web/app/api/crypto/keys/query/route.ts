@@ -1,19 +1,27 @@
 // POST /api/crypto/keys/query
-// Returns the published device key bundles for a set of Matrix user ids.
+// Returns the published device key bundles for a set of Matrix ids.
 // OlmMachine uses this to learn peers' identity keys before claiming OTKs.
 //
 // Body: { device_keys: { "@<uuid>:legends.local": [] | ["<deviceId>", ...] }, timeout?: number }
 // Response shape mirrors Matrix /_matrix/client/v3/keys/query (minus
 // cross-signing — we don't issue master/self/user signing keys).
+//
+// Dispatch: each requested Matrix id may target either a user (`@<uuid>`)
+// or a bot (`@bot.<uuid>`); `parsePrincipalFromMatrixId` returns a tagged
+// principal and `getDeviceList` reads either `user_key_bundles` or
+// `bot_devices` based on that tag. Unparseable ids land in `failures`
+// (Matrix-shaped, per entry) so a single bad target can't fail the batch.
 
 import { NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { userKeyBundles } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
-import { fromMatrixUserId, toMatrixUserId } from "@/lib/crypto-matrix";
+import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
+import {
+  getDeviceList,
+  parsePrincipalFromMatrixId,
+} from "@/lib/crypto-principal";
 
 const bodySchema = z.object({
   device_keys: z.record(z.string().min(1).max(256), z.array(z.string().min(1).max(128))),
@@ -23,6 +31,10 @@ const bodySchema = z.object({
 function matrixError(errcode: string, error: string, status: number) {
   return NextResponse.json({ errcode, error }, { status });
 }
+
+// `db` is used transitively through the dispatch layer; the import above keeps
+// the route's bundle attribution stable when build tools tree-shake.
+void db;
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -45,48 +57,45 @@ export async function POST(req: Request) {
   const deviceKeysOut: Record<string, Record<string, unknown>> = {};
   const failures: Record<string, { errcode: string; error: string }> = {};
 
-  for (const [matrixUserId, deviceFilter] of Object.entries(parsed.data.device_keys)) {
-    const rawUserId = fromMatrixUserId(matrixUserId);
-    if (!rawUserId) {
-      failures[matrixUserId] = { errcode: "M_UNKNOWN", error: "invalid matrix user id" };
+  for (const [matrixId, deviceFilter] of Object.entries(parsed.data.device_keys)) {
+    const principal = parsePrincipalFromMatrixId(matrixId);
+    if (!principal) {
+      failures[matrixId] = { errcode: "M_UNKNOWN", error: "invalid matrix id" };
       continue;
     }
 
-    // Pull all device rows for this user (optionally narrowed).
-    const baseCond = eq(userKeyBundles.userId, rawUserId);
-    const where =
+    const fullId =
+      principal.type === "user"
+        ? toMatrixUserId(principal.id)
+        : toMatrixBotId(principal.id);
+
+    const list = await getDeviceList(principal);
+
+    // Empty filter array = "give me every device". A non-empty filter narrows
+    // the response to the listed device ids (others are silently dropped).
+    const devices =
       deviceFilter.length > 0
-        ? and(baseCond, inArray(userKeyBundles.deviceId, deviceFilter))
-        : baseCond;
+        ? list.devices.filter((d) => deviceFilter.includes(d.deviceId))
+        : list.devices;
 
-    const rows = await db
-      .select({
-        deviceId: userKeyBundles.deviceId,
-        algorithmsJson: userKeyBundles.algorithmsJson,
-        keysJson: userKeyBundles.keysJson,
-        signaturesJson: userKeyBundles.signaturesJson,
-      })
-      .from(userKeyBundles)
-      .where(where);
-
-    if (rows.length === 0) {
-      // Matrix returns an empty object for the user (no failure) — the
-      // caller must be tolerant of "user has no devices yet" themselves.
-      deviceKeysOut[toMatrixUserId(rawUserId)] = {};
+    if (devices.length === 0) {
+      // Matrix returns an empty object for the principal (no failure) — the
+      // caller must be tolerant of "principal has no devices yet" themselves.
+      deviceKeysOut[fullId] = {};
       continue;
     }
 
     const perDevice: Record<string, unknown> = {};
-    for (const row of rows) {
-      perDevice[row.deviceId] = {
-        user_id: toMatrixUserId(rawUserId),
-        device_id: row.deviceId,
-        algorithms: row.algorithmsJson,
-        keys: row.keysJson,
-        signatures: row.signaturesJson,
+    for (const d of devices) {
+      perDevice[d.deviceId] = {
+        user_id: fullId,
+        device_id: d.deviceId,
+        algorithms: d.algorithms,
+        keys: d.keys,
+        signatures: d.signatures,
       };
     }
-    deviceKeysOut[toMatrixUserId(rawUserId)] = perDevice;
+    deviceKeysOut[fullId] = perDevice;
   }
 
   return NextResponse.json({
