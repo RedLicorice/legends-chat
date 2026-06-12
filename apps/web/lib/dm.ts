@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { dmConversations, dmParticipants, dmMessages, dmBlocks, encryptionKeys, users, bots } from "@legends/db/schema";
 import { generateDataKey, wrapKey, unwrapKey, encryptMessage, decryptMessage } from "@legends/crypto";
 import { buildDmKey } from "@legends/db/dm-key";
+import { BOT_E2EE_ERROR_CODES } from "@legends/shared";
 import { db } from "@/lib/db";
 import { encodeDmContent, decodeDmContent } from "@/lib/dm.codec";
 import { toMatrixRoomId } from "@/lib/crypto-matrix";
@@ -83,18 +84,39 @@ export async function openConversation(
   if (peer.type === "user" && initiatorUserId === peer.id) {
     throw Object.assign(new Error("cannot DM yourself"), { code: "BAD" });
   }
-  if (peer.type === "bot" && options?.e2ee) {
-    throw Object.assign(new Error("e2ee bot DMs are not supported yet"), { code: "BAD" });
-  }
   if (peer.type === "user" && (await isBlockedBetween(initiatorUserId, peer.id))) {
     throw Object.assign(new Error("blocked"), { code: "BLOCKED" });
   }
   if (peer.type === "bot") {
-    const [b] = await db.select({ id: bots.id, dmEnabled: bots.dmEnabled, isActive: bots.isActive }).from(bots).where(eq(bots.id, peer.id)).limit(1);
-    if (!b || !b.isActive || !b.dmEnabled) throw Object.assign(new Error("bot not dm-able"), { code: "BAD" });
+    const [b] = await db
+      .select({ id: bots.id, dmEnabled: bots.dmEnabled, isActive: bots.isActive, e2eeState: bots.e2eeState })
+      .from(bots)
+      .where(eq(bots.id, peer.id))
+      .limit(1);
+    if (!b || !b.isActive || !b.dmEnabled) {
+      throw Object.assign(new Error("bot not dm-able"), { code: "BAD" });
+    }
+    // Bot E2EE state-machine gate. For E2EE DM open attempts, branch on the
+    // bot's e2ee_state: 'disabled' / 'pending' both reject with stable codes
+    // (consumed by the client to render specific UX); 'ready' falls through to
+    // the regular open path which now treats bot peers as E2EE-capable.
+    if (options?.e2ee) {
+      if (b.e2eeState === "disabled") {
+        throw Object.assign(new Error("bot e2ee disabled"), {
+          code: BOT_E2EE_ERROR_CODES.BOT_E2EE_DISABLED,
+        });
+      }
+      if (b.e2eeState === "pending") {
+        throw Object.assign(new Error("bot e2ee not ready"), {
+          code: BOT_E2EE_ERROR_CODES.BOT_E2EE_NOT_READY,
+        });
+      }
+    }
   }
 
-  const isE2ee = peer.type === "user" && !!options?.e2ee;
+  // E2EE is allowed when the peer is a user, or a bot in the 'ready' state
+  // (which the gate above has already verified before this point).
+  const isE2ee = !!options?.e2ee && (peer.type === "user" || peer.type === "bot");
 
   const dmKey = buildDmKey({ type: "user", id: initiatorUserId }, peer);
   const existing = await db
