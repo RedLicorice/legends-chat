@@ -67,7 +67,15 @@ export function createMegolmChatCrypto(roomId: string): ChatCrypto {
   };
 }
 
-export function createOlmChatCrypto(roomKey: string, peerUserId: string): ChatCrypto {
+/**
+ * Create an Olm 1:1 chat-crypto bound to a single peer.
+ *
+ * `peerMatrixId` must be a fully namespaced Matrix id so user and bot peers
+ * are unambiguous on the wire (`@<uuid>:legends.local` vs
+ * `@bot.<uuid>:legends.local`). Build it from a peer principal via
+ * `toMatrixUserId` / `toMatrixBotId` in `@/lib/crypto-matrix`.
+ */
+export function createOlmChatCrypto(roomKey: string, peerMatrixId: string): ChatCrypto {
   let mod: CryptoMod | null = null;
   let initPromise: Promise<void> | null = null;
   return {
@@ -89,8 +97,8 @@ export function createOlmChatCrypto(roomKey: string, peerUserId: string): ChatCr
     },
     async ensureSession(_memberUserIds: string[]) {
       if (!mod) throw new Error("chat-crypto: not initialized");
-      await mod.ensurePeerTracked(peerUserId);
-      await mod.ensureSessionWithPeer(peerUserId);
+      await mod.ensurePeerTracked(peerMatrixId);
+      await mod.ensureSessionWithPeer(peerMatrixId);
     },
     async encrypt(plaintext: string): Promise<EncryptedEnvelope> {
       if (!mod) throw new Error("chat-crypto: not initialized");

@@ -14,12 +14,15 @@
 //   - pollSync()                                -> fetch /api/crypto/sync, feed receiveSyncChanges
 //   - freeResources()                           -> close() the OlmMachine
 //
-//   DM ops (1:1):
-//     - ensurePeerTracked(peerUserId)           -> updateTrackedUsers + queryKeys flush
-//     - ensureSessionWithPeer(peerUserId)       -> ensureRoomMembers(roomId, [peer]) shortcut
+//   DM ops (1:1) — peer ids are **Matrix-shaped** so the same code path
+//   works for user peers (`@<uuid>:legends.local`) and bot peers
+//   (`@bot.<uuid>:legends.local`). Use `crypto-matrix.ts` helpers to build
+//   the right namespace from a peer principal.
+//     - ensurePeerTracked(peerMatrixId)         -> updateTrackedUsers + queryKeys flush
+//     - ensureSessionWithPeer(peerMatrixId)     -> ensureRoomMembers(roomId, [peer]) shortcut
 //     - encryptDm(roomId, plaintext)            -> delegates to encryptRoom
 //     - decryptDm(roomId, envelope)             -> delegates to decryptRoom
-//     - getPeerFingerprint(peerUserId)          -> formatted ed25519 for safety modal
+//     - getPeerFingerprint(peerMatrixId)        -> formatted ed25519 for safety modal
 //
 //   Group room ops (topics, multi-recipient):
 //     - ensureRoomMembers(roomId, userIds)      -> track + claim + shareRoomKey
@@ -387,22 +390,27 @@ export async function bootstrap(): Promise<void> {
 
 // ── Tracking peers and establishing sessions (DM convenience) ────────────────
 
-export async function ensurePeerTracked(peerUserId: string): Promise<void> {
+/**
+ * Track a DM peer identified by its **Matrix id** (e.g. `@<uuid>:legends.local`
+ * or `@bot.<uuid>:legends.local`). The Matrix-id boundary is the right level
+ * to drop the user/bot distinction — both principals share the same
+ * /keys/query + /keys/claim wire format, only the id namespace differs.
+ */
+export async function ensurePeerTracked(peerMatrixId: string): Promise<void> {
   const machine = await getMachine();
-  const matrixPeer = toMatrixUserId(peerUserId);
-  await machine.updateTrackedUsers([new UserId(matrixPeer)]);
+  await machine.updateTrackedUsers([new UserId(peerMatrixId)]);
   // updateTrackedUsers schedules a /keys/query in the background; flush it.
   await pumpOutgoing();
 }
 
-export async function ensureSessionWithPeer(peerUserId: string): Promise<void> {
+export async function ensureSessionWithPeer(peerMatrixId: string): Promise<void> {
   // DM convenience: delegate to the group-aware helper with a single peer.
   // The self device is implicit (OlmMachine internally treats "us" via userId).
   // The roomId is not needed for ensureRoomMembers's session-claim step —
   // that step only requires the peer set — so we pass a placeholder. The
   // actual shareRoomKey runs later from encryptRoom() / encryptDm() where the
   // real roomId is known.
-  await ensureRoomMembersPeers([peerUserId]);
+  await ensureRoomMembersPeers([peerMatrixId]);
 }
 
 /**
@@ -410,14 +418,17 @@ export async function ensureSessionWithPeer(peerUserId: string): Promise<void> {
  * requiring a roomId. Used by the DM convenience helpers — the actual
  * shareRoomKey for the room happens from encryptDm/encryptRoom which already
  * call shareRoomKey before encryptRoomEvent.
+ *
+ * Inputs are already Matrix-shaped ids so this works for both user and bot
+ * peers.
  */
-async function ensureRoomMembersPeers(userIds: string[]): Promise<void> {
+async function ensureRoomMembersPeers(matrixIds: string[]): Promise<void> {
   const machine = await getMachine();
-  const matrixUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
+  const matrixUsers = matrixIds.map((m) => new UserId(m));
   await machine.updateTrackedUsers(matrixUsers);
   // Build a fresh UserId list (the previous ones were consumed by
   // updateTrackedUsers — wasm-bindgen "moves" UserId handles).
-  const claimUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
+  const claimUsers = matrixIds.map((m) => new UserId(m));
   const claim = await machine.getMissingSessions(claimUsers);
   if (claim) {
     const resp = await postJson<unknown>("/api/crypto/keys/claim", claim.body);
@@ -636,11 +647,10 @@ export async function pollSync(): Promise<{ newToDeviceCount: number }> {
 // ── Fingerprints ──────────────────────────────────────────────────────────────
 
 export async function getPeerFingerprint(
-  peerUserId: string,
+  peerMatrixId: string,
 ): Promise<string | null> {
   const machine = await getMachine();
-  const matrixPeer = toMatrixUserId(peerUserId);
-  const devices = await machine.getUserDevices(new UserId(matrixPeer), null);
+  const devices = await machine.getUserDevices(new UserId(peerMatrixId), null);
   const all = devices.devices();
   if (all.length === 0) return null;
   // For 1:1 DMs we pick the first non-deleted device.

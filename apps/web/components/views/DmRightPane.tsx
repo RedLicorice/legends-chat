@@ -7,6 +7,7 @@ import { useAppShell } from "@/components/AppShell";
 import { useDm } from "@/lib/hooks/use-dm";
 import { createDmChatSource } from "@/lib/chat-source/dm";
 import { createOlmChatCrypto } from "@/lib/chat-crypto";
+import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
 
 interface Props {
   id: string;
@@ -23,7 +24,15 @@ export function DmRightPane({ id }: Props) {
   const showExpandSidebar = desktopCollapsed && compactMode === "minimal";
 
   const peer = data?.conversation.peer ?? null;
-  const peerId = peer?.type === "user" ? peer.id : null;
+  // Bug 20: bot peers also need a chatCrypto in E2EE DMs. Build the
+  // Matrix-shaped id at this boundary so the crypto layer doesn't have to
+  // know about Legends' user/bot distinction. `@bot.<uuid>:legends.local`
+  // vs `@<uuid>:legends.local` keeps targeting unambiguous on the wire.
+  const peerMatrixId = peer
+    ? peer.type === "bot"
+      ? toMatrixBotId(peer.id)
+      : toMatrixUserId(peer.id)
+    : null;
   const roomKey = data?.conversation.e2eeRoomId ?? null;
   const isE2ee = !!data?.conversation.isE2ee;
   const conversationId = data?.conversation.id ?? null;
@@ -31,25 +40,26 @@ export function DmRightPane({ id }: Props) {
 
   const source = useMemo(() => {
     if (!conversationId || !currentUserId) return null;
+    // PeerLookup only consumes displayName/avatarUrl for rendering — bot
+    // and user peers both have those, so don't drop bots here (was Bug 20).
     return createDmChatSource({
       conversationId,
       currentUserId,
-      peer:
-        peer && peer.type === "user"
-          ? {
-              id: peer.id,
-              displayName: peer.displayName,
-              avatarUrl: peer.avatarUrl,
-            }
-          : null,
+      peer: peer
+        ? {
+            id: peer.id,
+            displayName: peer.displayName,
+            avatarUrl: peer.avatarUrl,
+          }
+        : null,
       roomKey,
     });
   }, [conversationId, currentUserId, peer, roomKey]);
 
   const chatCrypto = useMemo(() => {
-    if (!isE2ee || !roomKey || !peerId) return null;
-    return createOlmChatCrypto(roomKey, peerId);
-  }, [isE2ee, roomKey, peerId]);
+    if (!isE2ee || !roomKey || !peerMatrixId) return null;
+    return createOlmChatCrypto(roomKey, peerMatrixId);
+  }, [isE2ee, roomKey, peerMatrixId]);
 
   if ((!data && status === "loading") || !id) {
     return <PWASplash />;
