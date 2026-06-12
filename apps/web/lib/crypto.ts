@@ -347,20 +347,40 @@ async function dispatchOne(
 // indefinitely). The result is a runaway loop hammering /api/crypto/keys/query
 // until rate-limited, and encryption never converges.
 //
-// The mutex guarantees: at any moment AT MOST ONE pump cycle is in flight.
-// Concurrent callers all await the same in-flight promise. After it
-// resolves, the next caller may start a fresh cycle (state may have
-// advanced). This preserves correctness — every request the machine wants
-// to emit still gets dispatched exactly once — while eliminating the
-// duplicate-response feedback loop.
+// Contract: by the time `pumpOutgoing()` returns, every request the
+// machine had queued at the moment the caller invoked us has been
+// dispatched. Concurrent callers must NOT lose drains — a caller that
+// schedules a request right before the in-flight pump's mutex clears
+// must still see it drained.
+//
+// Implementation: a generation counter. Every call bumps `pumpRequested`.
+// The in-flight pump loops while it hasn't yet served the latest
+// generation. Concurrent callers `await pumpInFlight` (no duplicate
+// dispatches), and the in-flight pump keeps looping until its served
+// generation catches up. Replaces a naive "early-return after await"
+// mutex that silently lost the KeysQuery scheduled by
+// `ensureDmSession.updateTrackedUsers` when a `pollSync` pump was mid-
+// flight — leading to `shareRoomKey` panicking with
+// "Session wasn't created nor shared" deep inside matrix-sdk-crypto-wasm
+// (group_sessions/mod.rs:218).
 let pumpInFlight: Promise<void> | null = null;
+let pumpRequested = 0;
+let pumpServed = 0;
 
 export async function pumpOutgoing(): Promise<void> {
+  // Bump the requested counter BEFORE checking pumpInFlight. The
+  // in-flight pump (if any) will keep looping until pumpServed catches
+  // up to this value — guaranteeing it observes any state the caller
+  // scheduled before invoking us.
+  const myGen = ++pumpRequested;
   if (pumpInFlight) {
-    // A pump is already running; wait for it and return.
-    // Don't start a second concurrent cycle.
     await pumpInFlight;
-    return;
+    // If the previous pump didn't reach our generation (it can't, by
+    // construction — it has already returned), kick off a fresh pump
+    // ourselves so the request the caller scheduled before invoking us
+    // doesn't sit undrained.
+    if (pumpServed >= myGen) return;
+    // Fall through to start a fresh pump cycle.
   }
   pumpInFlight = (async () => {
     try {
@@ -368,12 +388,24 @@ export async function pumpOutgoing(): Promise<void> {
       // Cap iterations to avoid an unbounded loop on a misbehaving server
       // or a wrapper bug. 32 is generous — a healthy bootstrap takes ≤4.
       for (let i = 0; i < 32; i++) {
+        // Snapshot the requested generation at the START of this
+        // iteration. Anything bumped AFTER this read will be served by a
+        // later iteration (or by the next pump if we hit the cap).
+        const gen = pumpRequested;
         const reqs = await machine.outgoingRequests();
-        if (reqs.length === 0) return;
+        if (reqs.length === 0) {
+          pumpServed = gen;
+          // If a fresh caller arrived during our `outgoingRequests` poll,
+          // loop again — they may have scheduled a request that the next
+          // poll will pick up.
+          if (pumpRequested > gen) continue;
+          return;
+        }
         for (const req of reqs) {
           const { requestId, requestType, responseBody } = await dispatchOne(req);
           await machine.markRequestAsSent(requestId, requestType, responseBody);
         }
+        pumpServed = gen;
       }
     } finally {
       pumpInFlight = null;
