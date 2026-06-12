@@ -227,16 +227,24 @@ opened and shown on every chat-list row.
   channels and no end-to-end layer. Bots are **external entities** —
   they run as independent processes (often off the chat operator's
   infrastructure) and talk to the server through the bot API.
-  - **E2EE bot DMs (planned).** Bot E2EE is on the roadmap and follows
-    the same trust model as user E2EE: the bot's SDK holds its own Olm
-    identity key and prekeys, the chat server stores only the bot's
-    **public** key, and the server never sees plaintext. E2EE
-    participation is opt-in per bot, enabled by an admin in the bot's
-    settings. Until a bot is configured this way and its operator
-    deploys an E2EE-capable SDK build, attempting to open an E2EE DM
-    with that bot is refused. Today's bots are still plaintext-only;
-    if you would not say something in front of the bot author, do not
-    say it in a bot DM.
+  - **E2EE bot DMs.** Bot E2EE follows the same trust model as user
+    E2EE: the bot's SDK holds its own Olm identity key and prekeys, the
+    chat server stores only the bot's **public** key, and the server
+    never sees plaintext. Participation is opt-in per bot. Each bot has
+    an E2EE state — `disabled`, `pending`, or `ready` — visible to
+    admins in the bot's settings. Flipping the toggle moves a bot from
+    `disabled` to `pending`; once the bot's SDK has uploaded its device
+    and one-time keys the server moves it to `ready` and the bot can
+    take part in E2EE DMs. Flipping the toggle off stops new E2EE
+    conversations from opening with that bot but leaves in-flight ones
+    decryptable; admins can also rotate a bot's E2EE identity, which
+    wipes the server-side device record and forces the SDK to bootstrap
+    a fresh one. A bot that is not `ready` cannot take part in an E2EE
+    DM, and trying to open one is refused. Operator-side caveat:
+    compromising the bot host gives an attacker access to the bot's
+    Olm store and lets them decrypt past and future bot
+    conversations — the same risk you take on your own device,
+    applied to whoever runs the bot.
 
 ### Peer-to-peer (P2P) channels
 
