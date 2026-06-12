@@ -211,7 +211,15 @@ export class BotCryptoTransport {
 
 function extractErrorCode(body: string): string | undefined {
   try {
-    const parsed = JSON.parse(body) as { code?: unknown; error?: unknown };
+    const parsed = JSON.parse(body) as {
+      errcode?: unknown;
+      code?: unknown;
+      error?: unknown;
+    };
+    // Matrix convention (and what every /api/bot/v1/crypto/* route emits) is
+    // `errcode` — read that first. Fall back to legacy `code` so any older
+    // route or external client that still emits `code` keeps working.
+    if (typeof parsed.errcode === "string") return parsed.errcode;
     if (typeof parsed.code === "string") return parsed.code;
     // Fall back to `error` if it looks like a snake_case code rather than a sentence.
     if (typeof parsed.error === "string" && /^[a-z][a-z0-9_]*$/.test(parsed.error)) {

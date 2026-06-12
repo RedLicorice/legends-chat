@@ -151,6 +151,38 @@ describe("BotCryptoTransport", () => {
     expect(e.body).toContain("boom");
   });
 
+  // Finding 14: every /api/bot/v1/crypto/* route returns `{ errcode, error }`
+  // per Matrix convention. The SDK previously only read `code`, so the
+  // structured machine-readable id was lost. Read `errcode` first, fall back
+  // to `code` to keep any legacy callers working.
+  it("extractErrorCode reads `errcode` per Matrix convention", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errcode: "M_FORBIDDEN", error: "you may not" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const t = new BotCryptoTransport({ token: "tok", baseUrl: "https://chat.test" });
+    await expect(t.keysUpload({})).rejects.toMatchObject({
+      status: 403,
+      code: "M_FORBIDDEN",
+    });
+  });
+
+  it("extractErrorCode falls back to legacy `code` when no errcode present", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "legacy_code", error: "old shape" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const t = new BotCryptoTransport({ token: "tok", baseUrl: "https://chat.test" });
+    await expect(t.keysUpload({})).rejects.toMatchObject({
+      status: 500,
+      code: "legacy_code",
+    });
+  });
+
   it("BotCryptoTransportError exposes status + code + body fields", async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "otk_unavailable", code: "otk_unavailable" }), {
