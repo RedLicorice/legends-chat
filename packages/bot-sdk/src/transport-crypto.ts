@@ -81,9 +81,16 @@ export interface SyncResponse {
   device_unused_fallback_key_types?: string[];
 }
 
-/** Response shape from `GET /api/bot/v1/crypto/rooms/<roomId>`. */
+/**
+ * Response shape from `GET /api/bot/v1/crypto/rooms/<roomId>`.
+ *
+ * The field is `devices` (matching the server emission in
+ * /api/bot/v1/crypto/rooms/[roomId]/route.ts). Older drafts of this type
+ * used `device_ids` which was never what the server returned — latent until
+ * the first caller actually read the field.
+ */
 export interface RoomMembersResponse {
-  members: Array<{ matrix_id: string; device_ids: string[] }>;
+  members: Array<{ matrix_id: string; devices: string[] }>;
 }
 
 // ── Error type ─────────────────────────────────────────────────────────────

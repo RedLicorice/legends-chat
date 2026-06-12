@@ -104,7 +104,7 @@ describe("BotCryptoTransport", () => {
   });
 
   it("roomMembers URL-encodes the room id (Matrix room ids contain reserved ':' which proxies misparse)", async () => {
-    fetchSpy.mockResolvedValueOnce(okResponse({ members: [{ matrix_id: "@u:legends.local", device_ids: ["DEV"] }] }));
+    fetchSpy.mockResolvedValueOnce(okResponse({ members: [{ matrix_id: "@u:legends.local", devices: ["DEV"] }] }));
     const t = new BotCryptoTransport({ token: "tok", baseUrl: "https://chat.test" });
     const out = await t.roomMembers("!abc-uuid:legends.local");
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -119,7 +119,8 @@ describe("BotCryptoTransport", () => {
     expect(init.method).toBe("GET");
     expect(init.headers).toMatchObject({ authorization: "Bearer tok" });
     expect(init.body).toBeUndefined();
-    expect(out).toEqual({ members: [{ matrix_id: "@u:legends.local", device_ids: ["DEV"] }] });
+    // Server emits `devices`, not `device_ids` — the SDK type now matches.
+    expect(out).toEqual({ members: [{ matrix_id: "@u:legends.local", devices: ["DEV"] }] });
   });
 
   it("strips a trailing slash from baseUrl", async () => {

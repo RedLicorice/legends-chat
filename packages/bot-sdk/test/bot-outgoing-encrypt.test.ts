@@ -61,7 +61,7 @@ describe("LegendsBot — outgoing encrypt", () => {
       }
       if (url.includes("/api/bot/v1/crypto/rooms/")) {
         return new Response(
-          JSON.stringify({ members: [{ matrix_id: "@user-a:legends.local", device_ids: ["DEV-U"] }] }),
+          JSON.stringify({ members: [{ matrix_id: "@user-a:legends.local", devices: ["DEV-U"] }] }),
           { status: 200 },
         );
       }
