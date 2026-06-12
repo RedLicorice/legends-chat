@@ -427,7 +427,18 @@ async function snapshotIdb(storeName: string): Promise<SnapshotDatabase[]> {
   const matching = all.filter((db) => db.name === storeName || db.name.startsWith(storeName + "::"));
   const dumps: SnapshotDatabase[] = [];
   for (const meta of matching) {
-    const db = await openDb(meta.name, meta.version);
+    // Open at the CURRENT version (no explicit version arg). The version we
+    // sniffed from `listAllDatabases()` is already stale: matrix-sdk-crypto-wasm
+    // bumps its DB versions every time it adds an object store via a
+    // versionchange transaction — and it does so aggressively (a cold start
+    // can land the main DB at version 100+ before we even reach the first
+    // sync iteration). Opening at the cached version either races wasm's
+    // own upgrade (we win → wrong schema observed; wasm wins → onblocked
+    // resolves null, the loop logs NotFoundError forever) or triggers a
+    // spurious downgrade upgrade. Letting IDB pick the live version avoids
+    // both failure modes. `db.version` after open then reflects the truth
+    // we capture into the snapshot for `restoreIdb`.
+    const db = await openDb(meta.name);
     if (!db) continue;
     try {
       const objectStores: SnapshotObjectStore[] = [];
@@ -529,9 +540,18 @@ async function listAllDatabases(): Promise<Array<{ name: string; version: number
   return out;
 }
 
-function openDb(name: string, version: number): Promise<IDBDatabase | null> {
+/**
+ * Open `name` at its current on-disk version (no upgrade). Always pass an
+ * undefined version so we never race wasm's own versionchange-driven schema
+ * bumps; see the long comment in {@link snapshotIdb} for why.
+ *
+ * `restoreIdb` is the only caller that needs a specific version (it creates
+ * the DB fresh at the version recorded in the snapshot), and it uses
+ * `indexedDB.open(...)` directly for that.
+ */
+function openDb(name: string): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
-    const req = indexedDB.open(name, version);
+    const req = indexedDB.open(name);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => resolve(null);
     req.onblocked = () => resolve(null);
