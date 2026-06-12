@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
 import type {
+  BotInfo,
   CallbackQueryUpdate,
   DmMessageUpdate,
   MessageUpdate,
@@ -9,6 +11,9 @@ import type {
   Update,
 } from "./types.js";
 import { LegendsBotClient } from "./client.js";
+import { OlmStore } from "./crypto/olm-store.js";
+import { BotOlmMachine } from "./crypto/olm-machine.js";
+import { BotCryptoTransport } from "./transport-crypto.js";
 
 // ─── Context objects ──────────────────────────────────────────────────────────
 
@@ -92,6 +97,7 @@ type ErrorHandler = (err: unknown, update: Update) => void;
 
 export class LegendsBot {
   public readonly api: LegendsBotClient;
+  public readonly cryptoTransport: BotCryptoTransport;
 
   private readonly _handlers = {
     message: [] as MsgHandler[],
@@ -102,9 +108,79 @@ export class LegendsBot {
 
   private _onError: ErrorHandler = (err) => console.error("[bot] unhandled error:", err);
   private _running = false;
+  private _botInfo: BotInfo | null = null;
+  private _crypto: BotOlmMachine | null = null;
+  private _cryptoStore: OlmStore | null = null;
+  private readonly _cryptoStorePath: string;
 
-  constructor({ token, baseUrl }: { token: string; baseUrl?: string }) {
+  constructor({
+    token,
+    baseUrl,
+    cryptoStorePath,
+  }: {
+    token: string;
+    baseUrl?: string;
+    cryptoStorePath?: string;
+  }) {
     this.api = new LegendsBotClient({ token, baseUrl });
+    this.cryptoTransport = new BotCryptoTransport({ token, baseUrl });
+    this._cryptoStorePath = cryptoStorePath ?? path.join(process.cwd(), "data", "olm-store.pickle");
+  }
+
+  /**
+   * Resolve the bot's `getMe` response and, if `e2ee_state` is `pending` or
+   * `ready`, instantiate the local Olm machine. On a fresh bootstrap (no
+   * existing pickle), drains the initial `keys_upload` so the server records
+   * the bot's identity + one-time keys before any sync traffic happens.
+   *
+   * Idempotent: re-invocation with an existing pickle reloads the same
+   * identity from disk.
+   */
+  private async _loadBotInfo(): Promise<void> {
+    const info = await this.api.getMe().catch(() => null);
+    if (!info) return;
+    this._botInfo = info;
+    const state = info.e2ee_state ?? "disabled";
+    if (state === "disabled") {
+      this._crypto = null;
+      return;
+    }
+    await this._initCrypto(info);
+  }
+
+  /**
+   * Bootstrap or reload the Olm machine for an E2EE-enabled bot. Splits the
+   * "first run" path (drain `keys_upload`, persist) from the warm-start path
+   * (existing pickle is reloaded as-is — the sync loop will surface any new
+   * outgoing requests on its first iteration).
+   */
+  private async _initCrypto(info: BotInfo): Promise<void> {
+    this._cryptoStore = new OlmStore(this._cryptoStorePath);
+    const hadPickle = await this._cryptoStore.exists();
+    this._crypto = await BotOlmMachine.create({ botId: info.id, store: this._cryptoStore });
+    if (!hadPickle) {
+      const reqs = await this._crypto.outgoingRequests();
+      for (const r of reqs) {
+        if (r.type === "keys_upload") {
+          const resp = await this.cryptoTransport.keysUpload(JSON.parse(r.body));
+          await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+        }
+      }
+      await this._crypto.persist();
+    }
+  }
+
+  /**
+   * Test hook: drive `_loadBotInfo` without spinning up the polling loop.
+   * Production callers go through {@link start}.
+   */
+  public async loadBotInfoForTest(): Promise<void> {
+    await this._loadBotInfo();
+  }
+
+  /** Test hook: peek at the Olm machine (null when E2EE is disabled). */
+  public cryptoForTest(): BotOlmMachine | null {
+    return this._crypto;
   }
 
   on(event: "message", handler: MsgHandler): this;
@@ -167,25 +243,26 @@ export class LegendsBot {
   async startWebhook({
     port,
     webhookUrl,
-    path = "/webhook",
+    path: webhookPath = "/webhook",
   }: {
     port: number;
     webhookUrl: string;
     path?: string;
   }): Promise<void> {
-    await this.api.setWebhook(webhookUrl.replace(/\/$/, "") + path);
-    const handler = this.webhookCallback(path);
+    await this._loadBotInfo();
+    await this.api.setWebhook(webhookUrl.replace(/\/$/, "") + webhookPath);
+    const handler = this.webhookCallback(webhookPath);
     const server = createServer((req, res) => { void handler(req, res); });
     await new Promise<void>((resolve) => server.listen(port, resolve));
-    console.log(`[bot] webhook server on :${port}${path} → ${webhookUrl}${path}`);
+    console.log(`[bot] webhook server on :${port}${webhookPath} → ${webhookUrl}${webhookPath}`);
   }
 
   // ── Polling mode ──────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
     this._running = true;
-    const info = await this.api.getMe().catch(() => null);
-    console.log(`[bot] polling started${info ? ` (${info.name})` : ""}`);
+    await this._loadBotInfo();
+    console.log(`[bot] polling started${this._botInfo ? ` (${this._botInfo.name})` : ""}`);
 
     while (this._running) {
       try {

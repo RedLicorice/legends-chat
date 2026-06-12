@@ -3,6 +3,8 @@ export interface BotInfo {
   name: string;
   avatarUrl: string | null;
   webhookUrl: string | null;
+  e2ee_state?: "disabled" | "pending" | "ready";
+  e2ee_device_id?: string | null;
 }
 
 export interface MessageUpdate {
