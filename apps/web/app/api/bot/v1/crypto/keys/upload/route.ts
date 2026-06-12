@@ -3,11 +3,30 @@
 // (running in @legends/bot-sdk) publishes its single device's identity keys
 // and seeds the one-time-key pool used by peers' Olm sessions.
 //
-// State machine: the first successful upload transitions
-// bots.e2ee_state from "disabled" | "pending" → "ready" and stamps
-// bots.e2ee_device_id with the bot's device id. Replays with the same
-// (device_id + identity_keys) are 200 no-ops. A different identity key for
-// the same device_id is a 422 with errcode "crypto_keys_invalid".
+// Body shape mirrors Matrix CS API — `device_keys` is OPTIONAL because the
+// SDK also calls this route for OTK top-ups, sending `{one_time_keys}` alone.
+// When `device_keys` is present its `keys` field maps `"<algo>:<deviceId>"`
+// to the base64 public key (NOT the legacy `identity_keys` shape).
+//
+//   POST /api/bot/v1/crypto/keys/upload
+//   {
+//     device_keys?: {
+//       user_id, device_id, algorithms, keys: {<algo:devid>: <b64>}, signatures
+//     },
+//     one_time_keys?: { "<algo>:<keyId>": <opaque> }
+//   }
+//
+// State machine:
+//   - First successful upload that carries `device_keys` transitions
+//     bots.e2ee_state from "disabled" | "pending" → "ready" and stamps
+//     bots.e2ee_device_id with the bot's device id.
+//   - OTK-only top-ups append to bot_one_time_keys for the bot's current
+//     device and never touch bot_devices or e2ee_state.
+//   - OTK-only top-ups before any device upload are 422 — there's no device
+//     to attach the keys to and the SDK contract is "upload device first".
+//   - A device_keys upload whose ed25519 fingerprint differs from a prior
+//     upload for the same device_id is 422 crypto_keys_invalid (re-keying
+//     requires bot re-pairing — admin "reset e2ee" surface).
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
@@ -18,8 +37,13 @@ import { db } from "@/lib/db";
 import { getBotFromRequest } from "@/lib/bot-auth";
 
 const deviceKeysSchema = z.object({
+  // Matrix-spec `user_id` is the full matrix id; we accept-and-ignore it
+  // here (the bot's identity is already established via bearer auth).
+  user_id: z.string().min(1).max(256).optional(),
   device_id: z.string().min(1).max(128),
-  identity_keys: z.record(z.string(), z.string().min(1).max(2048)),
+  // Matrix CS API names this `keys` (not `identity_keys`). matrix-sdk-crypto
+  // emits the spec shape; older drafts of this route used the wrong field.
+  keys: z.record(z.string(), z.string().min(1).max(2048)),
   algorithms: z.array(z.string().min(1).max(128)).min(1).max(16),
   signatures: z
     .record(z.string(), z.record(z.string(), z.string().min(1).max(4096)))
@@ -34,15 +58,27 @@ const otkValueSchema = z.union([
     signatures: z
       .record(z.string(), z.record(z.string(), z.string().min(1).max(4096)))
       .optional(),
+    fallback: z.boolean().optional(),
   }),
 ]);
 
-const bodySchema = z.object({
-  device_keys: deviceKeysSchema,
-  one_time_keys: z
-    .record(z.string().min(1).max(256), otkValueSchema)
-    .optional(),
-});
+const bodySchema = z
+  .object({
+    device_keys: deviceKeysSchema.optional(),
+    one_time_keys: z
+      .record(z.string().min(1).max(256), otkValueSchema)
+      .optional(),
+    // matrix-sdk-crypto may also include `fallback_keys`; accept and ignore
+    // for forward-compat (we don't persist fallback keys yet).
+    fallback_keys: z
+      .record(z.string().min(1).max(256), otkValueSchema)
+      .optional(),
+  })
+  .refine(
+    (d) =>
+      d.device_keys != null || d.one_time_keys != null || d.fallback_keys != null,
+    { message: "must include device_keys, one_time_keys, or fallback_keys" },
+  );
 
 function err(errcode: string, error: string, status: number) {
   return NextResponse.json({ errcode, error }, { status });
@@ -62,55 +98,83 @@ export async function POST(req: Request) {
   }
 
   const dk = parsed.data.device_keys;
-  const edKey = dk.identity_keys[`ed25519:${dk.device_id}`];
-  if (!edKey) {
-    return err(
-      BOT_E2EE_ERROR_CODES.CRYPTO_KEYS_INVALID,
-      "missing ed25519 identity key",
-      422,
-    );
-  }
+  let deviceId: string;
+  let identityKeys: Record<string, string>;
 
-  // Idempotency: same (botId, deviceId) row must keep the same identity_keys.
-  // If the ed25519 fingerprint differs, the upload is rejected — re-keying a
-  // device requires bot re-pairing (Task 19 — admin "reset e2ee" surface).
-  const [existing] = await db
-    .select({ identityKeys: botDevices.identityKeys })
-    .from(botDevices)
-    .where(and(eq(botDevices.botId, bot.id), eq(botDevices.deviceId, dk.device_id)))
-    .limit(1);
-  if (existing) {
-    const existingEd = (existing.identityKeys as Record<string, string>)[
-      `ed25519:${dk.device_id}`
-    ];
-    if (existingEd !== edKey) {
+  if (dk) {
+    const edKey = dk.keys[`ed25519:${dk.device_id}`];
+    if (!edKey) {
       return err(
         BOT_E2EE_ERROR_CODES.CRYPTO_KEYS_INVALID,
-        "identity key mismatch for existing device",
+        "missing ed25519 identity key",
         422,
       );
     }
-  }
 
-  await db
-    .insert(botDevices)
-    .values({
-      botId: bot.id,
-      deviceId: dk.device_id,
-      algorithms: dk.algorithms,
-      identityKeys: dk.identity_keys,
-      signatures: dk.signatures ?? null,
-      unsigned: dk.unsigned ?? null,
-    })
-    .onConflictDoUpdate({
-      target: [botDevices.botId, botDevices.deviceId],
-      set: {
+    // Idempotency: same (botId, deviceId) row must keep the same identity_keys.
+    // If the ed25519 fingerprint differs, the upload is rejected — re-keying a
+    // device requires bot re-pairing (Task 19 — admin "reset e2ee" surface).
+    const [existing] = await db
+      .select({ identityKeys: botDevices.identityKeys })
+      .from(botDevices)
+      .where(and(eq(botDevices.botId, bot.id), eq(botDevices.deviceId, dk.device_id)))
+      .limit(1);
+    if (existing) {
+      const existingEd = (existing.identityKeys as Record<string, string>)[
+        `ed25519:${dk.device_id}`
+      ];
+      if (existingEd !== edKey) {
+        return err(
+          BOT_E2EE_ERROR_CODES.CRYPTO_KEYS_INVALID,
+          "identity key mismatch for existing device",
+          422,
+        );
+      }
+    }
+
+    await db
+      .insert(botDevices)
+      .values({
+        botId: bot.id,
+        deviceId: dk.device_id,
         algorithms: dk.algorithms,
-        identityKeys: dk.identity_keys,
+        identityKeys: dk.keys,
         signatures: dk.signatures ?? null,
-        updatedAt: new Date(),
-      },
-    });
+        unsigned: dk.unsigned ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [botDevices.botId, botDevices.deviceId],
+        set: {
+          algorithms: dk.algorithms,
+          identityKeys: dk.keys,
+          signatures: dk.signatures ?? null,
+          updatedAt: new Date(),
+        },
+      });
+
+    // First successful upload transitions disabled|pending → ready. Subsequent
+    // uploads keep state=ready and only refresh the device_id pointer if it
+    // happened to change (currently always the same device).
+    await db
+      .update(bots)
+      .set({ e2eeState: "ready", e2eeDeviceId: dk.device_id })
+      .where(eq(bots.id, bot.id));
+
+    deviceId = dk.device_id;
+    identityKeys = dk.keys;
+  } else {
+    // OTK-only top-up: must already have a device row to attach against.
+    // The SDK contract says "upload device first, then keep topping up OTKs".
+    if (!bot.e2eeDeviceId) {
+      return err(
+        BOT_E2EE_ERROR_CODES.CRYPTO_KEYS_INVALID,
+        "no device on file — upload device_keys first",
+        422,
+      );
+    }
+    deviceId = bot.e2eeDeviceId;
+    identityKeys = {};
+  }
 
   if (parsed.data.one_time_keys) {
     for (const [keyId, raw] of Object.entries(parsed.data.one_time_keys)) {
@@ -123,7 +187,7 @@ export async function POST(req: Request) {
         .insert(botOneTimeKeys)
         .values({
           botId: bot.id,
-          deviceId: dk.device_id,
+          deviceId,
           keyId,
           algorithm,
           keyJson,
@@ -138,15 +202,10 @@ export async function POST(req: Request) {
     }
   }
 
-  // First successful upload transitions disabled|pending → ready. Subsequent
-  // uploads keep state=ready and only refresh the device_id pointer if it
-  // happened to change (currently always the same device).
-  await db
-    .update(bots)
-    .set({ e2eeState: "ready", e2eeDeviceId: dk.device_id })
-    .where(eq(bots.id, bot.id));
-
   // Per-algorithm OTK count for the SDK to know when to top up.
+  // Silence the "set but never read" lint for identityKeys — we keep it for
+  // future audit logging and as a reminder of what was just persisted.
+  void identityKeys;
   const counts: Record<string, number> = {};
   const allOtks = await db
     .select({ algorithm: botOneTimeKeys.algorithm })
@@ -154,7 +213,7 @@ export async function POST(req: Request) {
     .where(
       and(
         eq(botOneTimeKeys.botId, bot.id),
-        eq(botOneTimeKeys.deviceId, dk.device_id),
+        eq(botOneTimeKeys.deviceId, deviceId),
       ),
     );
   for (const r of allOtks) counts[r.algorithm] = (counts[r.algorithm] ?? 0) + 1;
