@@ -29,7 +29,15 @@ export async function GET(req: Request) {
       .where(and(ilike(users.displayName, `%${q}%`), ne(users.id, user.id), eq(users.isAnon, false)))
       .limit(6),
     db
-      .select({ id: bots.id, displayName: bots.name, avatarUrl: bots.avatarUrl })
+      .select({
+        id: bots.id,
+        displayName: bots.name,
+        avatarUrl: bots.avatarUrl,
+        // Bug 19: NewChatModal needs e2eeState to decide whether the E2EE
+        // checkbox should be enabled for a bot peer. The server-side
+        // state-machine still gates POST /api/dm — this is purely UX.
+        e2eeState: bots.e2eeState,
+      })
       .from(bots)
       .where(and(ilike(bots.name, `%${q}%`), eq(bots.dmEnabled, true), eq(bots.isActive, true)))
       .limit(4),

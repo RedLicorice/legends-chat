@@ -16,6 +16,9 @@ type SearchHit = {
   id: string;
   displayName: string;
   avatarUrl: string | null;
+  // Only present for bot hits — surfaced so the modal can enable/disable the
+  // E2EE checkbox. The server's POST /api/dm enforces the same gate.
+  e2eeState?: "disabled" | "pending" | "ready";
 };
 
 interface NewChatModalProps {
@@ -94,7 +97,12 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
     if (busyId) return;
     setError(null);
     setBusyId(hit.id);
-    const wantE2EE = requestE2EE && hit.type === "user";
+    // Per-row E2EE decision. Users are always E2EE-capable; bots only when
+    // their e2ee_state is "ready". The server's POST /api/dm enforces this
+    // (see BOT_E2EE_ERROR_CODES) — this is just to avoid a guaranteed-400.
+    const isHitE2eeCapable =
+      hit.type === "user" || (hit.type === "bot" && hit.e2eeState === "ready");
+    const wantE2EE = requestE2EE && isHitE2eeCapable;
     try {
       const r = await apiFetch("/api/dm", {
         method: "POST",
@@ -164,19 +172,45 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
             />
           </div>
 
-          {/* E2EE toggle — only meaningful for user peers; we still show it
-              always so the affordance doesn't pop in/out as results change.
-              startChat ignores the flag for bot rows. */}
-          <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted">
-            <input
-              type="checkbox"
-              checked={requestE2EE}
-              onChange={(e) => setRequestE2EE(e.target.checked)}
-              className="h-3.5 w-3.5 accent-[var(--accent)]"
-            />
-            <Lock className="h-3 w-3" />
-            <span>Encrypt this chat (users only)</span>
-          </label>
+          {/* E2EE toggle. Bots are E2EE-capable once their e2ee_state is
+              "ready" (per bot E2EE state-machine). Users are always capable.
+              The checkbox is disabled when none of the current search hits
+              support E2EE so the affordance can't mislead. */}
+          {(() => {
+            const anyE2eeCapable =
+              hits.length === 0 ||
+              hits.some(
+                (h) => h.type === "user" || (h.type === "bot" && h.e2eeState === "ready"),
+              );
+            const disabled = hits.length > 0 && !anyE2eeCapable;
+            return (
+              <label
+                className={cn(
+                  "mt-3 flex items-center gap-2 text-xs text-muted",
+                  disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                )}
+                title={
+                  disabled
+                    ? "This bot isn't ready for end-to-end encryption yet."
+                    : undefined
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={requestE2EE && !disabled}
+                  disabled={disabled}
+                  onChange={(e) => setRequestE2EE(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-[var(--accent)]"
+                />
+                <Lock className="h-3 w-3" />
+                <span>
+                  {disabled
+                    ? "Encrypt this chat (bot not ready)"
+                    : "Encrypt this chat"}
+                </span>
+              </label>
+            );
+          })()}
         </div>
 
         {/* Results */}
@@ -199,7 +233,10 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
               {hits.map((h) => {
                 const isBot = h.type === "bot";
                 const isBusy = busyId === h.id;
-                const wantE2EE = requestE2EE && !isBot;
+                // Mirror startChat's gate: users always, bots only when ready.
+                const isHitE2eeCapable =
+                  h.type === "user" || (h.type === "bot" && h.e2eeState === "ready");
+                const wantE2EE = requestE2EE && isHitE2eeCapable;
                 return (
                   <li key={`${h.type}:${h.id}`}>
                     <button
@@ -233,13 +270,13 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
                           ) : (
                             <>
                               <UserIcon className="h-3 w-3" /> User
-                              {wantE2EE && (
-                                <>
-                                  <span aria-hidden>·</span>
-                                  <Lock className="h-3 w-3" />
-                                  <span>Encrypted</span>
-                                </>
-                              )}
+                            </>
+                          )}
+                          {wantE2EE && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <Lock className="h-3 w-3" />
+                              <span>Encrypted</span>
                             </>
                           )}
                         </div>
