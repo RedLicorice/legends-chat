@@ -1,7 +1,7 @@
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import {
-  bots, dmConversations, dmMessages, dmParticipants,
+  dmConversations, dmParticipants,
   encryptionKeys, messages, topicBots, topicPrincipalGrants, topics,
 } from "@legends/db/schema";
 import { canPrincipal, REDIS_CHANNELS, type GrantEffect, type TopicGrant } from "@legends/shared";
@@ -9,9 +9,16 @@ import { encryptMessage, unwrapKey, generateDataKey, wrapKey } from "@legends/cr
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getBotFromRequest } from "@/lib/bot-auth";
-import { encodeDmContent } from "@/lib/dm.codec";
+import { insertDmMessage } from "@/lib/dm";
 
 interface InlineKeyboardButton { text: string; callbackData: string }
+
+// R2 (bot E2EE part 1 / Task 13): this route now accepts `ciphertext` next to
+// `text` for E2EE DM conversations. Topic branch still requires `text` (Part 1
+// only covers DM E2EE; topic-bot E2EE has its own follow-up). DM mode/payload
+// pairing is enforced post-conv-lookup:
+//   - E2EE convo ⇒ ciphertext required (text rejected)
+//   - Plaintext convo ⇒ text required (ciphertext rejected)
 
 let cachedKey: { id: string; data: Uint8Array } | null = null;
 async function currentDataKey(): Promise<{ id: string; data: Uint8Array }> {
@@ -36,22 +43,30 @@ export async function POST(req: Request) {
   const body = await req.json() as {
     topicId?: string;
     conversationId?: string;
-    text: string;
+    text?: string;
+    ciphertext?: Record<string, unknown>;
     replyToMessageId?: string;
     inlineKeyboard?: InlineKeyboardButton[][];
   };
-  if (!body.text?.trim()) {
-    return NextResponse.json({ ok: false, error: "text required" }, { status: 400 });
-  }
   if ((body.topicId && body.conversationId) || (!body.topicId && !body.conversationId)) {
     return NextResponse.json({ ok: false, error: "exactly one of topicId or conversationId required" }, { status: 400 });
+  }
+  // text XOR ciphertext at the request level. The conv-mode match is
+  // enforced after we know `isE2ee` (DM branch only — topic branch still
+  // requires text).
+  const hasText = typeof body.text === "string" && body.text.trim().length > 0;
+  const hasCiphertext = body.ciphertext != null && typeof body.ciphertext === "object";
+  if (hasText === hasCiphertext) {
+    return NextResponse.json(
+      { ok: false, error: "exactly one of `text` or `ciphertext` required" },
+      { status: 400 },
+    );
   }
 
   // ── DM branch ──────────────────────────────────────────────────────────────
   if (body.conversationId) {
     const [conv] = await db.select().from(dmConversations).where(eq(dmConversations.id, body.conversationId)).limit(1);
     if (!conv) return NextResponse.json({ ok: false, error: "conversation not found" }, { status: 404 });
-    if (conv.isE2ee) return NextResponse.json({ ok: false, error: "bots cannot send to E2EE DMs (plan B)" }, { status: 400 });
     if (conv.state === "blocked") return NextResponse.json({ ok: false, error: "blocked" }, { status: 403 });
 
     const [part] = await db
@@ -69,19 +84,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "inline keyboards not supported in DMs (yet)" }, { status: 400 });
     }
 
-    const key = await currentDataKey();
-    const aad = new TextEncoder().encode(body.conversationId);
-    const { ciphertext, nonce } = encryptMessage(key.data, encodeDmContent(body.text.trim()), aad);
-    const [row] = await db.insert(dmMessages).values({
+    // Mode/payload match: E2EE convo wants ciphertext, plaintext wants text.
+    if (conv.isE2ee && !hasCiphertext) {
+      return NextResponse.json(
+        { ok: false, error: "E2EE conversation; send ciphertext" },
+        { status: 400 },
+      );
+    }
+    if (!conv.isE2ee && !hasText) {
+      return NextResponse.json(
+        { ok: false, error: "plaintext conversation; send text" },
+        { status: 400 },
+      );
+    }
+
+    const msg = await insertDmMessage({
       conversationId: body.conversationId,
       senderType: "bot",
       senderId: bot.id,
-      contentCiphertext: ciphertext,
-      contentNonce: nonce,
-      keyId: key.id,
-      replyToMessageId: body.replyToMessageId && /^\d+$/.test(body.replyToMessageId) ? BigInt(body.replyToMessageId) : null,
-    }).returning();
-    await db.update(dmConversations).set({ lastMessageAt: row!.createdAt }).where(eq(dmConversations.id, body.conversationId));
+      text: hasText ? body.text!.trim() : undefined,
+      ciphertext: hasCiphertext ? body.ciphertext : undefined,
+      replyToMessageId:
+        body.replyToMessageId && /^\d+$/.test(body.replyToMessageId)
+          ? body.replyToMessageId
+          : null,
+    });
 
     // Fan out to user participants via the existing ws relay (Plan A path).
     const userParts = await db
@@ -89,22 +116,28 @@ export async function POST(req: Request) {
       .from(dmParticipants)
       .where(and(eq(dmParticipants.conversationId, body.conversationId), eq(dmParticipants.principalType, "user")));
     const userIds = userParts.map((p) => p.pid);
-    const msgOut = {
-      id: row!.id.toString(),
-      conversationId: body.conversationId,
-      senderType: "bot" as const,
-      senderId: bot.id,
-      text: body.text.trim(),
-      replyToMessageId: body.replyToMessageId ?? null,
-      createdAt: row!.createdAt.toISOString(),
-      editedAt: null,
-    };
-    await redis.publish(REDIS_CHANNELS.DM_MESSAGE_NEW, JSON.stringify({ conversationId: body.conversationId, message: msgOut, userIds }));
+    await redis.publish(
+      REDIS_CHANNELS.DM_MESSAGE_NEW,
+      JSON.stringify({
+        conversationId: body.conversationId,
+        message: msg,
+        userIds,
+        isE2ee: conv.isE2ee,
+      }),
+    );
 
-    return NextResponse.json({ ok: true, result: { messageId: row!.id.toString() } }, { status: 201 });
+    return NextResponse.json({ ok: true, result: { messageId: msg.id } }, { status: 201 });
   }
 
   // ── Topic branch (existing behavior, unchanged) ────────────────────────────
+  // Topic posts still require plaintext `text` — Part 1 only opens DM E2EE,
+  // topic-bot E2EE has its own follow-up sub-project.
+  if (!hasText) {
+    return NextResponse.json(
+      { ok: false, error: "ciphertext not supported for topic posts" },
+      { status: 400 },
+    );
+  }
   const topicId = body.topicId!;
   const [topic] = await db.select({ isE2ee: topics.isE2ee }).from(topics).where(eq(topics.id, topicId)).limit(1);
   if (!topic) return NextResponse.json({ ok: false, error: "topic not found" }, { status: 404 });
@@ -136,7 +169,7 @@ export async function POST(req: Request) {
 
   const key = await currentDataKey();
   const aad = new TextEncoder().encode(topicId);
-  const { ciphertext, nonce } = encryptMessage(key.data, body.text.trim(), aad);
+  const { ciphertext, nonce } = encryptMessage(key.data, body.text!.trim(), aad);
   const [row] = await db.insert(messages).values({
     topicId,
     senderUserId: null,
@@ -157,7 +190,7 @@ export async function POST(req: Request) {
     senderIsAnon: false,
     botId: bot.id,
     replyToMessageId: row!.replyToMessageId?.toString() ?? null,
-    text: body.text.trim(),
+    text: body.text!.trim(),
     attachments: [],
     inlineKeyboard: body.inlineKeyboard ?? null,
     createdAt: row!.createdAt,
