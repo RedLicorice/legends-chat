@@ -22,6 +22,10 @@ export type BotWithPermissions = {
   isActive: boolean;
   role: string;
   permissions: Set<string>;
+  /** E2EE state machine: 'disabled' | 'pending' | 'ready'. */
+  e2eeState: "disabled" | "pending" | "ready";
+  /** Currently-advertised device id once e2eeState === 'ready'. */
+  e2eeDeviceId: string | null;
 };
 
 export async function getBotFromRequest(req: Request): Promise<BotWithPermissions | null> {
@@ -65,5 +69,7 @@ export async function getBotFromRequest(req: Request): Promise<BotWithPermission
     isActive: bot.isActive,
     role: effectiveRole,
     permissions: resolvePermissions(permRows.map((p) => p.permission), overrideRows as PermissionOverride[]),
+    e2eeState: bot.e2eeState as "disabled" | "pending" | "ready",
+    e2eeDeviceId: bot.e2eeDeviceId,
   };
 }
