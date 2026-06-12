@@ -1,18 +1,30 @@
 // POST /api/crypto/keys/claim
-// Atomically claims one one-time prekey per requested (user, device). Falls
-// back to the device's fallback_key_json if the OTK pool is exhausted —
-// the fallback is reusable (not marked used) until the owner rotates it.
+// Atomically claims one one-time prekey per requested (principal, device).
+// Falls back to the device's fallback_key_json (user principals only) if the
+// OTK pool is exhausted — the fallback is reusable (not marked used) until
+// the owner rotates it.
 //
-// Body shape: { one_time_keys: { "@<uuid>:legends.local": { "<deviceId>": "signed_curve25519" } } }
+// Body shape: { one_time_keys: { "@<uuid>:legends.local" | "@bot.<uuid>:legends.local": { "<deviceId>": "signed_curve25519" } } }
+//
+// Dispatch: each requested Matrix id may target either a user (`@<uuid>`)
+// or a bot (`@bot.<uuid>`). `parsePrincipalFromMatrixId` returns a tagged
+// principal and `claimOneTimeKey` reads either `user_one_time_prekeys` or
+// `bot_one_time_keys` based on that tag. This mirrors the bot-facing
+// /api/bot/v1/crypto/keys/claim route — without it, user→bot Olm handshakes
+// were dead-ended with `"invalid matrix user id"` in failures.
 
 import { NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { userKeyBundles } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
-import { fromMatrixUserId, toMatrixUserId } from "@/lib/crypto-matrix";
+import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
+import {
+  claimOneTimeKey,
+  parsePrincipalFromMatrixId,
+} from "@/lib/crypto-principal";
 
 const bodySchema = z.object({
   one_time_keys: z.record(
@@ -47,60 +59,57 @@ export async function POST(req: Request) {
   const out: Record<string, Record<string, Record<string, unknown>>> = {};
   const failures: Record<string, { errcode: string; error: string }> = {};
 
-  for (const [matrixUserId, devices] of Object.entries(parsed.data.one_time_keys)) {
-    const rawUserId = fromMatrixUserId(matrixUserId);
-    if (!rawUserId) {
-      failures[matrixUserId] = { errcode: "M_UNKNOWN", error: "invalid matrix user id" };
+  for (const [matrixId, devices] of Object.entries(parsed.data.one_time_keys)) {
+    const principal = parsePrincipalFromMatrixId(matrixId);
+    if (!principal) {
+      failures[matrixId] = { errcode: "M_UNKNOWN", error: "invalid matrix id" };
       continue;
     }
-    const fullMatrixId = toMatrixUserId(rawUserId);
-    const userBucket: Record<string, Record<string, unknown>> = {};
+
+    const fullMatrixId =
+      principal.type === "user"
+        ? toMatrixUserId(principal.id)
+        : toMatrixBotId(principal.id);
+    const bucket: Record<string, Record<string, unknown>> = {};
 
     for (const [deviceId, algorithm] of Object.entries(devices)) {
-      // Atomically claim one unused OTK with SKIP LOCKED to avoid two
-      // concurrent claims handing out the same key.
-      const popped = await db.execute<{ key_id: string; key_json: Record<string, unknown> }>(sql`
-        UPDATE user_one_time_prekeys
-           SET used_at = now()
-         WHERE ctid IN (
-           SELECT ctid FROM user_one_time_prekeys
-            WHERE user_id = ${rawUserId}
-              AND device_id = ${deviceId}
-              AND algorithm = ${algorithm}
-              AND used_at IS NULL
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-         )
-         RETURNING key_id, key_json
-      `);
-      const poppedRow = Array.from(popped)[0];
-
-      if (poppedRow) {
-        userBucket[deviceId] = { [poppedRow.key_id]: poppedRow.key_json };
+      // Atomically claim one unused OTK. The dispatch layer uses
+      // FOR UPDATE SKIP LOCKED to avoid two concurrent claims handing out
+      // the same key, regardless of whether the pool is user- or bot-side.
+      const otk = await claimOneTimeKey(principal, deviceId, algorithm);
+      if (otk) {
+        bucket[deviceId] = { [otk.keyId]: otk.keyJson };
         continue;
       }
 
-      // No OTK — try the fallback. The fallback is the per-device
-      // signed_curve25519 key the OlmMachine uploaded for exactly this
-      // case and is reusable until rotated.
+      // No OTK. For user principals, fall back to the per-device
+      // signed_curve25519 fallback key the OlmMachine uploaded for exactly
+      // this case — reusable until rotated. Bot principals don't carry a
+      // fallback today; their bucket entry is simply omitted (the bot-facing
+      // /api/bot/v1/crypto/keys/claim route follows the same convention).
+      if (principal.type !== "user") continue;
+
       const [fb] = await db
         .select({ fallbackKeyJson: userKeyBundles.fallbackKeyJson })
         .from(userKeyBundles)
         .where(
-          and(eq(userKeyBundles.userId, rawUserId), eq(userKeyBundles.deviceId, deviceId)),
+          and(
+            eq(userKeyBundles.userId, principal.id),
+            eq(userKeyBundles.deviceId, deviceId),
+          ),
         )
         .limit(1);
 
       if (fb?.fallbackKeyJson && typeof fb.fallbackKeyJson === "object") {
         // The column stores `{ "<keyId>": {key, signatures, fallback} }`.
-        userBucket[deviceId] = fb.fallbackKeyJson as Record<string, unknown>;
+        bucket[deviceId] = fb.fallbackKeyJson as Record<string, unknown>;
       }
       // else: omit this device — Matrix lets the client interpret the
       // absence as "no key available" without failing the whole request.
     }
 
-    if (Object.keys(userBucket).length > 0) {
-      out[fullMatrixId] = userBucket;
+    if (Object.keys(bucket).length > 0) {
+      out[fullMatrixId] = bucket;
     }
   }
 
