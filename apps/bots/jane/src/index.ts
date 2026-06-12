@@ -1,3 +1,4 @@
+import path from "node:path";
 import { LegendsBot } from "@legends/bot-sdk";
 
 const token = process.env.BOT_TOKEN;
@@ -8,7 +9,13 @@ if (!token) {
   process.exit(1);
 }
 
-const bot = new LegendsBot({ token, baseUrl });
+// Olm pickle for E2EE DMs lives here (gitignored). Operator must also flip the
+// E2EE toggle in the admin UI (AdminBotsView → bot row → End-to-end encryption)
+// for the SDK's keys/upload to be accepted by the server.
+const dataDir = process.env.BOT_DATA_DIR ?? path.resolve(process.cwd(), "data");
+const cryptoStorePath = path.join(dataDir, "olm-store.pickle");
+
+const bot = new LegendsBot({ token, baseUrl, cryptoStorePath });
 
 bot.on("new_member", async (ctx) => {
   const { display_name, username } = ctx.new_member;
@@ -16,6 +23,16 @@ bot.on("new_member", async (ctx) => {
   await ctx.send(
     `👋 Welcome to **${ctx.new_member.topic_title}**, ${tag}! Glad to have you here. Say hi!`,
   );
+});
+
+// Demonstrates E2EE DMs. Replies in both plaintext + E2EE conversations
+// transparently — the SDK decrypts incoming ciphertext before this handler
+// runs and encrypts outgoing replies when the conversation is E2EE.
+bot.on("dm_message", async (ctx) => {
+  const text = ctx.dm_message.text ?? "";
+  if (text.trim().toLowerCase() === "ping") {
+    await ctx.reply(`crypto-test echo: ${text}`);
+  }
 });
 
 bot.catch((err) => {
