@@ -904,7 +904,13 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     if (!text || !source.edit) return;
 
     if (isE2ee) {
-      const cc = chatCryptoRef.current ?? (await ensureCrypto());
+      // Always await ensureCrypto(): chatCryptoRef.current is non-null as
+      // soon as the parent passes a chatCrypto prop, so a `?? ensureCrypto()`
+      // fallthrough would silently skip cc.init() and the encrypt below
+      // would throw "chat-crypto: not initialized" on the first edit of a
+      // freshly-mounted DM. ensureCrypto() itself short-circuits when the
+      // cc is already ready, so this is cheap on the hot path.
+      const cc = await ensureCrypto();
       if (!cc) {
         setE2eeError("Encryption not initialized.");
         return;
@@ -1329,7 +1335,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     let finalText = processed;
     let ciphertextEnvelope: Record<string, unknown> | null = null;
     if (isE2ee) {
-      const cc = chatCryptoRef.current ?? (await ensureCrypto());
+      // Always await ensureCrypto() — see submitEdit() above for the full
+      // rationale: chatCryptoRef.current being non-null is the common case
+      // and would otherwise short-circuit the only call site that drives
+      // cc.init(), leaving cc.encrypt to throw "not initialized".
+      const cc = await ensureCrypto();
       if (!cc) {
         setE2eeError("encryption not initialized");
         return;
