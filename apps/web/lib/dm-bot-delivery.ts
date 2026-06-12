@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { bots, dmParticipants } from "@legends/db/schema";
+import { bots, dmConversations, dmParticipants } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 
@@ -8,11 +8,16 @@ const UPDATE_QUEUE_TTL = 300; // mirror apps/ws/src/webhook.ts
 // Same shape the SDK polls in apps/ws/src/webhook.ts WebhookUpdate, extended
 // with a "dm_message" variant. Kept inline here so this helper has no cross-
 // process import; the SDK declares the matching type in packages/bot-sdk.
+//
+// `text` and `ciphertext` are mutually exclusive at the envelope level:
+//   plaintext convo → `text` populated, `ciphertext` omitted
+//   E2EE convo      → `ciphertext` populated (m.room.encrypted body), `text` omitted
 type DmMessageEnvelope = {
   message_id: string;
   conversation_id: string;
   from: { id: string; display_name: string | null };
-  text: string;
+  text?: string;
+  ciphertext?: Record<string, unknown>;
   reply_to_message_id?: string;
   date: number;
 };
@@ -65,6 +70,8 @@ export async function deliverDmToBots(
     text: string;
     replyToMessageId: string | null;
     createdAt: string;
+    /** Matrix `m.room.encrypted` envelope when the convo is E2EE. */
+    ciphertext?: Record<string, unknown> | null;
   },
 ): Promise<void> {
   // Skip if the sender is itself a bot (don't loop a bot's own messages back to it).
@@ -74,17 +81,33 @@ export async function deliverDmToBots(
   const targets = await botParticipantsFor(conversationId);
   if (targets.length === 0) return;
 
+  // Look up the conversation's E2EE flag rather than trusting a caller-supplied
+  // hint — keeps the envelope shape authoritative against the row that actually
+  // landed on disk. If the convo row vanished we fall back to plaintext shape.
+  const [conv] = await db
+    .select({ isE2ee: dmConversations.isE2ee })
+    .from(dmConversations)
+    .where(eq(dmConversations.id, conversationId))
+    .limit(1);
+  const isE2ee = !!conv?.isE2ee;
+
+  const envelope: DmMessageEnvelope = {
+    message_id: msg.id,
+    conversation_id: conversationId,
+    from: { id: msg.senderId, display_name: msg.senderDisplayName },
+    reply_to_message_id: msg.replyToMessageId ?? undefined,
+    date: Math.floor(new Date(msg.createdAt).getTime() / 1000),
+  };
+  if (isE2ee && msg.ciphertext) {
+    envelope.ciphertext = msg.ciphertext;
+  } else {
+    envelope.text = msg.text;
+  }
+
   const update: DmUpdate = {
     update_id: nextId(),
     type: "dm_message",
-    dm_message: {
-      message_id: msg.id,
-      conversation_id: conversationId,
-      from: { id: msg.senderId, display_name: msg.senderDisplayName },
-      text: msg.text,
-      reply_to_message_id: msg.replyToMessageId ?? undefined,
-      date: Math.floor(new Date(msg.createdAt).getTime() / 1000),
-    },
+    dm_message: envelope,
   };
 
   await Promise.all(targets.map((t) => dispatch(t.botId, t.webhookUrl, update)));
