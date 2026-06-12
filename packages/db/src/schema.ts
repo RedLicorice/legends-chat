@@ -320,6 +320,12 @@ export const bots = pgTable("bots", {
   role: text("role").notNull().default("bot"),
   roleExpiresAt: timestamp("role_expires_at", { withTimezone: true }),
   roleFallback: text("role_fallback"),
+  // Bot E2EE state machine: 'disabled' → 'pending' (owner enabled, bot SDK
+  // not yet uploaded keys) → 'ready' (device + OTKs available). DM-open and
+  // topic-bot-add code-paths gate on this column. e2eeDeviceId is the
+  // currently advertised device id once 'ready'.
+  e2eeState: text("e2ee_state").notNull().default("disabled"),
+  e2eeDeviceId: text("e2ee_device_id"),
 });
 
 export const topicBots = pgTable(
@@ -619,6 +625,95 @@ export const cryptoSentTxns = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.senderUserId, t.senderDeviceId, t.txnId] }),
+  }),
+);
+
+// Bot E2EE: Matrix-shaped device record for a bot. Mirrors `userKeyBundles`
+// but is keyed on `bot_id` instead of `user_id`. Today each bot has exactly
+// one device; the table is shaped to allow multiple later (e.g. SDK roll).
+export const botDevices = pgTable(
+  "bot_devices",
+  {
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    algorithms: text("algorithms").array().notNull(),
+    identityKeys: jsonb("identity_keys").$type<Record<string, string>>().notNull(),
+    signatures: jsonb("signatures").$type<Record<string, Record<string, string>> | null>(),
+    unsigned: jsonb("unsigned").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.botId, t.deviceId] }),
+    botIdx: index("bot_devices_bot_id_idx").on(t.botId),
+  }),
+);
+
+// Bot E2EE: one-time prekey pool per (bot, device). Mirrors
+// `userOneTimePrekeys`. `claimed_at` (vs the user table's `used_at`) reflects
+// the spec wording; the partial index on unclaimed rows powers the
+// FOR UPDATE SKIP LOCKED claim path used by /api/crypto/keys/claim.
+export const botOneTimeKeys = pgTable(
+  "bot_one_time_keys",
+  {
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    keyId: text("key_id").notNull(),
+    algorithm: text("algorithm").notNull(),
+    keyJson: jsonb("key_json").$type<Record<string, unknown>>().notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.botId, t.deviceId, t.keyId] }),
+    unclaimedIdx: index("bot_one_time_keys_unclaimed_idx")
+      .on(t.botId, t.deviceId)
+      .where(sql`${t.claimedAt} IS NULL`),
+  }),
+);
+
+// Bot E2EE: to-device envelope queue with a bot as the recipient. The
+// CHECK constraint (defined in migration 0045) ensures exactly one of
+// (sender_user_id, sender_bot_id) is populated — drizzle can't express the
+// XOR check natively so the constraint lives in SQL.
+export const botToDeviceQueue = pgTable(
+  "bot_to_device_queue",
+  {
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    eventType: text("event_type").notNull(),
+    senderUserId: uuid("sender_user_id"),
+    senderBotId: uuid("sender_bot_id"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    botIdx: index("bot_to_device_queue_bot_idx").on(t.botId, t.id),
+  }),
+);
+
+// Bot E2EE: per-request idempotency for the bot-side sendToDevice mirror.
+// Keyed on (bot_id, txn_id); `body_hash` lets us detect a replay collision
+// where the same txn_id was reused with a different payload.
+export const botCryptoSentTxns = pgTable(
+  "bot_crypto_sent_txns",
+  {
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    txnId: text("txn_id").notNull(),
+    eventType: text("event_type").notNull(),
+    bodyHash: bytea("body_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.botId, t.txnId] }),
   }),
 );
 
