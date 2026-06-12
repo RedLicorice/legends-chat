@@ -61,6 +61,10 @@ describe("/api/bot/v1/sendMessage — ciphertext support", () => {
         ownerUserId: ownerId,
         dmEnabled: true,
         tokenHash: createHash("sha256").update(token).digest("hex"),
+        // Finding 10 setup: bot starts ready so the E2EE convo can be opened
+        // and successful ciphertext sends pass; individual tests flip to
+        // disabled / pending to exercise the re-check gate.
+        e2eeState: "ready",
       })
       .returning({ id: bots.id });
     botId = b!.id;
@@ -137,5 +141,59 @@ describe("/api/bot/v1/sendMessage — ciphertext support", () => {
   it("ciphertext to plaintext convo: 400", async () => {
     const res = await post({ conversationId: plaintextConvId, ciphertext: JSON.stringify({ x: 1 }) });
     expect(res.status).toBe(400);
+  });
+
+  // Finding 10: the convo's isE2ee flag is set at open time. If admin later
+  // flips the bot's e2eeState to 'disabled' or 'pending', existing E2EE
+  // convos must reject ciphertext sends — otherwise admin-disable doesn't
+  // actually stop the bot from continuing to send into the open thread.
+  it("E2EE convo + bot disabled: 403 bot_e2ee_disabled", async () => {
+    await db
+      .update(bots)
+      .set({ e2eeState: "disabled" })
+      .where(sql`${bots.id} = ${botId}`);
+    const res = await post({
+      conversationId: e2eeConvId,
+      ciphertext: JSON.stringify({ x: 1 }),
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("bot_e2ee_disabled");
+    // restore for other tests
+    await db
+      .update(bots)
+      .set({ e2eeState: "ready" })
+      .where(sql`${bots.id} = ${botId}`);
+  });
+
+  it("E2EE convo + bot pending: 403 bot_e2ee_not_ready", async () => {
+    await db
+      .update(bots)
+      .set({ e2eeState: "pending" })
+      .where(sql`${bots.id} = ${botId}`);
+    const res = await post({
+      conversationId: e2eeConvId,
+      ciphertext: JSON.stringify({ x: 1 }),
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("bot_e2ee_not_ready");
+    await db
+      .update(bots)
+      .set({ e2eeState: "ready" })
+      .where(sql`${bots.id} = ${botId}`);
+  });
+
+  it("plaintext convo + bot disabled: still 201 (gate scoped to E2EE convos)", async () => {
+    await db
+      .update(bots)
+      .set({ e2eeState: "disabled" })
+      .where(sql`${bots.id} = ${botId}`);
+    const res = await post({ conversationId: plaintextConvId, text: "hi" });
+    expect(res.status).toBe(201);
+    await db
+      .update(bots)
+      .set({ e2eeState: "ready" })
+      .where(sql`${bots.id} = ${botId}`);
   });
 });

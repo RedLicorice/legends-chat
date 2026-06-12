@@ -4,7 +4,13 @@ import {
   dmConversations, dmParticipants,
   encryptionKeys, messages, topicBots, topicPrincipalGrants, topics,
 } from "@legends/db/schema";
-import { canPrincipal, REDIS_CHANNELS, type GrantEffect, type TopicGrant } from "@legends/shared";
+import {
+  BOT_E2EE_ERROR_CODES,
+  canPrincipal,
+  REDIS_CHANNELS,
+  type GrantEffect,
+  type TopicGrant,
+} from "@legends/shared";
 import { encryptMessage, unwrapKey, generateDataKey, wrapKey } from "@legends/crypto";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
@@ -111,6 +117,22 @@ export async function POST(req: Request) {
 
     if (body.inlineKeyboard && body.inlineKeyboard.length > 0) {
       return NextResponse.json({ ok: false, error: "inline keyboards not supported in DMs (yet)" }, { status: 400 });
+    }
+
+    // Finding 10: re-check bots.e2eeState before allowing a ciphertext send
+    // into an E2EE convo. conv.isE2ee was decided at open time — admin can
+    // later flip the bot to 'disabled' or 'pending', and the convo flag won't
+    // catch that on its own. BotWithPermissions.e2eeState comes from the auth
+    // helper so this costs no extra query.
+    if (conv.isE2ee && bot.e2eeState !== "ready") {
+      const code =
+        bot.e2eeState === "disabled"
+          ? BOT_E2EE_ERROR_CODES.BOT_E2EE_DISABLED
+          : BOT_E2EE_ERROR_CODES.BOT_E2EE_NOT_READY;
+      return NextResponse.json(
+        { ok: false, error: code },
+        { status: 403 },
+      );
     }
 
     // Mode/payload match: E2EE convo wants ciphertext, plaintext wants text.

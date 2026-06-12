@@ -21,7 +21,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import { REDIS_CHANNELS } from "@legends/shared";
+import { BOT_E2EE_ERROR_CODES, REDIS_CHANNELS } from "@legends/shared";
 import { dmConversations, dmParticipants } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
@@ -109,6 +109,17 @@ export async function POST(req: Request) {
       { ok: false, error: "bot not in conversation" },
       { status: 403 },
     );
+  }
+
+  // Finding 10: re-check bots.e2eeState on E2EE convos. conv.isE2ee is set at
+  // open time; admin can flip the bot to 'disabled' or 'pending' afterwards.
+  // BotWithPermissions.e2eeState comes from the auth helper so no extra query.
+  if (conv.isE2ee && bot.e2eeState !== "ready") {
+    const code =
+      bot.e2eeState === "disabled"
+        ? BOT_E2EE_ERROR_CODES.BOT_E2EE_DISABLED
+        : BOT_E2EE_ERROR_CODES.BOT_E2EE_NOT_READY;
+    return NextResponse.json({ ok: false, error: code }, { status: 403 });
   }
 
   // Payload-mode must match the conversation mode.
