@@ -47,23 +47,42 @@ describe("/api/bot/v1/crypto/keys/query", () => {
     });
   });
 
-  it("queries a user", async () => {
-    const res = await postQuery({ matrix_ids: [`@${peerUserId}:legends.local`] });
+  it("queries a user (Matrix-style device_keys body)", async () => {
+    const res = await postQuery({
+      device_keys: { [`@${peerUserId}:legends.local`]: [] },
+    });
     const body = await res.json();
     expect(body.device_keys[`@${peerUserId}:legends.local`]).toBeDefined();
     expect(body.device_keys[`@${peerUserId}:legends.local`].UDV).toBeDefined();
   });
 
-  it("queries another bot", async () => {
-    const res = await postQuery({ matrix_ids: [`@bot.${peerBotId}:legends.local`] });
+  it("queries another bot (Matrix-style device_keys body)", async () => {
+    const res = await postQuery({
+      device_keys: { [`@bot.${peerBotId}:legends.local`]: [] },
+    });
     const body = await res.json();
     expect(body.device_keys[`@bot.${peerBotId}:legends.local`].PB1).toBeDefined();
   });
 
   it("unknown matrix id returns empty entry", async () => {
-    const res = await postQuery({ matrix_ids: [`@bot.${randomUUID()}:legends.local`] });
+    const unknownId = `@bot.${randomUUID()}:legends.local`;
+    const res = await postQuery({ device_keys: { [unknownId]: [] } });
     const body = await res.json();
-    const k = Object.keys(body.device_keys)[0]!;
-    expect(body.device_keys[k]).toEqual({});
+    expect(body.device_keys[unknownId]).toEqual({});
+  });
+
+  it("accepts optional timeout per Matrix CS spec", async () => {
+    const res = await postQuery({
+      device_keys: { [`@${peerUserId}:legends.local`]: [] },
+      timeout: 5000,
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects legacy matrix_ids array body", async () => {
+    const res = await postQuery({
+      matrix_ids: [`@${peerUserId}:legends.local`],
+    });
+    expect(res.status).toBe(400);
   });
 });

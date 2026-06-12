@@ -1,9 +1,17 @@
 // POST /api/bot/v1/crypto/keys/query
-// Bot-authenticated mirror of /api/crypto/keys/query. Accepts a list of
-// Matrix-shaped principal ids (`@<uuid>:legends.local` for users,
-// `@bot.<uuid>:legends.local` for bots) and returns each principal's
-// published device list. Used by the bot's OlmMachine before it sends a
-// to-device envelope, so it knows which devices to encrypt to.
+// Bot-authenticated mirror of /api/crypto/keys/query. Body shape mirrors the
+// Matrix CS API:
+//   { device_keys: { "<user_id>": ["<dev_id>", ...], ... }, timeout?: number }
+// where an empty device_id array means "all devices for that user". The
+// response keys each user's full Matrix id to a map of {deviceId -> device
+// bundle}. Used by the bot's OlmMachine (matrix-sdk-crypto-wasm) before it
+// sends a to-device envelope so it knows which devices to encrypt to.
+//
+// The previous shape (`{ matrix_ids: string[] }`) did not match what the wasm
+// produces — `OutgoingRequest` of type `keys_query` carries the Matrix-spec
+// body verbatim, so the SDK could never call this route successfully without
+// a translation shim. Reverting to the spec shape is the smallest possible
+// change.
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -12,7 +20,11 @@ import { parsePrincipalFromMatrixId, getDeviceList } from "@/lib/crypto-principa
 import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
 
 const bodySchema = z.object({
-  matrix_ids: z.array(z.string().min(1).max(256)).min(1).max(200),
+  device_keys: z.record(
+    z.string().min(1).max(256),
+    z.array(z.string().min(1).max(128)).max(64),
+  ),
+  timeout: z.number().int().nonnegative().max(60_000).optional(),
 });
 
 export async function POST(req: Request) {
@@ -33,7 +45,9 @@ export async function POST(req: Request) {
   }
 
   const deviceKeys: Record<string, Record<string, unknown>> = {};
-  for (const matrixId of parsed.data.matrix_ids) {
+  for (const [matrixId, requestedDeviceIds] of Object.entries(
+    parsed.data.device_keys,
+  )) {
     const p = parsePrincipalFromMatrixId(matrixId);
     if (!p) {
       // Unparseable id: report as empty per Matrix /keys/query convention
@@ -44,8 +58,13 @@ export async function POST(req: Request) {
     const list = await getDeviceList(p);
     const fullId =
       p.type === "user" ? toMatrixUserId(p.id) : toMatrixBotId(p.id);
+    // Empty array = all devices; non-empty = filter to the requested set.
+    const filter = requestedDeviceIds.length > 0
+      ? new Set(requestedDeviceIds)
+      : null;
     const perDevice: Record<string, unknown> = {};
     for (const d of list.devices) {
+      if (filter && !filter.has(d.deviceId)) continue;
       perDevice[d.deviceId] = {
         user_id: fullId,
         device_id: d.deviceId,
