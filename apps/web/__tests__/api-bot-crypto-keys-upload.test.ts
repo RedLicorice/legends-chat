@@ -122,4 +122,41 @@ describe("/api/bot/v1/crypto/keys/upload", () => {
     const res = await withAuth({});
     expect(res.status).toBe(422);
   });
+
+  // Finding 8: admin "disable" must be sticky. A bot whose state was flipped
+  // to 'disabled' by the admin surface must NOT be silently re-enabled the
+  // next time the SDK uploads device_keys (the SDK uploads on every boot —
+  // without this gate, admin-disable lasts only until the bot restarts).
+  it("upload with state='disabled' keeps state='disabled' (admin lock is sticky)", async () => {
+    const ownerId = randomUUID();
+    await db.execute(sql`INSERT INTO users (id, display_name) VALUES (${ownerId}, 'kup-d') ON CONFLICT DO NOTHING`);
+    const t = randomBytes(16).toString("hex");
+    const [b] = await db.insert(bots).values({
+      name: `kup-disabled-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ownerUserId: ownerId,
+      tokenHash: createHash("sha256").update(t).digest("hex"),
+      e2eeState: "disabled",
+    }).returning({ id: bots.id });
+    const localBotId = b!.id;
+
+    const sample = {
+      device_keys: {
+        user_id: `@bot.${localBotId}:legends.local`,
+        device_id: "BDEV-D",
+        keys: { [`ed25519:BDEV-D`]: "ed-d", [`curve25519:BDEV-D`]: "cv-d" },
+        algorithms: ["m.olm.v1.curve25519-aes-sha2", "m.megolm.v1.aes-sha2"],
+        signatures: { ["selfsig"]: { [`ed25519:BDEV-D`]: "sig" } },
+      },
+      one_time_keys: { "signed_curve25519:ZZZZ": { key: "kz" } },
+    };
+
+    const res = await withAuth(sample, t);
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(bots).where(sql`${bots.id} = ${localBotId}`);
+    // State must stay 'disabled' — admin lock survives the upload.
+    expect(row!.e2eeState).toBe("disabled");
+    // device_id must NOT be advertised while disabled.
+    expect(row!.e2eeDeviceId).toBeNull();
+  });
 });

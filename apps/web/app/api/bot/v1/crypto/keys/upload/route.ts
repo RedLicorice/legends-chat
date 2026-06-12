@@ -17,9 +17,15 @@
 //   }
 //
 // State machine:
-//   - First successful upload that carries `device_keys` transitions
-//     bots.e2ee_state from "disabled" | "pending" → "ready" and stamps
-//     bots.e2ee_device_id with the bot's device id.
+//   - A device_keys upload while state='pending' transitions pending → ready
+//     and stamps bots.e2ee_device_id with the bot's device id.
+//   - A device_keys upload while state='disabled' accepts the upload body
+//     (device row + OTKs persist so a future admin re-enable doesn't require
+//     the bot to bounce) but does NOT change state and does NOT advertise
+//     e2ee_device_id. Admin-disable is sticky — without this gate the SDK's
+//     boot-time upload would silently re-enable a bot the admin just locked.
+//   - A device_keys upload while state='ready' is a no-op for state, but the
+//     device row + OTKs are still upserted (idempotent re-upload on bot boot).
 //   - OTK-only top-ups append to bot_one_time_keys for the bot's current
 //     device and never touch bot_devices or e2ee_state.
 //   - OTK-only top-ups before any device upload are 422 — there's no device
@@ -152,13 +158,18 @@ export async function POST(req: Request) {
         },
       });
 
-    // First successful upload transitions disabled|pending → ready. Subsequent
-    // uploads keep state=ready and only refresh the device_id pointer if it
-    // happened to change (currently always the same device).
-    await db
-      .update(bots)
-      .set({ e2eeState: "ready", e2eeDeviceId: dk.device_id })
-      .where(eq(bots.id, bot.id));
+    // Only transition pending → ready. State='disabled' is admin-controlled
+    // (Task: admin "reset/disable e2ee" surface) and must NOT be undone by the
+    // SDK's routine boot-time upload. State='ready' is a no-op for state too —
+    // we still persist the device row above (idempotent), but don't re-stamp
+    // e2ee_device_id since it's already set.
+    if (bot.e2eeState === "pending") {
+      await db
+        .update(bots)
+        .set({ e2eeState: "ready", e2eeDeviceId: dk.device_id })
+        .where(eq(bots.id, bot.id));
+    }
+    // disabled / ready: do not touch state or device_id here.
 
     deviceId = dk.device_id;
     identityKeys = dk.keys;
