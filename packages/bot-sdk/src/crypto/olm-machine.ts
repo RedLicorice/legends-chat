@@ -279,6 +279,19 @@ export class BotOlmMachine {
     };
   }
 
+  /**
+   * Encrypt a plaintext body for a Megolm room.
+   *
+   * The wasm `encryptRoomEvent` returns the m.room.encrypted CONTENT object
+   * as a JSON string (e.g. `'{"algorithm":"m.megolm.v1.aes-sha2",
+   * "ciphertext":"...","sender_key":"...","session_id":"...","device_id":"..."}'`).
+   *
+   * That JSON string IS the bot-API wire format for `ciphertext` (both for
+   * outgoing sendDmCiphertext/sendTopicCiphertext and for incoming envelopes
+   * delivered by the server). Keeping the field as an opaque string on the
+   * wire avoids a re-serialize round-trip and matches what
+   * {@link decryptRoomMessage} expects on the other side.
+   */
   async encryptForRoom(
     roomId: string,
     plaintext: string,
@@ -293,6 +306,14 @@ export class BotOlmMachine {
     return { ciphertext };
   }
 
+  /**
+   * Decrypt an incoming room message.
+   *
+   * `envelope.ciphertext` is the JSON-stringified m.room.encrypted content
+   * object that came off the wire (see {@link encryptForRoom} for the
+   * symmetric outgoing direction). We parse it here to assemble the full
+   * Matrix event the wasm wants.
+   */
   async decryptRoomMessage(
     roomId: string,
     envelope: { ciphertext: string; sender: string },
