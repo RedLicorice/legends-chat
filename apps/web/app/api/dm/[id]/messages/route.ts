@@ -92,20 +92,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     JSON.stringify({ conversationId: id, message: msg, userIds: allParticipants, isE2ee: conv.isE2ee }),
   );
 
-  // Also dispatch to any bot participants of this conversation (Plan C).
-  // Bot DMs are not E2EE (openConversation rejects bot + e2ee), so it's safe to
-  // forward plaintext here. Skip if this row is E2EE just in case.
-  if (!conv.isE2ee && parsed.data.text != null) {
-    void deliverDmToBots(id, {
-      id: msg.id,
-      senderType: "user",
-      senderId: user.id,
-      senderDisplayName: user.displayName,
-      text: parsed.data.text,
-      replyToMessageId: parsed.data.replyToMessageId ?? null,
-      createdAt: msg.createdAt,
-    }).catch((e) => console.error("[dm-bot-delivery] failed", e));
-  }
+  // Dispatch to any bot participants of this conversation (Plan C). Fire for
+  // BOTH plaintext and E2EE convos — bots that are members of an E2EE DM still
+  // need the envelope so they can decrypt with their OlmMachine. The original
+  // `!conv.isE2ee && text != null` gate silently dropped user→bot ciphertext,
+  // which is the live-stack bug this reconciles. `deliverDmToBots` itself
+  // routes plaintext vs ciphertext shape (Task 15 / dm-bot-delivery.ts).
+  void deliverDmToBots(id, {
+    id: msg.id,
+    senderType: "user",
+    senderId: user.id,
+    senderDisplayName: user.displayName,
+    text: parsed.data.text ?? "",
+    ciphertext: parsed.data.ciphertext ?? null,
+    replyToMessageId: parsed.data.replyToMessageId ?? null,
+    createdAt: msg.createdAt,
+  }).catch((e) => console.error("[dm-bot-delivery] failed", e));
 
   return NextResponse.json({ message: msg }, { status: 201 });
 }
