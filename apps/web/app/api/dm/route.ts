@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { BOT_E2EE_ERROR_CODES } from "@legends/shared";
 import { getCurrentUser } from "@/lib/auth";
 import { openConversation, listConversations } from "@/lib/dm";
 
@@ -33,6 +34,16 @@ export async function POST(req: Request) {
     const code = (e as { code?: string }).code;
     if (code === "BLOCKED") return NextResponse.json({ error: "blocked" }, { status: 403 });
     if (code === "BAD") return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    // Bot E2EE state-machine codes: stable identifiers the frontend pattern-
+    // matches on to render specific UX ("admin disabled" vs "bot not ready").
+    // Return the code value verbatim in `error` so callers don't have to split
+    // on a sentence — see BOT_E2EE_ERROR_CODES in @legends/shared.
+    if (
+      code === BOT_E2EE_ERROR_CODES.BOT_E2EE_DISABLED ||
+      code === BOT_E2EE_ERROR_CODES.BOT_E2EE_NOT_READY
+    ) {
+      return NextResponse.json({ error: code }, { status: 400 });
+    }
     throw e;
   }
 }
