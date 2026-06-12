@@ -200,7 +200,8 @@ export class LegendsBot {
   async handleUpdate(update: Update): Promise<void> {
     try {
       if (update.type === "message" && update.message) {
-        const ctx = new MessageContext(this, update, update.message);
+        const msg = await this._decryptIncomingMessage(update.message);
+        const ctx = new MessageContext(this, update, msg);
         for (const h of this._handlers.message) await h(ctx);
       } else if (update.type === "new_member" && update.new_member) {
         const ctx = new NewMemberContext(this, update, update.new_member);
@@ -209,12 +210,41 @@ export class LegendsBot {
         const ctx = new CallbackQueryContext(this, update, update.callback_query);
         for (const h of this._handlers.callback_query) await h(ctx);
       } else if (update.type === "dm_message" && update.dm_message) {
-        const ctx = new DmMessageContext(this, update, update.dm_message);
+        const dm = await this._decryptIncomingDm(update.dm_message);
+        const ctx = new DmMessageContext(this, update, dm);
         for (const h of this._handlers.dm_message) await h(ctx);
       }
     } catch (err) {
       this._onError(err, update);
     }
+  }
+
+  /**
+   * Pre-process step: if the incoming topic message has a `ciphertext` field,
+   * decrypt it through the Olm machine and surface the plaintext to handlers
+   * as `text`. Plaintext messages pass through unchanged. A decrypt failure
+   * propagates and is caught by {@link handleUpdate}, surfacing through
+   * `_onError` per spec §11.
+   */
+  private async _decryptIncomingMessage(m: MessageUpdate): Promise<MessageUpdate> {
+    if (!m.ciphertext || !m.e2ee_room_id || !this._crypto) return m;
+    const sender = m.sender_matrix_id ?? "";
+    const plaintext = await this._crypto.decryptRoomMessage(m.e2ee_room_id, {
+      ciphertext: m.ciphertext,
+      sender,
+    });
+    return { ...m, text: plaintext };
+  }
+
+  /** DM-flavour of {@link _decryptIncomingMessage}. */
+  private async _decryptIncomingDm(d: DmMessageUpdate): Promise<DmMessageUpdate> {
+    if (!d.ciphertext || !d.e2ee_room_id || !this._crypto) return d;
+    const sender = d.sender_matrix_id ?? "";
+    const plaintext = await this._crypto.decryptRoomMessage(d.e2ee_room_id, {
+      ciphertext: d.ciphertext,
+      sender,
+    });
+    return { ...d, text: plaintext };
   }
 
   // ── Webhook mode ─────────────────────────────────────────────────────────

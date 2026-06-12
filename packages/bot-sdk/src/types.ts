@@ -12,6 +12,9 @@ export interface MessageUpdate {
   from: { id: string | null; display_name: string | null };
   chat: { id: string; type: string; title: string };
   text: string;
+  ciphertext?: string;
+  e2ee_room_id?: string;
+  sender_matrix_id?: string;
   reply_to_message_id?: string;
   date: number;
 }
@@ -36,6 +39,9 @@ export interface DmMessageUpdate {
   conversation_id: string;
   from: { id: string; display_name: string | null };
   text: string;
+  ciphertext?: string;
+  e2ee_room_id?: string;
+  sender_matrix_id?: string;
   reply_to_message_id?: string;
   date: number;
 }
