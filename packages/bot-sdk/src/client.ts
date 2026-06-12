@@ -56,4 +56,34 @@ export class LegendsBotClient {
   async getUpdates(): Promise<Update[]> {
     return this.call<Update[]>("getUpdates");
   }
+
+  /**
+   * Send an E2EE DM ciphertext envelope. Wraps the RPC route
+   * `POST /api/bot/v1/sendDmMessage` (per INDEX R1) — the same server
+   * handler accepts `{conversationId, text}` for plaintext and
+   * `{conversationId, ciphertext}` for E2EE. The SDK exposes the two
+   * shapes as separate methods so callers don't have to construct the
+   * union manually.
+   */
+  async sendDmCiphertext(params: {
+    conversationId: string;
+    ciphertext: string;
+    replyToMessageId?: string;
+  }): Promise<{ messageId: string }> {
+    return this.call<{ messageId: string }>("sendDmMessage", params);
+  }
+
+  /**
+   * Send an E2EE topic ciphertext envelope. Per INDEX R2 the existing
+   * `POST /api/bot/v1/sendMessage` route is extended to accept
+   * `ciphertext` alongside `text`; this method packages the ciphertext
+   * shape.
+   */
+  async sendTopicCiphertext(params: {
+    topicId: string;
+    ciphertext: string;
+    replyToMessageId?: string;
+  }): Promise<{ messageId: string }> {
+    return this.call<{ messageId: string }>("sendMessage", params);
+  }
 }

@@ -27,6 +27,13 @@ export class MessageContext {
   get topicId(): string { return this.message.chat.id; }
 
   async reply(text: string, options?: Omit<SendMessageParams, "topicId" | "text">): Promise<{ messageId: string }> {
+    if (this.message.e2ee_room_id) {
+      return this.bot._sendEncryptedForTest({
+        roomId: this.message.e2ee_room_id,
+        target: { kind: "topic", topicId: this.topicId },
+        plaintext: text,
+      });
+    }
     return this.bot.api.sendMessage({ topicId: this.topicId, text, ...options });
   }
 
@@ -81,6 +88,13 @@ export class DmMessageContext {
   get conversationId(): string { return this.dm_message.conversation_id; }
 
   async reply(text: string, options?: Omit<SendDmMessageParams, "conversationId" | "text">): Promise<{ messageId: string }> {
+    if (this.dm_message.e2ee_room_id) {
+      return this.bot._sendEncryptedForTest({
+        roomId: this.dm_message.e2ee_room_id,
+        target: { kind: "dm", conversationId: this.conversationId },
+        plaintext: text,
+      });
+    }
     return this.bot.api.sendDmMessage({ conversationId: this.conversationId, text, ...options });
   }
 }
@@ -181,6 +195,82 @@ export class LegendsBot {
   /** Test hook: peek at the Olm machine (null when E2EE is disabled). */
   public cryptoForTest(): BotOlmMachine | null {
     return this._crypto;
+  }
+
+  /**
+   * Public dispatcher for `MessageContext` / `DmMessageContext` to invoke
+   * the outgoing-encrypt pipeline. Not part of the public SDK surface —
+   * callers should use `ctx.reply()` instead.
+   *
+   * Flow:
+   *   1. Resolve the room's member matrix-ids from the server.
+   *   2. Pre-establish Olm sessions via `getMissingSessions` + `keys/claim`.
+   *      This is REQUIRED per the Task 18 review note: without it,
+   *      `shareRoomKey` emits `m.room_key.withheld` and the recipient
+   *      can't decrypt.
+   *   3. Drive each `shareRoomKey` to-device request through
+   *      `BotCryptoTransport.sendToDevice`.
+   *   4. Encrypt the plaintext as `m.room.message` Megolm.
+   *   5. Deliver via `sendDmCiphertext` / `sendTopicCiphertext` (per
+   *      INDEX R1 + R2).
+   *   6. Persist the machine.
+   */
+  public async _sendEncryptedForTest(args: {
+    roomId: string;
+    target: { kind: "dm"; conversationId: string } | { kind: "topic"; topicId: string };
+    plaintext: string;
+  }): Promise<{ messageId: string }> {
+    return this._sendEncrypted(args);
+  }
+
+  private async _sendEncrypted({
+    roomId,
+    target,
+    plaintext,
+  }: {
+    roomId: string;
+    target: { kind: "dm"; conversationId: string } | { kind: "topic"; topicId: string };
+    plaintext: string;
+  }): Promise<{ messageId: string }> {
+    if (!this._crypto) throw new Error("crypto not initialised");
+
+    // 1. Member list.
+    const { members } = await this.cryptoTransport.roomMembers(roomId);
+    const memberIds = members.map((m) => m.matrix_id);
+
+    // 2. Establish Olm sessions before megolm key-share. Without this the
+    //    wasm emits `m.room_key.withheld` for missing sessions and the
+    //    recipient can't decrypt (see Task 18 review note).
+    const claim = await this._crypto.getMissingSessions(memberIds);
+    if (claim) {
+      const claimResp = await this.cryptoTransport.keysClaim(JSON.parse(claim.body));
+      await this._crypto.markRequestAsSent(claim.id, JSON.stringify(claimResp));
+    }
+
+    // 3. Megolm room-key share: drain whatever the wasm emits.
+    const shareReqs = await this._crypto.shareRoomKey(roomId, memberIds);
+    for (const r of shareReqs) {
+      if (r.type === "keys_claim") {
+        const resp = await this.cryptoTransport.keysClaim(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "to_device" && r.event_type) {
+        await this.cryptoTransport.sendToDevice(r.event_type, r.txn_id ?? r.id, JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, "{}");
+      }
+    }
+
+    // 4. Encrypt the payload.
+    const { ciphertext } = await this._crypto.encryptForRoom(roomId, plaintext, "m.room.message");
+
+    // 5. Dispatch to the right RPC.
+    const out =
+      target.kind === "dm"
+        ? await this.api.sendDmCiphertext({ conversationId: target.conversationId, ciphertext })
+        : await this.api.sendTopicCiphertext({ topicId: target.topicId, ciphertext });
+
+    // 6. Persist the updated machine state (new megolm session, OTKs used).
+    await this._crypto.persist();
+    return out;
   }
 
   on(event: "message", handler: MsgHandler): this;
