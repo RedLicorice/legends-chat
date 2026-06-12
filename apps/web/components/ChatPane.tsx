@@ -333,8 +333,20 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const e2eeRoomIdRef = useRef<string | null>(e2eeRoomId);
   useEffect(() => { e2eeRoomIdRef.current = e2eeRoomId; }, [e2eeRoomId]);
   const chatCryptoRef = useRef<ChatCrypto | null>(chatCrypto);
-  useEffect(() => { chatCryptoRef.current = chatCrypto; }, [chatCrypto]);
   const cryptoInitPromise = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    chatCryptoRef.current = chatCrypto;
+    // Bug 21: when the chat-crypto identity changes (e.g. DmRightPane's
+    // useMemo rebuilds it because roomKey arrived after the first render),
+    // the previous instance's "ready" state must NOT carry over. Reset the
+    // shared UI flag so the next ensureCrypto() actually calls init() on
+    // this new closure. Without this, the new cc's internal `mod` stays
+    // null and the next encrypt() throws "chat-crypto: not initialized".
+    cryptoInitPromise.current = null;
+    if (chatCrypto && !chatCrypto.ready()) {
+      setE2eeReady(false);
+    }
+  }, [chatCrypto]);
   const socketRef = useRef<NonNullable<ChatSource["socket"]> | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -515,7 +527,19 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const ensureCrypto = useCallback(async (): Promise<ChatCrypto | null> => {
     const cc = chatCryptoRef.current;
     if (!cc) return null;
-    if (e2eeReady) return cc;
+    // Per-instance readiness check: a freshly-built chat-crypto closure
+    // (e.g. after DmRightPane's useMemo deps change) must init itself even
+    // if the shared `e2eeReady` flag is true from a previous instance. The
+    // underlying cc.init() is idempotent, so we can safely always invoke
+    // it; we still short-circuit here to avoid an awaited microtask hop
+    // on the hot path once the instance is ready.
+    if (cc.ready()) {
+      if (!e2eeReady) {
+        setE2eeReady(true);
+        setE2eeSetupNeeded(false);
+      }
+      return cc;
+    }
     if (cryptoInitPromise.current) {
       await cryptoInitPromise.current;
       return cc;

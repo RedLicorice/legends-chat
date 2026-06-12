@@ -7,6 +7,14 @@ export interface ChatCrypto {
   /** Returns the matrix-flavored sender id for the room/peer when decrypting. */
   matrixSenderFor(senderUserId: string | null, fallbackUserId: string): string;
   init(currentUserId: string): Promise<void>;
+  /**
+   * Per-instance readiness. True iff `init()` has resolved successfully on
+   * *this* closure. Callers must not gate `init()` invocation on a shared
+   * React state that survives chat-crypto identity changes — readiness is
+   * tracked here so a freshly-built instance can't inherit a stale "ready"
+   * flag from a previous one.
+   */
+  ready(): boolean;
   ensureSession(memberUserIds: string[]): Promise<void>;
   encrypt(plaintext: string): Promise<EncryptedEnvelope>;
   decrypt(envelope: IncomingEnvelope): Promise<string>;
@@ -29,6 +37,7 @@ export function createMegolmChatCrypto(roomId: string): ChatCrypto {
     matrixSenderFor(senderUserId, fallbackUserId) {
       return toMatrixUserId(senderUserId ?? fallbackUserId);
     },
+    ready() { return mod !== null; },
     async init(currentUserId: string) {
       if (mod) return;
       if (initPromise) { await initPromise; return; }
@@ -84,6 +93,7 @@ export function createOlmChatCrypto(roomKey: string, peerMatrixId: string): Chat
       const id = senderUserId ?? fallbackUserId;
       return toMatrixUserId(id);
     },
+    ready() { return mod !== null; },
     async init(currentUserId: string) {
       if (mod) return;
       if (initPromise) { await initPromise; return; }
