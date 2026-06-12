@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { bots, dmConversations, dmParticipants } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
+import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
 
 const UPDATE_QUEUE_TTL = 300; // mirror apps/ws/src/webhook.ts
 
@@ -11,13 +12,26 @@ const UPDATE_QUEUE_TTL = 300; // mirror apps/ws/src/webhook.ts
 //
 // `text` and `ciphertext` are mutually exclusive at the envelope level:
 //   plaintext convo → `text` populated, `ciphertext` omitted
-//   E2EE convo      → `ciphertext` populated (m.room.encrypted body), `text` omitted
+//   E2EE convo      → `ciphertext` populated (JSON-stringified
+//                     m.room.encrypted CONTENT object), `text` omitted,
+//                     `e2ee_room_id` and `sender_matrix_id` also set so
+//                     the bot SDK can hand a complete Matrix event to
+//                     `OlmMachine.decryptRoomEvent`.
+//
+// Wire-format note: `ciphertext` is a STRING (not an object) per the
+// decision recorded in packages/bot-sdk/src/crypto/olm-machine.ts. The
+// SDK's `decryptRoomMessage` does `JSON.parse(envelope.ciphertext)` to
+// recover the content object the wasm needs. The DB row stores the
+// payload as jsonb, so this helper re-serializes when assembling the
+// envelope.
 type DmMessageEnvelope = {
   message_id: string;
   conversation_id: string;
   from: { id: string; display_name: string | null };
   text?: string;
-  ciphertext?: Record<string, unknown>;
+  ciphertext?: string;
+  e2ee_room_id?: string;
+  sender_matrix_id?: string;
   reply_to_message_id?: string;
   date: number;
 };
@@ -84,8 +98,13 @@ export async function deliverDmToBots(
   // Look up the conversation's E2EE flag rather than trusting a caller-supplied
   // hint — keeps the envelope shape authoritative against the row that actually
   // landed on disk. If the convo row vanished we fall back to plaintext shape.
+  // `e2eeRoomId` is the synthetic Matrix room id the bot SDK needs to wrap
+  // the ciphertext into an `m.room.encrypted` event.
   const [conv] = await db
-    .select({ isE2ee: dmConversations.isE2ee })
+    .select({
+      isE2ee: dmConversations.isE2ee,
+      e2eeRoomId: dmConversations.e2eeRoomId,
+    })
     .from(dmConversations)
     .where(eq(dmConversations.id, conversationId))
     .limit(1);
@@ -99,7 +118,15 @@ export async function deliverDmToBots(
     date: Math.floor(new Date(msg.createdAt).getTime() / 1000),
   };
   if (isE2ee && msg.ciphertext) {
-    envelope.ciphertext = msg.ciphertext;
+    // Stringify so the bot SDK's `decryptRoomMessage` (which does
+    // `JSON.parse(envelope.ciphertext)`) recovers the m.room.encrypted
+    // content object the wasm wants — see olm-machine.ts wire-format note.
+    envelope.ciphertext = JSON.stringify(msg.ciphertext);
+    if (conv?.e2eeRoomId) envelope.e2ee_room_id = conv.e2eeRoomId;
+    envelope.sender_matrix_id =
+      msg.senderType === "user"
+        ? toMatrixUserId(msg.senderId)
+        : toMatrixBotId(msg.senderId);
   } else {
     envelope.text = msg.text;
   }
