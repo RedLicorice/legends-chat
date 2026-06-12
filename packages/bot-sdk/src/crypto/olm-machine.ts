@@ -101,7 +101,23 @@ interface SnapshotDatabase {
 
 interface SnapshotObjectStore {
   name: string;
+  /**
+   * matrix-sdk-crypto-wasm creates most stores with `keyPath: null` (out-of-line
+   * keys) but a few use `autoIncrement` and several have indices on specific
+   * `keyPath`s. Restoring must preserve all three so wasm queries (e.g.
+   * `gossip_requests.unsent`, `inbound_group_sessions3.backup`) keep working.
+   */
+  keyPath: string | string[] | null;
+  autoIncrement: boolean;
+  indices: SnapshotIndex[];
   records: SnapshotRecord[];
+}
+
+interface SnapshotIndex {
+  name: string;
+  keyPath: string | string[];
+  unique: boolean;
+  multiEntry: boolean;
 }
 
 interface SnapshotRecord {
@@ -416,8 +432,14 @@ async function snapshotIdb(storeName: string): Promise<SnapshotDatabase[]> {
     try {
       const objectStores: SnapshotObjectStore[] = [];
       for (const osName of Array.from(db.objectStoreNames)) {
-        const records = await dumpStore(db, osName);
-        objectStores.push({ name: osName, records });
+        const { schema, records } = await dumpStore(db, osName);
+        objectStores.push({
+          name: osName,
+          keyPath: schema.keyPath,
+          autoIncrement: schema.autoIncrement,
+          indices: schema.indices,
+          records,
+        });
       }
       dumps.push({ name: meta.name, version: db.version, objectStores });
     } finally {
@@ -434,7 +456,23 @@ async function restoreIdb(databases: SnapshotDatabase[]): Promise<void> {
       req.onupgradeneeded = () => {
         const db = req.result;
         for (const os of dbDump.objectStores) {
-          if (!db.objectStoreNames.contains(os.name)) db.createObjectStore(os.name);
+          if (db.objectStoreNames.contains(os.name)) continue;
+          // Pass keyPath / autoIncrement so the store has the same shape wasm
+          // expects. `keyPath: null` means out-of-line keys (default), which
+          // matches most matrix-sdk-crypto-wasm stores.
+          const objectStore = db.createObjectStore(os.name, {
+            keyPath: os.keyPath ?? undefined,
+            autoIncrement: os.autoIncrement,
+          });
+          // Re-create indices so queries like `gossip_requests.unsent` and
+          // `inbound_group_sessions3.backup` keep working after restore.
+          // Without these, wasm raises `NotFoundError (8)` on every poll.
+          for (const idx of os.indices) {
+            objectStore.createIndex(idx.name, idx.keyPath, {
+              unique: idx.unique,
+              multiEntry: idx.multiEntry,
+            });
+          }
         }
       };
       req.onsuccess = () => {
@@ -445,8 +483,20 @@ async function restoreIdb(databases: SnapshotDatabase[]): Promise<void> {
             if (!db.objectStoreNames.contains(os.name)) continue;
             const objectStore = tx.objectStore(os.name);
             objectStore.clear();
+            // Stores with an in-line keyPath derive the primary key from the
+            // value itself, so we MUST omit the explicit key arg there
+            // (passing one would raise DataError). Out-of-line stores
+            // (`keyPath: null`) need the captured key. matrix-sdk-crypto-wasm
+            // currently uses out-of-line keys everywhere, but we handle both
+            // for future-proofing.
+            const inline = os.keyPath !== null;
             for (const rec of os.records) {
-              objectStore.put(decodeSnapshotValue(rec.value), decodeSnapshotValue(rec.key) as IDBValidKey);
+              const value = decodeSnapshotValue(rec.value);
+              if (inline) {
+                objectStore.put(value);
+              } else {
+                objectStore.put(value, decodeSnapshotValue(rec.key) as IDBValidKey);
+              }
             }
           }
           tx.oncomplete = () => {
@@ -488,26 +538,62 @@ function openDb(name: string, version: number): Promise<IDBDatabase | null> {
   });
 }
 
-function dumpStore(db: IDBDatabase, storeName: string): Promise<SnapshotRecord[]> {
+interface DumpedStore {
+  schema: {
+    keyPath: string | string[] | null;
+    autoIncrement: boolean;
+    indices: SnapshotIndex[];
+  };
+  records: SnapshotRecord[];
+}
+
+function dumpStore(db: IDBDatabase, storeName: string): Promise<DumpedStore> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readonly");
     const objectStore = tx.objectStore(storeName);
-    const out: SnapshotRecord[] = [];
+    const indices: SnapshotIndex[] = [];
+    for (const idxName of Array.from(objectStore.indexNames)) {
+      const idx = objectStore.index(idxName);
+      indices.push({
+        name: idx.name,
+        keyPath: normalizeKeyPath(idx.keyPath) as string | string[],
+        unique: idx.unique,
+        multiEntry: idx.multiEntry,
+      });
+    }
+    const schema = {
+      keyPath: normalizeKeyPath(objectStore.keyPath),
+      autoIncrement: objectStore.autoIncrement,
+      indices,
+    };
+    const records: SnapshotRecord[] = [];
     const cursorReq = objectStore.openCursor();
     cursorReq.onsuccess = () => {
       const cursor = cursorReq.result;
       if (cursor) {
-        out.push({
+        records.push({
           key: encodeSnapshotValue(cursor.key),
           value: encodeSnapshotValue(cursor.value),
         });
         cursor.continue();
       } else {
-        resolve(out);
+        resolve({ schema, records });
       }
     };
     cursorReq.onerror = () => reject(cursorReq.error);
   });
+}
+
+/**
+ * Coerce an IDB keyPath (which can be `null`, a `string`, or a `DOMStringList`
+ * depending on the backend) into a JSON-safe form. matrix-sdk-crypto-wasm uses
+ * out-of-line keys (`null`) for most stores and a string array for the
+ * composite `inbound_group_sessions3` index.
+ */
+function normalizeKeyPath(kp: string | string[] | DOMStringList | null): string | string[] | null {
+  if (kp === null || kp === undefined) return null;
+  if (typeof kp === "string") return kp;
+  return Array.from(kp as Iterable<string>);
 }
 
 function encodeSnapshotValue(v: unknown): SnapshotValue {
