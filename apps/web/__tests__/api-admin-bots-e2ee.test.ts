@@ -6,6 +6,13 @@ const state = {
   botRow: { id: "bot-1", e2eeState: "disabled" as "disabled" | "pending" | "ready", e2eeDeviceId: null as string | null },
   updates: [] as Array<{ table: string; patch: Record<string, unknown> }>,
   deletes: [] as string[],
+  inserts: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  // Finding 11 inputs for rotate's peer-user discovery: tests preload the
+  // bot's DM convs (and the convs' user participants) and topic memberships.
+  dmConvIds: [] as string[],
+  dmUserParticipants: [] as { conversationId: string; userId: string }[],
+  topicIdsForBot: [] as string[],
+  topicMembersByTopic: {} as Record<string, string[]>,
 };
 
 vi.mock("@/lib/auth", () => ({
@@ -25,14 +32,67 @@ vi.mock("@/lib/db", () => {
     if (typeof t.tableName === "string") return t.tableName;
     return "?";
   }
+  // Resolve the right row set for each `select().from(table).where()` chain
+  // based on which table the call hit. The route uses:
+  //   - bots (.limit(1))      → state.botRow
+  //   - dm_participants (bot) → state.dmConvIds
+  //   - dm_participants (user)→ state.dmUserParticipants for any of dmConvIds
+  //   - topic_bots            → state.topicIdsForBot
+  //   - topic_members         → flattened state.topicMembersByTopic
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function selectFromImpl(table: unknown): any {
+    const name = tableName(table);
+    const terminate = (): Promise<unknown[]> => {
+      if (name === "bots") return Promise.resolve([{ ...state.botRow }]);
+      if (name === "dm_participants") {
+        // The route issues two distinct queries against dm_participants —
+        // first to find conversations the bot is in, then to find user
+        // participants of those conversations. We can disambiguate by which
+        // shape the test seeded, but the simpler path is to return both sets
+        // in order. The route's first call extracts `conversationId`, the
+        // second extracts `pid` — different keys mean the unused values on
+        // each row are harmless.
+        if (selectFromImpl.dmCallCount === 0) {
+          selectFromImpl.dmCallCount++;
+          return Promise.resolve(
+            state.dmConvIds.map((c) => ({ conversationId: c })),
+          );
+        }
+        selectFromImpl.dmCallCount++;
+        return Promise.resolve(
+          state.dmUserParticipants.map((p) => ({ pid: p.userId })),
+        );
+      }
+      if (name === "topic_bots") {
+        return Promise.resolve(state.topicIdsForBot.map((t) => ({ topicId: t })));
+      }
+      if (name === "topic_members") {
+        const all: { userId: string }[] = [];
+        for (const memberIds of Object.values(state.topicMembersByTopic)) {
+          for (const u of memberIds) all.push({ userId: u });
+        }
+        return Promise.resolve(all);
+      }
+      return Promise.resolve([]);
+    };
+    return {
+      where: () => ({
+        // `bots` lookup uses .limit(1); other lookups await directly.
+        // Awaiting where() returns the terminate() promise; chaining .limit
+        // returns the same. We support both by making the returned object
+        // both thenable and chainable.
+        then: (resolve: (v: unknown[]) => unknown, reject?: (e: unknown) => unknown) =>
+          terminate().then(resolve, reject),
+        limit: () => terminate(),
+      }),
+    };
+  }
+  selectFromImpl.dmCallCount = 0;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fakeDb: any = {
     select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => Promise.resolve([{ ...state.botRow }]),
-        }),
-      }),
+      from: (table: unknown) => selectFromImpl(table),
     }),
     update: (table: unknown) => ({
       set: (patch: Record<string, unknown>) => ({
@@ -47,6 +107,13 @@ vi.mock("@/lib/db", () => {
         }),
       }),
     }),
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => {
+        const name = tableName(table);
+        state.inserts.push({ table: name, values });
+        return Promise.resolve();
+      },
+    }),
     delete: (table: unknown) => ({
       where: () => {
         const name = tableName(table);
@@ -55,6 +122,10 @@ vi.mock("@/lib/db", () => {
       },
     }),
     transaction: async (fn: (tx: typeof fakeDb) => Promise<unknown>) => fn(fakeDb),
+    // Reset hook the test calls between scenarios since selectFromImpl is closed over.
+    _resetSelectCounter: () => {
+      selectFromImpl.dmCallCount = 0;
+    },
   };
   return { db: fakeDb };
 });
@@ -70,11 +141,19 @@ function req(body: unknown) {
 }
 function params() { return { params: Promise.resolve({ id: "bot-1" }) }; }
 
-beforeEach(() => {
+beforeEach(async () => {
   state.currentUser = { id: "admin-1", permissions: new Set(["bots.manage"]) };
   state.botRow = { id: "bot-1", e2eeState: "disabled", e2eeDeviceId: null };
   state.updates = [];
   state.deletes = [];
+  state.inserts = [];
+  state.dmConvIds = [];
+  state.dmUserParticipants = [];
+  state.topicIdsForBot = [];
+  state.topicMembersByTopic = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { db } = (await import("@/lib/db")) as unknown as { db: any };
+  db._resetSelectCounter?.();
 });
 
 describe("PATCH /api/admin/bots/[id]/e2ee", () => {
@@ -145,5 +224,41 @@ describe("PATCH /api/admin/bots/[id]/e2ee", () => {
     const body = await res.json();
     expect(body.e2ee_state).toBe("pending");
     expect(body.e2ee_device_id).toBeNull();
+  });
+
+  // Finding 11: peers caching the bot's dead device id keep encrypting Olm
+  // messages to it after a rotate. Append a user_device_change_log row per
+  // peer user so the next /api/crypto/sync surfaces the bot's device under
+  // device_lists.changed and the OlmMachine drops the stale device cache.
+  it("rotate fans out user_device_change_log rows for every peer user (DM + topic)", async () => {
+    state.botRow.e2eeState = "ready";
+    state.botRow.e2eeDeviceId = "DEVICE-1";
+    state.dmConvIds = ["conv-a"];
+    state.dmUserParticipants = [{ conversationId: "conv-a", userId: "user-a" }];
+    state.topicIdsForBot = ["topic-x"];
+    state.topicMembersByTopic = { "topic-x": ["user-b", "user-c"] };
+
+    const res = await PATCH(req({ rotate: true }), params());
+    expect(res.status).toBe(200);
+
+    const logInserts = state.inserts.filter((i) => i.table === "user_device_change_log");
+    const insertedUsers = logInserts.map((i) => i.values.userId);
+    expect(insertedUsers).toContain("user-a");
+    expect(insertedUsers).toContain("user-b");
+    expect(insertedUsers).toContain("user-c");
+    // Reason must encode the bot id so peers can correlate the change.
+    for (const i of logInserts) {
+      expect(i.values.reason).toBe("bot_rotate:bot-1");
+    }
+  });
+
+  it("rotate with no peers inserts zero device_change rows (no-op safe)", async () => {
+    state.botRow.e2eeState = "pending";
+    state.dmConvIds = [];
+    state.topicIdsForBot = [];
+    const res = await PATCH(req({ rotate: true }), params());
+    expect(res.status).toBe(200);
+    const logInserts = state.inserts.filter((i) => i.table === "user_device_change_log");
+    expect(logInserts).toHaveLength(0);
   });
 });

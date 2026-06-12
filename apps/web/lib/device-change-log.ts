@@ -12,6 +12,9 @@
 //   'topic_bot_add:<id>' — bot was added to an E2EE topic; members must
 //                          rotate the outbound Megolm session.
 //   'topic_bot_remove:<id>' — bot was removed from an E2EE topic; same.
+//   'bot_rotate:<id>'    — admin wiped + rotated the bot's E2EE device; peers
+//                          must drop their cached device set for the bot so
+//                          they don't keep encrypting to the dead device.
 
 import { userDeviceChangeLog } from "@legends/db/schema";
 import { db } from "@/lib/db";
@@ -26,7 +29,8 @@ export type DeviceChangeReason =
   // accept any string with the prefix at the type level so call sites can
   // keep the bot id in the audit row without resorting to a cast.
   | `topic_bot_add:${string}`
-  | `topic_bot_remove:${string}`;
+  | `topic_bot_remove:${string}`
+  | `bot_rotate:${string}`;
 
 export async function logDeviceChange(
   userId: string,
