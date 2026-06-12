@@ -14,7 +14,7 @@ import { userKeyBundles, userToDeviceQueue } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
-import { toMatrixUserId } from "@/lib/crypto-matrix";
+import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
 
 const PAGE_SIZE = 200;
 const EPOCH = new Date(0).toISOString();
@@ -70,11 +70,12 @@ export async function GET(req: NextRequest) {
   const rows = await db.execute<{
     id: string;
     sender_user_id: string;
+    sender_device_id: string;
     event_type: string;
     content_json: Record<string, unknown>;
     created_at_ms: Date;
   }>(sql`
-    SELECT id, sender_user_id, event_type, content_json,
+    SELECT id, sender_user_id, sender_device_id, event_type, content_json,
            date_trunc('milliseconds', created_at) AS created_at_ms
       FROM user_to_device_queue
      WHERE recipient_user_id = ${user.id}
@@ -88,10 +89,23 @@ export async function GET(req: NextRequest) {
   const ids: string[] = [];
   let lastCreatedAt: Date | null = null;
 
+  // Detect the bot-origin workaround pattern committed in 314e3bf: when the
+  // sender is a bot, /api/crypto/sendToDevice writes
+  //   sender_user_id  = bots.owner_user_id (NOT NULL column)
+  //   sender_device_id = `bot:<botId>`
+  // because user_to_device_queue has no sender_bot_id column yet (deferred
+  // migration 0046 per R1/INDEX). The outer envelope `sender` MUST match the
+  // identity that owns the inner Olm sender_key, otherwise matrix-sdk-crypto
+  // silently drops the wrapped m.room_key → bot replies render as "Locked".
+  const BOT_ORIGIN_DEVICE_RE = /^bot:([0-9a-fA-F-]+)$/;
   for (const row of Array.from(rows)) {
+    const botMatch = row.sender_device_id?.match(BOT_ORIGIN_DEVICE_RE);
+    const sender = botMatch
+      ? toMatrixBotId(botMatch[1]!)
+      : toMatrixUserId(row.sender_user_id);
     events.push({
       type: row.event_type,
-      sender: toMatrixUserId(row.sender_user_id),
+      sender,
       content: row.content_json,
     });
     ids.push(row.id);
