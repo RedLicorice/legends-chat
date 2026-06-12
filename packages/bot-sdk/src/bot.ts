@@ -125,6 +125,7 @@ export class LegendsBot {
   private _botInfo: BotInfo | null = null;
   private _crypto: BotOlmMachine | null = null;
   private _cryptoStore: OlmStore | null = null;
+  private _syncLoopPromise: Promise<void> | null = null;
   private readonly _cryptoStorePath: string;
 
   constructor({
@@ -273,6 +274,78 @@ export class LegendsBot {
     return out;
   }
 
+  /**
+   * Test hook: start `_cryptoSyncLoop` and return its promise so the test
+   * can `await` it after calling `stop()`. In production the loop is
+   * spawned from `start()` / `startWebhook()` automatically.
+   */
+  public cryptoSyncLoopForTest(): Promise<void> {
+    this._running = true;
+    this._syncLoopPromise = this._cryptoSyncLoop();
+    return this._syncLoopPromise;
+  }
+
+  /**
+   * Background drain of `/api/bot/v1/crypto/sync`:
+   *
+   *   1. Long-poll `/sync` for to-device events + OTK counts.
+   *   2. Feed them into the wasm via `receiveSyncChanges`.
+   *   3. Drain whatever outgoing requests the wasm emits in response
+   *      (keys_upload, keys_query, keys_claim, to_device).
+   *   4. Persist.
+   *
+   * Errors trigger exponential backoff (500ms → 1s → 2s → 4s → 8s) and
+   * surface through `_onError`. The loop exits when `stop()` flips
+   * `_running` to false.
+   */
+  private async _cryptoSyncLoop(): Promise<void> {
+    if (!this._crypto) return;
+    const backoffSteps = [500, 1_000, 2_000, 4_000, 8_000];
+    let backoffIdx = 0;
+    while (this._running) {
+      try {
+        const sync = await this.cryptoTransport.sync({ timeoutMs: 30_000 });
+        await this._crypto.receiveSyncChanges({
+          toDevice: JSON.stringify(sync.to_device.events),
+          otkCounts: sync.device_one_time_keys_count,
+        });
+        await this._drainOutgoingRequests();
+        await this._crypto.persist();
+        backoffIdx = 0;
+      } catch (err) {
+        this._onError(err, {} as Update);
+        const delayMs = backoffSteps[Math.min(backoffIdx, backoffSteps.length - 1)]!;
+        backoffIdx++;
+        await delay(delayMs);
+      }
+    }
+  }
+
+  /**
+   * Walk the wasm machine's outgoing-request queue and dispatch each one
+   * through `BotCryptoTransport`. Called from `_cryptoSyncLoop` after
+   * every `receiveSyncChanges`.
+   */
+  private async _drainOutgoingRequests(): Promise<void> {
+    if (!this._crypto) return;
+    const reqs = await this._crypto.outgoingRequests();
+    for (const r of reqs) {
+      if (r.type === "keys_upload") {
+        const resp = await this.cryptoTransport.keysUpload(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "keys_query") {
+        const resp = await this.cryptoTransport.keysQuery(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "keys_claim") {
+        const resp = await this.cryptoTransport.keysClaim(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "to_device" && r.event_type) {
+        await this.cryptoTransport.sendToDevice(r.event_type, r.txn_id ?? r.id, JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, "{}");
+      }
+    }
+  }
+
   on(event: "message", handler: MsgHandler): this;
   on(event: "new_member", handler: MemberHandler): this;
   on(event: "callback_query", handler: CallbackHandler): this;
@@ -369,7 +442,9 @@ export class LegendsBot {
     webhookUrl: string;
     path?: string;
   }): Promise<void> {
+    this._running = true;
     await this._loadBotInfo();
+    if (this._crypto) this._syncLoopPromise = this._cryptoSyncLoop();
     await this.api.setWebhook(webhookUrl.replace(/\/$/, "") + webhookPath);
     const handler = this.webhookCallback(webhookPath);
     const server = createServer((req, res) => { void handler(req, res); });
@@ -382,6 +457,7 @@ export class LegendsBot {
   async start(): Promise<void> {
     this._running = true;
     await this._loadBotInfo();
+    if (this._crypto) this._syncLoopPromise = this._cryptoSyncLoop();
     console.log(`[bot] polling started${this._botInfo ? ` (${this._botInfo.name})` : ""}`);
 
     while (this._running) {
@@ -395,6 +471,7 @@ export class LegendsBot {
         await delay(5_000);
       }
     }
+    if (this._syncLoopPromise) await this._syncLoopPromise;
   }
 
   stop(): void {
