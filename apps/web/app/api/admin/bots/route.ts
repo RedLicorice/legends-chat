@@ -22,6 +22,8 @@ export async function GET() {
       webhookUrl: bots.webhookUrl,
       isActive: bots.isActive,
       createdAt: bots.createdAt,
+      e2eeState: bots.e2eeState,
+      e2eeDeviceId: bots.e2eeDeviceId,
     })
     .from(bots)
     .leftJoin(users, eq(bots.ownerUserId, users.id))

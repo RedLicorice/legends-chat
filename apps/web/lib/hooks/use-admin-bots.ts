@@ -14,6 +14,10 @@ export interface AdminBotsPayload {
     role: string;
     roleExpiresAt: string | null;
     roleFallback: string | null;
+    e2ee_state: "disabled" | "pending" | "ready";
+    e2ee_device_id: string | null;
+    identityKeyFingerprint?: string;
+    lastKeysUploadAt?: string;
   }[];
   topics: { id: string; title: string; isE2ee: boolean }[];
   assignments: { botId: string; topicId: string }[];

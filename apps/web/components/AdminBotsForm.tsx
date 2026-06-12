@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Bot, ChevronDown, ChevronUp, Copy, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ImageUploadButton } from "@/components/ImageUploadButton";
+import { AdminBotsE2eeSection } from "@/components/views/admin/AdminBotsE2eeSection";
 
 interface BotRow {
   id: string;
@@ -17,6 +18,10 @@ interface BotRow {
   role: string | null;
   roleExpiresAt: Date | string | null;
   roleFallback: string | null;
+  e2ee_state: "disabled" | "pending" | "ready";
+  e2ee_device_id: string | null;
+  identityKeyFingerprint?: string;
+  lastKeysUploadAt?: string;
 }
 
 interface TopicRow {
@@ -103,6 +108,13 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
     } finally {
       setCreating(false);
     }
+  }
+
+  async function refetchBots() {
+    const res = await apiFetch("/api/admin/bots/page-data");
+    if (!res.ok) return;
+    const data = await res.json() as { bots?: BotRow[] };
+    if (data.bots) setBots(data.bots);
   }
 
   async function rotateToken(botId: string) {
@@ -492,6 +504,18 @@ export function AdminBotsForm({ bots: initialBots, topics, assignments: initialA
                     })}
                   </div>
                 </div>
+
+                {/* E2EE state machine (per-bot toggle + rotate) */}
+                <AdminBotsE2eeSection
+                  bot={{
+                    id: bot.id,
+                    e2ee_state: bot.e2ee_state,
+                    e2ee_device_id: bot.e2ee_device_id,
+                    identityKeyFingerprint: bot.identityKeyFingerprint,
+                    lastKeysUploadAt: bot.lastKeysUploadAt,
+                  }}
+                  onChange={refetchBots}
+                />
               </div>
             )}
           </div>
