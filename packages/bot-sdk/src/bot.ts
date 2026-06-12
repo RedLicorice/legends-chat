@@ -205,16 +205,21 @@ export class LegendsBot {
    *
    * Flow:
    *   1. Resolve the room's member matrix-ids from the server.
-   *   2. Pre-establish Olm sessions via `getMissingSessions` + `keys/claim`.
+   *   2. Track those users + drain `keys_query`. Required for the
+   *      first-reply case: without an in-flight device list,
+   *      `getMissingSessions` has nothing to claim and `shareRoomKey`
+   *      emits `m.room_key.withheld` instead of a real key. Order
+   *      matters: track → query → claim → share.
+   *   3. Pre-establish Olm sessions via `getMissingSessions` + `keys/claim`.
    *      This is REQUIRED per the Task 18 review note: without it,
    *      `shareRoomKey` emits `m.room_key.withheld` and the recipient
    *      can't decrypt.
-   *   3. Drive each `shareRoomKey` to-device request through
+   *   4. Drive each `shareRoomKey` to-device request through
    *      `BotCryptoTransport.sendToDevice`.
-   *   4. Encrypt the plaintext as `m.room.message` Megolm.
-   *   5. Deliver via `sendDmCiphertext` / `sendTopicCiphertext` (per
+   *   5. Encrypt the plaintext as `m.room.message` Megolm.
+   *   6. Deliver via `sendDmCiphertext` / `sendTopicCiphertext` (per
    *      INDEX R1 + R2).
-   *   6. Persist the machine.
+   *   7. Persist the machine.
    */
   public async _sendEncryptedForTest(args: {
     roomId: string;
@@ -239,7 +244,35 @@ export class LegendsBot {
     const { members } = await this.cryptoTransport.roomMembers(roomId);
     const memberIds = members.map((m) => m.matrix_id);
 
-    // 2. Establish Olm sessions before megolm key-share. Without this the
+    // 2. Track the recipient users and drain any `keys_query` the wasm
+    //    emits in response. On the first reply to a user we've never
+    //    seen, the machine has no device list for them; without this
+    //    step `getMissingSessions` has nothing to claim against and
+    //    `shareRoomKey` emits `m.room_key.withheld` instead of a real
+    //    Olm-wrapped room key. Order matters: track → query → claim →
+    //    share. We pass any `keys_claim` / `to_device` requests that
+    //    surface here through their existing dispatchers defensively,
+    //    even though `outgoingRequests()` after `updateTrackedUsers`
+    //    is expected to be `keys_query` only.
+    await this._crypto.updateTrackedUsers(memberIds);
+    const preShareReqs = await this._crypto.outgoingRequests();
+    for (const r of preShareReqs) {
+      if (r.type === "keys_query") {
+        const resp = await this.cryptoTransport.keysQuery(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "keys_claim") {
+        const resp = await this.cryptoTransport.keysClaim(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "keys_upload") {
+        const resp = await this.cryptoTransport.keysUpload(JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, JSON.stringify(resp));
+      } else if (r.type === "to_device" && r.event_type) {
+        await this.cryptoTransport.sendToDevice(r.event_type, r.txn_id ?? r.id, JSON.parse(r.body));
+        await this._crypto.markRequestAsSent(r.id, "{}");
+      }
+    }
+
+    // 3. Establish Olm sessions before megolm key-share. Without this the
     //    wasm emits `m.room_key.withheld` for missing sessions and the
     //    recipient can't decrypt (see Task 18 review note).
     const claim = await this._crypto.getMissingSessions(memberIds);
@@ -248,7 +281,7 @@ export class LegendsBot {
       await this._crypto.markRequestAsSent(claim.id, JSON.stringify(claimResp));
     }
 
-    // 3. Megolm room-key share: drain whatever the wasm emits.
+    // 4. Megolm room-key share: drain whatever the wasm emits.
     const shareReqs = await this._crypto.shareRoomKey(roomId, memberIds);
     for (const r of shareReqs) {
       if (r.type === "keys_claim") {
@@ -260,16 +293,16 @@ export class LegendsBot {
       }
     }
 
-    // 4. Encrypt the payload.
+    // 5. Encrypt the payload.
     const { ciphertext } = await this._crypto.encryptForRoom(roomId, plaintext, "m.room.message");
 
-    // 5. Dispatch to the right RPC.
+    // 6. Dispatch to the right RPC.
     const out =
       target.kind === "dm"
         ? await this.api.sendDmCiphertext({ conversationId: target.conversationId, ciphertext })
         : await this.api.sendTopicCiphertext({ topicId: target.topicId, ciphertext });
 
-    // 6. Persist the updated machine state (new megolm session, OTKs used).
+    // 7. Persist the updated machine state (new megolm session, OTKs used).
     await this._crypto.persist();
     return out;
   }
