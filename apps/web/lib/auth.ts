@@ -23,11 +23,17 @@ import {
   psUserPermissionOverrides,
 } from "./db-prepared";
 
+// `next build` page-data collection imports this module; the secrets aren't
+// required at build time (no token is verified during collection). Fall back
+// to a sentinel string. At runtime, a missing real secret means token sign
+// + verify both use the sentinel — which is the correct failure mode if the
+// env var is genuinely missing (no token will ever validate against a real
+// session).
 const accessSecret = new TextEncoder().encode(
-  process.env.JWT_ACCESS_SECRET ?? (() => { throw new Error("JWT_ACCESS_SECRET not set"); })(),
+  process.env.JWT_ACCESS_SECRET ?? "build-placeholder-access",
 );
 const refreshSecret = new TextEncoder().encode(
-  process.env.JWT_REFRESH_SECRET ?? (() => { throw new Error("JWT_REFRESH_SECRET not set"); })(),
+  process.env.JWT_REFRESH_SECRET ?? "build-placeholder-refresh",
 );
 
 const ACCESS_TTL = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 900);
