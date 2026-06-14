@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { AppShellMobileBar } from "@/components/AppShell";
 import { PWASplash } from "@/components/PWASplash";
 import type { ResourceStatus } from "@/lib/hooks/use-api-resource";
 
@@ -26,16 +27,22 @@ export function AdminPanel({
 
   if (status === "forbidden") {
     return (
-      <section className="flex-1 p-4 sm:p-8">
-        <p className="text-sm text-muted">{forbiddenMessage}</p>
-      </section>
+      <>
+        <AppShellMobileBar />
+        <section className="flex-1 p-4 sm:p-8">
+          <p className="text-sm text-muted">{forbiddenMessage}</p>
+        </section>
+      </>
     );
   }
   if (status === "error" && !hasData) {
     return (
-      <section className="flex-1 p-4 sm:p-8">
-        <p className="text-sm text-muted">{errorMessage}</p>
-      </section>
+      <>
+        <AppShellMobileBar />
+        <section className="flex-1 p-4 sm:p-8">
+          <p className="text-sm text-muted">{errorMessage}</p>
+        </section>
+      </>
     );
   }
   // Splash only on FIRST load — once we have prior data OR the request is
@@ -43,5 +50,10 @@ export function AdminPanel({
   // without a data payload, and lets data views serve stale-while-revalidate).
   if (status === "loading" && !hasData) return <PWASplash />;
   if (status === "unauthenticated") return <PWASplash />;
-  return <>{children}</>;
+  return (
+    <>
+      <AppShellMobileBar />
+      {children}
+    </>
+  );
 }
