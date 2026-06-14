@@ -79,13 +79,32 @@ export async function assertParticipant(conversationId: string, userId: string):
 export async function openConversation(
   initiatorUserId: string,
   peer: { type: "user" | "bot"; id: string },
-  options?: { e2ee?: boolean },
+  options?: {
+    e2ee?: boolean;
+    /**
+     * First message to insert atomically with the conversation row. Required
+     * for user peers (pending state needs a body for the recipient to read /
+     * decide on); bot peers auto-accept and may omit it. Provide exactly one
+     * of `text` or `ciphertext` — same XOR contract as `insertDmMessage`.
+     */
+    firstMessage?: { text?: string | null; ciphertext?: Record<string, unknown> | null };
+  },
 ): Promise<{ id: string; created: boolean; e2eeRoomId: string | null }> {
   if (peer.type === "user" && initiatorUserId === peer.id) {
     throw Object.assign(new Error("cannot DM yourself"), { code: "BAD" });
   }
   if (peer.type === "user" && (await isBlockedBetween(initiatorUserId, peer.id))) {
     throw Object.assign(new Error("blocked"), { code: "BLOCKED" });
+  }
+  // User peers require a first message — this is the contract that makes the
+  // pending-request UX meaningful (recipient sees what they're accepting).
+  // Bot peers skip the gate; they auto-accept and the first message is
+  // optional. The XOR is enforced when we actually call insertDmMessage.
+  const fm = options?.firstMessage;
+  const hasFirstMessage =
+    !!fm && ((typeof fm.text === "string" && fm.text.length > 0) || fm.ciphertext != null);
+  if (peer.type === "user" && !hasFirstMessage) {
+    throw Object.assign(new Error("first message required"), { code: "BAD" });
   }
   if (peer.type === "bot") {
     const [b] = await db
@@ -164,6 +183,25 @@ export async function openConversation(
     { conversationId: conv.id, principalType: "user", principalId: initiatorUserId },
     { conversationId: conv.id, principalType: peer.type, principalId: peer.id },
   ]).onConflictDoNothing();
+  // Insert the first message atomically with the conversation (drizzle has no
+  // ergonomic transaction wrapper here, but the convo-row insert + participant
+  // upserts above already establish the rows the FK targets; a partial failure
+  // would just leave an empty pending row, which the periodic cleanup
+  // migration 0046 sweeps up). Skip when caller didn't supply one — bot peers
+  // are allowed to open without an opening message.
+  if (hasFirstMessage) {
+    const fmArgs: Parameters<typeof insertDmMessage>[0] = {
+      conversationId: conv.id,
+      senderType: "user",
+      senderId: initiatorUserId,
+    };
+    if (typeof fm!.text === "string" && fm!.text.length > 0) {
+      fmArgs.text = fm!.text;
+    } else if (fm!.ciphertext != null) {
+      fmArgs.ciphertext = fm!.ciphertext;
+    }
+    await insertDmMessage(fmArgs);
+  }
   // For user↔user DMs that land in `pending` state, notify the recipient via
   // the notification bell. Bot DMs auto-accept (state='accepted' above) and
   // bots have no notification bell, so skip them. Dynamic import keeps the

@@ -11,10 +11,26 @@ export async function GET() {
   return NextResponse.json({ conversations });
 }
 
+// firstMessage XOR: caller passes plaintext OR a ciphertext envelope, never
+// both. Same shape as the per-conversation POST in
+// /api/dm/[id]/messages — keeping them aligned makes the compose UI swappable
+// once the convo exists.
+const firstMessageSchema = z
+  .object({
+    text: z.string().min(1).max(8000).optional(),
+    ciphertext: z.record(z.unknown()).optional(),
+  })
+  .refine((d) => (d.text != null) !== (d.ciphertext != null), {
+    message: "provide exactly one of `text` or `ciphertext`",
+  });
+
 const openSchema = z.object({
   peerType: z.enum(["user", "bot"]),
   peerId: z.string().uuid(),
   e2ee: z.boolean().optional().default(false),
+  // Optional at the schema level; openConversation enforces presence for user
+  // peers (BAD / "first message required"). Bots may omit it.
+  firstMessage: firstMessageSchema.optional(),
 });
 
 export async function POST(req: Request) {
@@ -27,7 +43,10 @@ export async function POST(req: Request) {
     const { id, created, e2eeRoomId } = await openConversation(
       user.id,
       { type: parsed.data.peerType, id: parsed.data.peerId },
-      { e2ee: parsed.data.e2ee },
+      {
+        e2ee: parsed.data.e2ee,
+        firstMessage: parsed.data.firstMessage,
+      },
     );
     return NextResponse.json({ id, created, e2eeRoomId }, { status: created ? 201 : 200 });
   } catch (e) {

@@ -95,11 +95,16 @@ export async function emitDmRequestNotification(args: {
  * participant's sidebar can refresh its server snapshot. The web app POSTs
  * accept/decline; this lets the other side react without polling.
  *
+ * `state` is normally one of the DB enum values, but decline now *deletes* the
+ * conversation row instead of soft-blocking it (see route notes), so we also
+ * publish a synthetic `"declined"` so the WS handler can drop the row from
+ * sidebars without re-fetching state that no longer exists.
+ *
  * Fan-out lives in apps/ws — see REDIS_CHANNELS.DM_CONVERSATION_UPDATED.
  */
 export async function publishDmConversationUpdated(args: {
   conversationId: string;
-  state: "pending" | "accepted" | "blocked";
+  state: "pending" | "accepted" | "blocked" | "declined";
   userIds: string[];
 }): Promise<void> {
   if (args.userIds.length === 0) return;
@@ -109,6 +114,62 @@ export async function publishDmConversationUpdated(args: {
       conversationId: args.conversationId,
       state: args.state,
       userIds: args.userIds,
+    }),
+  );
+}
+
+/**
+ * Shape of the payload jsonb for a `dm_request_declined` notification. Sent
+ * to the *initiator* when the recipient declines their conversation request.
+ * The conversation row no longer exists by the time this notification reaches
+ * the client, so we inline the recipient's display name (lookup would 404).
+ */
+export type DmRequestDeclinedPayload = {
+  conversation_id: string;
+  recipient_user_id: string;
+  recipient_display_name: string;
+};
+
+/**
+ * Insert a `dm_request_declined` notification for the initiator and fan it
+ * out the same way `emitDmRequestNotification` does. Conversation row is
+ * already gone by the time we call this — pass the recipient display name in
+ * so we don't try a doomed join.
+ */
+export async function emitDmRequestDeclinedNotification(args: {
+  conversationId: string;
+  initiatorUserId: string;
+  recipientUserId: string;
+  recipientDisplayName: string;
+}): Promise<void> {
+  const payload: DmRequestDeclinedPayload = {
+    conversation_id: args.conversationId,
+    recipient_user_id: args.recipientUserId,
+    recipient_display_name: args.recipientDisplayName,
+  };
+
+  const [row] = await db
+    .insert(notifications)
+    .values({
+      userId: args.initiatorUserId,
+      type: "dm_request_declined",
+      payload,
+    })
+    .returning();
+  if (!row) return;
+
+  await redis.publish(
+    REDIS_CHANNELS.NOTIFICATION_BROADCAST,
+    JSON.stringify({
+      notifs: [
+        {
+          id: row.id,
+          userId: row.userId,
+          type: row.type,
+          payload: row.payload,
+          createdAt: row.createdAt.toISOString(),
+        },
+      ],
     }),
   );
 }

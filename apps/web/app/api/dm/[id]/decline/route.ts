@@ -1,22 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
-import { dmBlocks, dmConversations } from "@legends/db/schema";
+import { dmConversations, users } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { assertParticipant, recipientUserIds } from "@/lib/dm";
-import { markDmRequestNotificationsRead, publishDmConversationUpdated } from "@/lib/dm-requests";
+import {
+  emitDmRequestDeclinedNotification,
+  markDmRequestNotificationsRead,
+  publishDmConversationUpdated,
+} from "@/lib/dm-requests";
 
 /**
  * Decline a pending DM request. Recipient-only — the initiator can't "decline"
  * their own outgoing request (they'd just leave it pending; a separate
  * cancel path is out of scope).
  *
- * Decline = soft block: writes a `dm_blocks` row from the recipient to the
- * initiator and flips the conversation to `state='blocked'`. This is the same
- * shape as the existing `/api/dm/[id]/block` endpoint, but we keep them as
- * distinct routes because the UI semantics differ — decline is a one-click
- * action on an unaccepted request, block is a moderation action on an open
- * thread — and the audit story is clearer if they don't share a path.
+ * Decline = delete. The conversation row is dropped (cascade across
+ * `dm_participants` and `dm_messages` via FK), and a `dm_request_declined`
+ * notification is created for the initiator so they learn what happened.
+ * The decline path is no longer a soft-block — that's what the separate
+ * `/api/dm/[id]/block` endpoint is for; this makes the two intents
+ * independent and avoids surprising the recipient with an implicit block.
  *
  * Also clears the `dm_request` notification badge for this conversation.
  */
@@ -40,23 +44,48 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "cannot decline own request" }, { status: 403 });
   }
 
-  // Block the initiator (and any other user peers — there should only be one
-  // in 1:1 DMs, but the helper handles it generically).
+  // Compute the peer fan-out list BEFORE deleting the conversation — once the
+  // cascade fires, dm_participants is empty and recipientUserIds would return
+  // []. Also resolve the recipient (this user's) display name for the inline
+  // notification payload; the conversation will not exist by the time the
+  // initiator's client renders the badge, so we can't join from there.
   const peers = await recipientUserIds(id, user.id);
-  for (const p of peers) {
-    await db
-      .insert(dmBlocks)
-      .values({ blockerUserId: user.id, blockedUserId: p })
-      .onConflictDoNothing();
-  }
-  await db.update(dmConversations).set({ state: "blocked" }).where(eq(dmConversations.id, id));
+  const [me] = await db
+    .select({ displayName: users.displayName })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
+  const recipientDisplayName = me?.displayName ?? "Someone";
+
+  // Clear any open badge before we delete, so the cleanup query has a stable
+  // conversation_id to match on. (Strictly the cascade only touches dm_*
+  // tables, not notifications, but flush first for symmetry with accept.)
   await markDmRequestNotificationsRead({ recipientUserId: user.id, conversationId: id });
-  // Notify both sides so the initiator's sidebar drops/updates the row and the
-  // recipient's other sessions stay in sync. `peers` was computed above for
-  // the dm_blocks insert; reuse it as the fan-out list.
+
+  // Notify the initiator(s) of the decline so they get a bell update. The
+  // conversation row is about to vanish, so inline the recipient name —
+  // the receiver-side lookup would 404. We only fan to user-typed peers (bot
+  // peers don't have a notifications bell, and decline-on-bot DMs is a
+  // future-bug path we don't exercise today; bot DMs auto-accept).
+  for (const initiatorId of peers) {
+    await emitDmRequestDeclinedNotification({
+      conversationId: id,
+      initiatorUserId: initiatorId,
+      recipientUserId: user.id,
+      recipientDisplayName,
+    });
+  }
+
+  // Drop the conversation. `dm_participants` and `dm_messages` both declare
+  // `onDelete: 'cascade'`, so this single DELETE removes the whole graph.
+  await db.delete(dmConversations).where(eq(dmConversations.id, id));
+
+  // Tell every participant's other sessions to drop the sidebar row. State
+  // `"declined"` is synthetic — there is no row to re-fetch, so the WS
+  // handler must remove rather than refresh.
   await publishDmConversationUpdated({
     conversationId: id,
-    state: "blocked",
+    state: "declined",
     userIds: [user.id, ...peers],
   });
 

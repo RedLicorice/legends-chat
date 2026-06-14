@@ -625,7 +625,10 @@ subClient.on("message", (channel, message) => {
       // ChatListPane can refresh the server snapshot (incoming/state flip).
       const { conversationId, state, userIds } = JSON.parse(message) as {
         conversationId: string;
-        state: "pending" | "accepted" | "blocked";
+        // `"declined"` is a synthetic state — there is no DB row for it (the
+        // decline handler deletes the conversation). It's a signal to clients
+        // that the row should be dropped from sidebars.
+        state: "pending" | "accepted" | "blocked" | "declined";
         userIds: string[];
       };
       for (const uid of userIds) {
