@@ -110,6 +110,7 @@ export function DmRightPane({ id }: Props) {
           isE2ee: data.conversation.isE2ee,
           e2eeRoomId: data.conversation.e2eeRoomId,
           state: data.conversation.state,
+          incoming: data.conversation.incoming,
           peer: data.conversation.peer,
         },
       }}

@@ -18,6 +18,8 @@ export interface DmPayload {
     isE2ee: boolean;
     e2eeRoomId: string | null;
     state: "pending" | "accepted" | "blocked";
+    /** true when the current user is the recipient of a pending request. */
+    incoming: boolean;
     peer: {
       type: "user" | "bot";
       id: string;

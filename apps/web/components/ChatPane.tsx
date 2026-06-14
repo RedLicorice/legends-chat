@@ -129,6 +129,8 @@ export interface ChatPaneDmMode {
     isE2ee: boolean;
     e2eeRoomId: string | null;
     state: "pending" | "accepted" | "blocked";
+    /** true when the current user is the recipient of a pending request (i.e. NOT the sender). */
+    incoming: boolean;
     peer: { type: "user" | "bot"; id: string; displayName: string; avatarUrl: string | null } | null;
   };
 }
@@ -1445,7 +1447,9 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold truncate">{headerTitle}</h1>
             <p className="text-xs text-muted">
-              {dmConversation.state === "pending" ? "Conversation request" : "Conversation blocked"}
+              {dmConversation.state === "pending"
+                ? (dmConversation.incoming ? "Conversation request" : "Awaiting reply")
+                : "Conversation blocked"}
             </p>
           </div>
         </header>
@@ -1453,10 +1457,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           <div className="rounded-2xl border border-border bg-panel p-6 max-w-md w-full text-center space-y-3">
             <h2 className="text-base font-semibold">
               {dmConversation.state === "pending"
-                ? `${dmConversation.peer?.displayName ?? "Someone"} wants to chat`
+                ? (dmConversation.incoming
+                    ? `${dmConversation.peer?.displayName ?? "Someone"} wants to chat`
+                    : `Waiting for ${dmConversation.peer?.displayName ?? "them"} to accept`)
                 : "This conversation is blocked"}
             </h2>
-            {dmConversation.state === "pending" && (
+            {dmConversation.state === "pending" && dmConversation.incoming && (
               <div className="flex gap-2 justify-center">
                 <button
                   type="button"
@@ -1483,6 +1489,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                   className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-medium text-danger"
                 >Block</button>
               </div>
+            )}
+            {dmConversation.state === "pending" && !dmConversation.incoming && (
+              <p className="text-sm text-muted">
+                Your first message is waiting for the other side to accept. You'll be able to send more once they do.
+              </p>
             )}
           </div>
         </div>

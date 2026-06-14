@@ -84,6 +84,7 @@ function dmPayload(overrides: Partial<DmPayload["conversation"]> = {}): DmPayloa
       isE2ee: true,
       e2eeRoomId: "room-key-1",
       state: "accepted",
+      incoming: false,
       peer: {
         type: "bot",
         id: "bot-1",

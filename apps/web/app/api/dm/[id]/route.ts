@@ -27,6 +27,8 @@ export async function GET(
       isE2ee: dmConversations.isE2ee,
       e2eeRoomId: dmConversations.e2eeRoomId,
       state: dmConversations.state,
+      initiatorType: dmConversations.initiatorType,
+      initiatorId: dmConversations.initiatorId,
     })
     .from(dmConversations)
     .where(eq(dmConversations.id, id))
@@ -85,6 +87,10 @@ export async function GET(
       isE2ee: conv.isE2ee,
       e2eeRoomId: conv.e2eeRoomId,
       state: conv.state,
+      // `incoming` = current user is the recipient of the pending request
+      // (i.e. NOT the initiator). Sender sees a "waiting for them" message;
+      // recipient sees Accept/Decline/Block.
+      incoming: !(conv.initiatorType === "user" && conv.initiatorId === user.id),
       peer,
     },
   });
