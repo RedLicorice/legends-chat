@@ -777,6 +777,33 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     };
   }, [source, conversationKey, isFeed, isTopicMode, topic]);
 
+  // Sender-side decline handler. When the recipient declines a DM request,
+  // the conversation row is deleted server-side and ChatListContext fans out
+  // a `dm:conversation:declined` custom event. If we're currently viewing
+  // that conv, hop back to home and surface a toast via sessionStorage —
+  // HomeRightPane reads + clears the key on mount. We use sessionStorage
+  // (not a global toast service) because no toast infra exists yet and the
+  // SPA shell already mounts HomeRightPane right after navigation.
+  useEffect(() => {
+    if (!isDmMode || !dmConversation) return;
+    const onDeclined = (e: Event) => {
+      const detail = (e as CustomEvent<{ conversationId: string }>).detail;
+      if (!detail || detail.conversationId !== dmConversation.id) return;
+      try {
+        sessionStorage.setItem(
+          "legends:dm:declined-notice",
+          dmConversation.peer?.displayName ?? "The recipient",
+        );
+      } catch {
+        // sessionStorage may throw in privacy modes — fall through; the
+        // navigation still happens, the toast just won't render.
+      }
+      window.location.href = "/";
+    };
+    window.addEventListener("dm:conversation:declined", onDeclined);
+    return () => window.removeEventListener("dm:conversation:declined", onDeclined);
+  }, [isDmMode, dmConversation]);
+
   // Scroll to bottom when keyboard opens/closes so latest messages stay visible
   useEffect(() => {
     const vv = window.visualViewport;
@@ -1431,6 +1458,23 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         .join(", ");
 
   if (isDmMode && dmConversation && dmConversation.state !== "accepted") {
+    // Recipient on a pending request: surface the sender's first message as a
+    // preview so they're not asked to make a decision sight-unseen. Messages
+    // for pending DMs are accessible via assertParticipant; the chat source
+    // already subscribes on mount. For E2EE rows we can't show plaintext
+    // here (the key share happens after accept), so render an explanatory
+    // placeholder.
+    const firstMessage =
+      dmConversation.state === "pending" && dmConversation.incoming
+        ? messages[0] ?? null
+        : null;
+    const firstMessagePreview = firstMessage
+      ? firstMessage.ciphertextJson
+        ? null
+        : firstMessage.text ?? ""
+      : null;
+    const peerName = dmConversation.peer?.displayName ?? "them";
+
     return (
       <section className="flex h-full min-h-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-4 pt-[calc(1rem+var(--sat))] md:px-6">
@@ -1459,9 +1503,25 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
               {dmConversation.state === "pending"
                 ? (dmConversation.incoming
                     ? `${dmConversation.peer?.displayName ?? "Someone"} wants to chat`
-                    : `Waiting for ${dmConversation.peer?.displayName ?? "them"} to accept`)
+                    : `Waiting for ${peerName} to accept your message.`)
                 : "This conversation is blocked"}
             </h2>
+            {dmConversation.state === "pending" && dmConversation.incoming && firstMessage && (
+              <div className="rounded-lg border border-border bg-panel2 p-3 text-left">
+                <p className="mb-1 text-[11px] uppercase tracking-wide text-muted">
+                  First message
+                </p>
+                {firstMessagePreview != null ? (
+                  <p className="whitespace-pre-wrap break-words text-sm text-text">
+                    {firstMessagePreview}
+                  </p>
+                ) : (
+                  <p className="text-xs italic text-muted">
+                    Encrypted — visible after you accept.
+                  </p>
+                )}
+              </div>
+            )}
             {dmConversation.state === "pending" && dmConversation.incoming && (
               <div className="flex gap-2 justify-center">
                 <button
@@ -1489,11 +1549,6 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                   className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-medium text-danger"
                 >Block</button>
               </div>
-            )}
-            {dmConversation.state === "pending" && !dmConversation.incoming && (
-              <p className="text-sm text-muted">
-                Your first message is waiting for the other side to accept. You'll be able to send more once they do.
-              </p>
             )}
           </div>
         </div>

@@ -204,12 +204,41 @@ export function ChatListProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Conversation lifecycle (accept/decline). Backend emits this from:
-    //   POST /api/dm/${id}/accept
-    //   POST /api/dm/${id}/decline
-    // v1: always request a refresh; the page owns the re-fetch.
-    socket.on(WS_EVENTS.DM_CONVERSATION_UPDATED, () => {
-      window.dispatchEvent(new CustomEvent("chatlist:refresh"));
-    });
+    //   POST /api/dm/${id}/accept    → state="accepted"
+    //   POST /api/dm/${id}/decline   → state="declined" (synthetic: the row
+    //                                  was deleted, do NOT refresh — refresh
+    //                                  would race with the server snapshot
+    //                                  and still drop the row, but skipping
+    //                                  avoids the flash and a wasted GET).
+    // For accept (and any future state we don't have a local handler for),
+    // dispatch the existing refresh signal so the page owner re-fetches.
+    socket.on(
+      WS_EVENTS.DM_CONVERSATION_UPDATED,
+      (u: { conversationId: string; state: string }) => {
+        if (u?.state === "declined") {
+          setItems((prev) =>
+            prev.filter(
+              (it) =>
+                !(
+                  (it.kind === "dm-user" || it.kind === "dm-bot") &&
+                  it.id === u.conversationId
+                ),
+            ),
+          );
+          // Also surface to any open page (e.g. ChatPane on /c/<id>) so the
+          // sender — who may currently be viewing this conv — can navigate
+          // away and show a toast. The event carries the convId so the
+          // listener can match its current route.
+          window.dispatchEvent(
+            new CustomEvent("dm:conversation:declined", {
+              detail: { conversationId: u.conversationId },
+            }),
+          );
+          return;
+        }
+        window.dispatchEvent(new CustomEvent("chatlist:refresh"));
+      },
+    );
 
     return () => {
       const w = window as unknown as { __chatListSocket?: Socket };

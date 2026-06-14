@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { X } from "lucide-react";
 import { AppShellMobileBar } from "@/components/AppShell";
 import { PWASplash } from "@/components/PWASplash";
 import { useMe } from "@/lib/hooks/use-me";
 import { useChatList } from "@/lib/hooks/use-chat-list";
+
+// Read-once sessionStorage key used by ChatPane to surface "your DM request
+// was declined" copy after the sender's open conversation was deleted. The
+// home page is the natural landing spot — ChatPane navigates here on the
+// `dm:conversation:declined` event.
+const DM_DECLINED_NOTICE_KEY = "legends:dm:declined-notice";
 
 /**
  * `/` right pane. Banner + welcome card + "no chats yet" empty state.
@@ -18,6 +25,23 @@ export function HomeRightPane() {
   const router = useRouter();
   const { me } = useMe();
   const { data, status: listStatus } = useChatList();
+
+  // Read + clear the sessionStorage notice on mount so it shows exactly once.
+  // ChatPane sets it just before navigating here when a DM request was
+  // declined remotely. Wrap access in a try/catch — sessionStorage can throw
+  // in privacy modes.
+  const [declinedNotice, setDeclinedNotice] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const v = sessionStorage.getItem(DM_DECLINED_NOTICE_KEY);
+      if (v) {
+        setDeclinedNotice(v);
+        sessionStorage.removeItem(DM_DECLINED_NOTICE_KEY);
+      }
+    } catch {
+      // best-effort; fall through silently
+    }
+  }, []);
 
   // If the admin configured a default home topic, jump to it. Replicates the
   // effect that lived in HomeView.tsx before the shell refactor.
@@ -36,6 +60,25 @@ export function HomeRightPane() {
   return (
     <>
       <AppShellMobileBar />
+      {declinedNotice && (
+        <div
+          role="status"
+          className="relative z-20 mx-auto mt-3 flex w-full max-w-xl items-start gap-2 rounded-md border border-border bg-panel2 px-3 py-2 text-sm text-text shadow-sm"
+        >
+          <div className="flex-1">
+            Your message request to{" "}
+            <span className="font-medium">{declinedNotice}</span> was declined.
+          </div>
+          <button
+            type="button"
+            onClick={() => setDeclinedNotice(null)}
+            className="rounded p-0.5 text-muted hover:bg-panel hover:text-text"
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       <div className="relative flex flex-1 min-h-0 flex-col overflow-y-auto overflow-x-hidden">
         {bannerConfig ? (
           <>

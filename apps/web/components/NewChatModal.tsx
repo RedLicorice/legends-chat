@@ -97,12 +97,19 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
     if (busyId) return;
     setError(null);
     setBusyId(hit.id);
-    // Per-row E2EE decision. Users are always E2EE-capable; bots only when
-    // their e2ee_state is "ready". The server's POST /api/dm enforces this
-    // (see BOT_E2EE_ERROR_CODES) — this is just to avoid a guaranteed-400.
-    const isHitE2eeCapable =
-      hit.type === "user" || (hit.type === "bot" && hit.e2eeState === "ready");
-    const wantE2EE = requestE2EE && isHitE2eeCapable;
+    // User peers no longer create a conversation directly — they go to the
+    // compose UI, which gathers a first message before POSTing /api/dm.
+    // Bots still auto-accept and have no first-message gate, so the legacy
+    // direct-POST path is preserved for them.
+    if (hit.type === "user") {
+      onClose();
+      router.push(`/c/new?peer=${encodeURIComponent(hit.id)}`);
+      setBusyId(null);
+      return;
+    }
+    // Bot peer path. E2EE is gated on the bot's e2ee_state ("ready" only);
+    // the server enforces the same constraint via BOT_E2EE_ERROR_CODES.
+    const wantE2EE = requestE2EE && hit.e2eeState === "ready";
     try {
       const r = await apiFetch("/api/dm", {
         method: "POST",
@@ -172,28 +179,31 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
             />
           </div>
 
-          {/* E2EE toggle. Bots are E2EE-capable once their e2ee_state is
-              "ready" (per bot E2EE state-machine). Users are always capable.
-              The checkbox is disabled when none of the current search hits
-              support E2EE so the affordance can't mislead. */}
+          {/* E2EE toggle. v1 caveat: user-to-user E2EE-from-first-message is
+              not supported (the room key derives from the conversation id,
+              which doesn't exist until first send), so the checkbox only
+              applies to bot peers in the ready state. The compose flow for
+              user peers always sends plaintext; users can enable E2EE later
+              once the recipient accepts (out of scope here). */}
           {(() => {
             const anyE2eeCapable =
               hits.length === 0 ||
-              hits.some(
-                (h) => h.type === "user" || (h.type === "bot" && h.e2eeState === "ready"),
-              );
+              hits.some((h) => h.type === "bot" && h.e2eeState === "ready");
+            const onlyUsers =
+              hits.length > 0 && hits.every((h) => h.type === "user");
             const disabled = hits.length > 0 && !anyE2eeCapable;
+            const title = disabled
+              ? onlyUsers
+                ? "End-to-end encryption is enabled per-conversation after the recipient accepts."
+                : "This bot isn't ready for end-to-end encryption yet."
+              : undefined;
             return (
               <label
                 className={cn(
                   "mt-3 flex items-center gap-2 text-xs text-muted",
                   disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                 )}
-                title={
-                  disabled
-                    ? "This bot isn't ready for end-to-end encryption yet."
-                    : undefined
-                }
+                title={title}
               >
                 <input
                   type="checkbox"
@@ -205,7 +215,9 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
                 <Lock className="h-3 w-3" />
                 <span>
                   {disabled
-                    ? "Encrypt this chat (bot not ready)"
+                    ? onlyUsers
+                      ? "Encrypt this chat (enable after accept)"
+                      : "Encrypt this chat (bot not ready)"
                     : "Encrypt this chat"}
                 </span>
               </label>
@@ -233,9 +245,11 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
               {hits.map((h) => {
                 const isBot = h.type === "bot";
                 const isBusy = busyId === h.id;
-                // Mirror startChat's gate: users always, bots only when ready.
+                // Mirror startChat's gate: only bots in "ready" can ride the
+                // first-send-with-E2EE path; users always send plaintext for
+                // the opening message in v1.
                 const isHitE2eeCapable =
-                  h.type === "user" || (h.type === "bot" && h.e2eeState === "ready");
+                  h.type === "bot" && h.e2eeState === "ready";
                 const wantE2EE = requestE2EE && isHitE2eeCapable;
                 return (
                   <li key={`${h.type}:${h.id}`}>

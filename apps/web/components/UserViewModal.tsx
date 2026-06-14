@@ -1,12 +1,16 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
-
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Shield, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { PERMISSIONS } from "@legends/shared";
 import { useMe } from "@/lib/hooks/use-me";
+
+// Note: openDm() no longer POSTs /api/dm itself — that endpoint now requires a
+// first message body for user peers, and the modal isn't the right place to
+// gather it. We navigate to /c/new?peer=<id>, which renders DmComposeNewView
+// and handles the create-conversation-on-first-send dance.
 
 interface UserProfile {
   id: string;
@@ -27,8 +31,6 @@ export function UserViewModal({ userId, viewerPermissions, onClose }: Props) {
   const { me } = useMe();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dmBusy, setDmBusy] = useState(false);
-  const [dmError, setDmError] = useState<string | null>(null);
 
   const canAdmin = viewerPermissions.includes(PERMISSIONS.ADMIN_CONFIG);
 
@@ -43,23 +45,13 @@ export function UserViewModal({ userId, viewerPermissions, onClose }: Props) {
   const initials = profile?.displayName.slice(0, 1).toUpperCase() ?? "?";
   const isSelf = !!me && !!profile && me.id === profile.id;
 
-  async function openDm() {
+  function openDm() {
     if (!profile) return;
-    setDmBusy(true);
-    setDmError(null);
-    const res = await apiFetch("/api/dm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ peerType: "user", peerId: profile.id }),
-    });
-    if (!res.ok) {
-      setDmBusy(false);
-      setDmError("Could not open DM");
-      return;
-    }
-    const data = (await res.json()) as { id: string };
     onClose();
-    router.push(`/c/${data.id}`);
+    // Compose UI owns the actual /api/dm POST — it requires a first message,
+    // and the previous "DM user" button bypassed that and left orphaned
+    // pending rows.
+    router.push(`/c/new?peer=${encodeURIComponent(profile.id)}`);
   }
 
   return (
@@ -101,12 +93,10 @@ export function UserViewModal({ userId, viewerPermissions, onClose }: Props) {
                 <button
                   type="button"
                   onClick={openDm}
-                  disabled={dmBusy}
-                  className="flex items-center justify-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-panel2 transition disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-panel2 transition"
                 >
-                  <MessageSquare className="h-4 w-4" /> {dmBusy ? "Opening…" : "DM User"}
+                  <MessageSquare className="h-4 w-4" /> DM User
                 </button>
-                {dmError && <p className="text-xs text-danger">{dmError}</p>}
               </div>
             )}
             {canAdmin && (
