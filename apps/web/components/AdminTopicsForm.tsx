@@ -129,7 +129,66 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
   const [createError, setCreateError] = useState<string | null>(null);
   const [grants, setGrants] = useState<Grant[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(false);
+  // Bulk-selection state — Set<topicId>. Stays unchanged across sort/filter
+  // changes; if a topic scrolls out of view it remains selected but the row
+  // checkbox is just not rendered (fine for v1).
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(() => new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const router = useRouter();
+
+  const allSelected = topics.length > 0 && bulkSelected.size === topics.length;
+  const someSelected = bulkSelected.size > 0 && !allSelected;
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  function toggleSelected(id: string, checked: boolean) {
+    setBulkSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setBulkSelected(checked ? new Set(topics.map((t) => t.id)) : new Set());
+  }
+
+  function clearBulkSelection() {
+    setBulkSelected(new Set());
+    setBulkError(null);
+  }
+
+  async function bulkDelete() {
+    const ids = Array.from(bulkSelected);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      const res = await apiFetch("/api/admin/topics/bulk", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "delete", ids }),
+      });
+      if (!res.ok) throw new Error("bulk delete failed");
+      const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
+      const deletedSet = new Set(data.ids);
+      setTopics((prev) => prev.filter((t) => !deletedSet.has(t.id)));
+      if (selected && deletedSet.has(selected)) setSelected(null);
+      setBulkSelected(new Set());
+      setBulkConfirmOpen(false);
+      router.refresh();
+    } catch {
+      setBulkError("Delete failed");
+      // Keep selection so the user can retry.
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   useEffect(() => {
     apiFetch("/api/admin/roles")
@@ -359,7 +418,18 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
       {/* Left: topic list */}
       <div className={`flex-col border-r border-border bg-panel ${selected ? "hidden md:flex md:w-56 md:shrink-0" : "flex w-full md:w-56 md:shrink-0"}`}>
         <div className="flex items-center justify-between border-b border-border p-3">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted">Topics</span>
+          <div className="flex items-center gap-2">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              className="accent-accent"
+              aria-label="Select all topics"
+              checked={allSelected}
+              onChange={(e) => toggleSelectAll(e.target.checked)}
+              disabled={topics.length === 0}
+            />
+            <span className="text-xs font-medium uppercase tracking-wide text-muted">Topics</span>
+          </div>
           <button
             type="button"
             onClick={() => { setSelected("__new__"); setCreateForm(EMPTY_CREATE); setCreateError(null); }}
@@ -368,28 +438,103 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
             <Plus className="h-3.5 w-3.5" /> New
           </button>
         </div>
+
+        {/* Bulk action bar — sticky above the scrolling list */}
+        {bulkSelected.size > 0 && (
+          <div className="sticky top-0 z-10 flex flex-col gap-1.5 border-b border-border bg-panel2 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-text">{bulkSelected.size} selected</span>
+              <button
+                type="button"
+                onClick={clearBulkSelection}
+                disabled={bulkBusy}
+                className="text-xs text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-50"
+              >
+                Clear
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBulkConfirmOpen(true)}
+              disabled={bulkBusy}
+              className="flex items-center justify-center gap-1 rounded-lg border border-danger px-2 py-1 text-xs text-danger hover:bg-danger hover:text-white disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {bulkBusy ? "Deleting…" : "Delete selected"}
+            </button>
+            {bulkError && <p className="text-[11px] text-danger">{bulkError}</p>}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto">
           {topics.length === 0 && <p className="p-4 text-xs text-muted">No topics yet.</p>}
           {topics.map((t) => (
-            <button
+            <div
               key={t.id}
-              type="button"
-              onClick={() => setSelected(t.id)}
-              className={`w-full border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-panel2 ${selected === t.id ? "border-l-2 border-l-accent bg-panel2" : ""}`}
+              className={`flex items-start gap-2 border-b border-border px-3 py-2.5 transition-colors hover:bg-panel2 ${selected === t.id ? "border-l-2 border-l-accent bg-panel2" : ""}`}
             >
-              <div className="truncate text-sm font-medium">{t.title}</div>
-              <div className="truncate font-mono text-xs text-muted">#{t.slug}</div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {t.isFeed && <span className="rounded bg-accent/10 px-1 text-[10px] text-accent">Feed</span>}
-                {t.isHomeTopic && <span className="rounded bg-accent/10 px-1 text-[10px] text-accent">Home</span>}
-                {t.isSticky && <span className="rounded border border-border bg-panel2 px-1 text-[10px] text-muted">Sticky</span>}
-                {t.isE2ee && <span className="rounded bg-green-500/10 px-1 text-[10px] text-green-400">E2EE</span>}
-                {t.isP2p && <span className="rounded bg-blue-500/10 px-1 text-[10px] text-blue-400">P2P</span>}
-              </div>
-            </button>
+              <input
+                type="checkbox"
+                className="mt-1 shrink-0 accent-accent"
+                aria-label={`Select topic ${t.title}`}
+                checked={bulkSelected.has(t.id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => toggleSelected(t.id, e.target.checked)}
+              />
+              <button
+                type="button"
+                onClick={() => setSelected(t.id)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <div className="truncate text-sm font-medium">{t.title}</div>
+                <div className="truncate font-mono text-xs text-muted">#{t.slug}</div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {t.isFeed && <span className="rounded bg-accent/10 px-1 text-[10px] text-accent">Feed</span>}
+                  {t.isHomeTopic && <span className="rounded bg-accent/10 px-1 text-[10px] text-accent">Home</span>}
+                  {t.isSticky && <span className="rounded border border-border bg-panel2 px-1 text-[10px] text-muted">Sticky</span>}
+                  {t.isE2ee && <span className="rounded bg-green-500/10 px-1 text-[10px] text-green-400">E2EE</span>}
+                  {t.isP2p && <span className="rounded bg-blue-500/10 px-1 text-[10px] text-blue-400">P2P</span>}
+                </div>
+              </button>
+            </div>
           ))}
         </div>
       </div>
+
+      {/* Bulk delete confirmation modal */}
+      {bulkConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm bulk delete topics"
+        >
+          <div className="w-full max-w-md rounded-xl border border-border bg-panel p-5 shadow-xl">
+            <h5 className="mb-2 text-sm font-semibold">Delete {bulkSelected.size} topics?</h5>
+            <p className="mb-4 text-xs text-muted">
+              Delete {bulkSelected.size} topic{bulkSelected.size === 1 ? "" : "s"} and all their messages? This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBulkConfirmOpen(false)}
+                disabled={bulkBusy}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-text disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void bulkDelete()}
+                disabled={bulkBusy}
+                className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {bulkBusy ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Right: detail */}
       <div className={`flex-1 overflow-y-auto bg-panel ${selected ? "flex" : "hidden md:flex"} flex-col`}>
