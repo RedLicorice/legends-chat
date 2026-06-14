@@ -23,6 +23,7 @@ import { HomeRightPane } from "@/components/views/HomeRightPane";
 import { TopicRightPane } from "@/components/views/TopicRightPane";
 import { DMListView } from "@/components/views/DMListView";
 import { DmRightPane } from "@/components/views/DmRightPane";
+import { DmComposeNewView } from "@/components/views/DmComposeNewView";
 import { SettingsView } from "@/components/views/SettingsView";
 import { AdminOverviewView } from "@/components/views/AdminOverviewView";
 import { AdminBansView } from "@/components/views/AdminBansView";
@@ -285,6 +286,11 @@ function resolveAuthedRoute(
   if (path.startsWith("/t/")) {
     const slug = path.slice(3).split("/")[0] || "";
     return { ...chatBase, mainContent: <TopicRightPane slug={slug} /> };
+  }
+  if (path === "/c/new") {
+    // First-message compose UI — no conversation row exists yet. Read peer
+    // id from `?peer=` inside the view; see DmComposeNewView.
+    return { ...chatBase, mainContent: <DmComposeNewView /> };
   }
   if (path.startsWith("/c/")) {
     const id = path.slice(3).split("/")[0] || "";
