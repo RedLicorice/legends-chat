@@ -1,26 +1,20 @@
 # Legends Chat — Administrator Manual
 
-This manual covers the admin panel: what each section does, how
-permissions and grants resolve, the bot E2EE state machine, the
-upload and link pipelines, settings, themes, and moderation.
-
-For the user-facing tour, see `docs/manual.md`. For the security
-posture and trust model, see `docs/whitepaper.md`.
+Covers the admin panel: each section, permission resolution, the
+bot E2EE state machine, upload and link pipelines, settings,
+themes, and moderation. User tour: `docs/manual.md`. Trust model:
+`docs/whitepaper.md`.
 
 ---
 
 ## Access & Roles
 
-The admin panel is mounted at `/admin`. Access requires either the
-`admin.config` permission (full panel) or the
-`moderation.queue.review` permission (queue-only). Staff who hold
-either see an **Admin** link in the sidebar footer.
-
-All admin views render inside the persistent SPA shell — opening
-`/admin/<section>` does not tear down your sidebar or live socket.
-Every admin view uses the same layout container
-(`<section className="flex-1 p-4 sm:p-8">`) so widths and spacing
-are uniform across the panel.
+The admin panel is mounted at `/admin`. Access requires
+`admin.config` (full panel) or `moderation.queue.review`
+(queue-only). Staff with either see an **Admin** link in the
+sidebar footer. All admin views render inside the persistent SPA
+shell — opening `/admin/<section>` doesn't tear down your sidebar
+or live socket.
 
 | Section | Route |
 |---|---|
@@ -41,7 +35,7 @@ are uniform across the panel.
 
 ## Topics (Channels)
 
-`/admin/topics` lists every channel. Click one to open the editor.
+`/admin/topics` lists every channel; click one to open the editor.
 
 ### Channel fields
 
@@ -49,90 +43,67 @@ are uniform across the panel.
 |---|---|
 | Title | Display name in the channel list |
 | Slug | URL-safe identifier (`/t/<slug>`) |
-| Description | Short summary shown in the channel info modal |
-| Icon URL | Image used as the channel icon |
-| Banner URL | Wide image shown at the top of the channel |
-| Sort Order | Integer controlling position in the channel list |
+| Description | Shown in the channel info modal |
+| Icon URL / Banner URL | Channel icon and wide header image |
+| Sort Order | Integer position in the channel list |
 
 ### Channel toggles
 
-- **Sticky** — pins the channel to the top of every member's list.
+- **Sticky** — pins to the top of every member's list.
 - **Feed Mode** — bulletin-board layout (`Ctrl+Enter` to post).
-- **E2EE Mode** — Matrix Megolm end-to-end encryption. **Disables
-  history visibility for new members** automatically (enforced at
-  the DB level via `topics_e2ee_history_chk`). Plaintext bot
-  members are rejected; bot membership requires the bot to be
-  E2EE-`ready`.
-- **P2P Mode** — WebRTC direct connections. Configure max
-  participants, STUN, and (optional) TURN.
-- **Home Topic** — marks this channel as the welcome landing.
-- **History Visible to New Members** — whether late joiners can
-  read prior history. Forced off on E2EE topics.
+- **E2EE Mode** — Matrix Megolm. **Disables history visibility
+  for new members** automatically (enforced via
+  `topics_e2ee_history_chk`). Plaintext bot members rejected; bot
+  membership requires E2EE-`ready`.
+- **P2P Mode** — WebRTC direct. Configure max participants, STUN,
+  and (optional) TURN.
+- **Home Topic** — welcome landing channel.
+- **History Visible to New Members** — late joiners read prior
+  history. Forced off on E2EE topics.
 
 ### Auto-delete rules
 
-Per-channel age and/or count thresholds:
-
-- **Delete by age** — remove messages older than N seconds.
-- **Delete by count** — keep only the most recent N messages.
-
-The auto-delete loop runs on a single elected server process
-(leader-locked in Redis) to avoid duplicate work.
+Per-channel thresholds: **Delete by age** (older than N seconds)
+or **Delete by count** (keep only the most recent N messages). The
+loop runs on a single elected server process (leader-locked in
+Redis).
 
 ### Topic principals — per-channel grants
 
-The topic editor's **Permissions** section lets you grant or deny
-per-principal access at a finer granularity than the role system.
-A **principal** is one of:
+The topic editor's **Permissions** section grants or denies
+per-principal access at finer granularity than the role system. A
+**principal** is a **user**, **bot**, or **role**.
 
-- a **user** (specific account)
-- a **bot** (specific bot account)
-- a **role** (every member with that role)
+Each grant is `(principal, action, effect, expiresAt?)` —
+`action` is `view`/`read`/`post`/`reply`, `effect` is
+`allow`/`deny`, `expiresAt` is optional (the row fades once past).
+Add via the principal search. Stored in `topic_grants` and
+`topic_bots`; the latter also lets a bot be a full channel member.
 
-Each grant is a tuple `(principal, action, effect, expiresAt?)`:
-
-- `action` is `view`, `read`, `post`, or `reply`.
-- `effect` is `allow` or `deny`.
-- `expiresAt` is optional; the row visually fades once past.
-
-Add a grant via the principal search (type to find a user or bot),
-then pick action + effect + optional expiry. Grants are stored in
-`topic_grants` and `topic_bots`; the latter also lets a bot be a
-fully-fledged channel member.
-
-For E2EE topics, only **ready** bots can be added — see the Bots
-section.
+For E2EE topics, only **ready** bots can be added — see Bots.
 
 ---
 
 ## Users
 
-`/admin/users` is the user directory.
-
-### Per-user fields
-
-Each row shows display name + avatar, role, last seen, account
-creation date, and invite chain (who invited them, and who
-invited that person).
+`/admin/users` is the user directory. Each row shows display name +
+avatar, role, last seen, account creation date, and invite chain.
 
 ### Actions
 
-- **Change role** — assign a built-in role (`user`, `moderator`,
-  `admin`) or any custom role. Effective immediately.
+- **Change role** — `user`, `moderator`, `admin`, or any custom
+  role. Effective immediately.
 - **Per-permission overrides** — `PUT
-  /api/admin/users/[id]/permission-overrides` to add an explicit
-  allow or deny for any permission. The override is validated
-  against the `PERMISSIONS` constant + the `topic.{slug}.{action}`
-  regex; unknown permissions are rejected with 400. Overrides
-  layer over role permissions: `allow` adds, `deny` removes.
-- **Ban** — with a reason and optional expiry. Indefinite bans
-  remain until lifted from `/admin/bans`. Requires
-  `users.ban.direct`.
-- **Mute** — per-topic mute with a reason and optional expiry.
-  Muted users can still read but cannot post. Requires
-  `users.mute.direct`.
-- **Sessions** — view active sessions, revoke individual sessions,
-  or revoke all sessions to force sign-out.
+  /api/admin/users/[id]/permission-overrides` adds an explicit
+  allow or deny. Validated against `PERMISSIONS` + the
+  `topic.{slug}.{action}` regex; unknown rejected with 400.
+  `allow` adds, `deny` removes from the role permissions.
+- **Ban** — reason + optional expiry. Indefinite bans persist
+  until lifted from `/admin/bans`. Requires `users.ban.direct`.
+- **Mute** — per-topic, reason + optional expiry. Muted users read
+  but cannot post. Requires `users.mute.direct`.
+- **Sessions** — view, revoke individually, or revoke all (force
+  sign-out).
 
 ---
 
@@ -144,19 +115,19 @@ invited that person).
 
 | Role | Default permissions |
 |---|---|
-| user | Delete own messages, edit own messages, flag, create invites, attach files |
+| user | Delete/edit own messages, flag, create invites, attach files |
 | moderator | All user perms + delete/edit any message, moderation queue, ban + mute (direct), mute lift, create topics, upload GIFs |
 | admin | All permissions |
 
-The `admin` role is `Object.values(PERMISSIONS)` — every
-permission in the schema. Migration `0034_backfill_role_permissions`
-keeps the role-permission rows seeded for fresh upgrades.
+The `admin` role is `Object.values(PERMISSIONS)`. Migration
+`0034_backfill_role_permissions` seeds role-permission rows on
+fresh upgrades.
 
 ### Custom roles
 
-Create named roles and assign any combination of the canonical
-permissions below. Custom roles can be assigned to users or set
-as the role granted to new invitees.
+Create named roles with any combination of canonical permissions
+below. Assignable to users or set as the role granted to new
+invitees.
 
 ### Permission reference
 
@@ -181,81 +152,71 @@ as the role granted to new invitees.
 | `content.attachment` | Upload file attachments in messages |
 | `content.gif.upload` | Upload GIFs to the community library |
 
-In addition to the canonical permissions above, **topic-scoped
-permissions** match the regex `topic.{slug}.{view|read|post|reply}`
-and can be used in user / bot permission overrides.
+**Topic-scoped permissions** match the regex
+`topic.{slug}.{view|read|post|reply}` and can be used in user/bot
+overrides.
 
 ---
 
 ## Bots
 
-`/admin/bots` manages bot accounts. Bot management requires the
-`bots.manage` permission.
+`/admin/bots` — bot accounts. Requires `bots.manage`.
 
 ### Creating a bot
 
-1. Create a bot account from `/admin/bots`. Copy the generated API
-   token immediately — the panel shows it once.
-2. Optionally provide a **webhook URL** — Legends Chat will POST
-   inbound messages to that endpoint so your bot service can react.
-3. Add the bot to channels either via the topic editor (`topic_bots`
-   row + optional grants) or via the bot's own admin settings.
+1. Create from `/admin/bots`. Copy the API token immediately —
+   shown once.
+2. Optionally set a **webhook URL** — Legends Chat POSTs inbound
+   messages there.
+3. Add the bot to channels via the topic editor (`topic_bots` +
+   optional grants) or the bot's settings.
 
-The bot SDK (`packages/bot-sdk`) provides the HTTP client most bot
-operators will use; it can also be run from a different machine
-than the chat server.
+The bot SDK (`packages/bot-sdk`) provides the HTTP client; it can
+run on a separate machine.
 
 ### DM enablement
 
-Each bot has a **DM enabled** boolean (`bots.dm_enabled`, added in
-migration 0036). Toggle it on to let users start 1:1 DMs with the
-bot from the New chat modal. Plaintext bot DMs work out of the
-box; E2EE bot DMs require the additional state machine below.
+Each bot has a **DM enabled** boolean (`bots.dm_enabled`, migration
+0036). Toggle on to let users start 1:1 DMs from the New chat
+modal. Plaintext bot DMs work out of the box; E2EE bot DMs need
+the state machine below.
 
 ### End-to-end encryption for bots
 
-The bot E2EE section in each bot's settings owns the state
-machine. Per-bot E2EE state has three values:
+Per-bot E2EE state has three values:
 
 | State | Badge | Meaning |
 |---|---|---|
 | `disabled` | gray "Disabled" | Bot does not participate in E2EE. New E2EE DMs / E2EE topic membership are refused. |
-| `pending` | yellow "Pending bot upload" | Admin enabled E2EE on this bot. Waiting for the bot's SDK to bootstrap an Olm device and upload its device + one-time keys. |
+| `pending` | yellow "Pending bot upload" | Admin enabled E2EE. Waiting for the SDK to bootstrap an Olm device and upload device + one-time keys. |
 | `ready` | green "Ready" | Bot uploaded keys. Can participate in E2EE DMs and E2EE topic channels. |
 
-When the bot is `ready`, the panel also shows:
-
-- **Device ID** (truncated for readability)
-- **Identity key fingerprint** (Ed25519 public key, grouped into
-  8-char blocks)
-- **Last keys upload at** (relative timestamp)
-- **Rotate identity** button — confirms in a modal before wiping
-  the server-side device record. Forces the SDK to bootstrap a
-  fresh identity on its next sync loop; existing E2EE
-  conversations with this bot are no longer decryptable.
+When `ready`, the panel also shows **Device ID** (truncated),
+**Identity key fingerprint** (Ed25519, 8-char blocks), **Last keys
+upload at**, and a **Rotate identity** button — confirms in a
+modal before wiping the server-side device record. Rotation forces
+the SDK to bootstrap a fresh identity on its next sync; existing
+E2EE conversations with this bot become undecryptable.
 
 State transitions:
 
-- **Admin flips toggle ON.** `disabled` → `pending`. Server writes
-  the new state; the bot's SDK detects it on the next
-  `/api/bot/v1/crypto/sync` poll and bootstraps an `OlmMachine`.
-- **Bot SDK uploads keys.** `pending` → `ready`. The
-  `/api/bot/v1/crypto/keys/upload` endpoint validates the upload
-  and transitions the state.
-- **Admin flips toggle OFF.** Any state → `disabled`. Existing
-  E2EE conversations stay decryptable for in-flight messages;
-  new E2EE conversations with this bot are refused.
-- **Admin clicks Rotate.** Server wipes the bot's device row +
-  schedules a `device_change_log` entry so peers re-query keys.
-  The SDK bootstraps a fresh identity on next sync.
+- **Toggle ON.** `disabled` → `pending`. SDK detects it on the
+  next `/api/bot/v1/crypto/sync` poll and bootstraps an
+  `OlmMachine`.
+- **Bot uploads keys.** `pending` → `ready` via
+  `/api/bot/v1/crypto/keys/upload`.
+- **Toggle OFF.** Any state → `disabled`. In-flight E2EE messages
+  stay decryptable; new ones refused.
+- **Rotate.** Server wipes the device row + schedules a
+  `device_change_log` entry so peers re-query keys.
 
-State machine + tables are owned by migration 0045. Tables:
-`bot_key_bundles`, `bot_one_time_prekeys`, `bot_to_device_queue`,
-`bot_crypto_sent_txns`. State column: `bots.e2ee_state`.
+Owned by migration 0045: `bot_key_bundles`, `bot_one_time_prekeys`,
+`bot_to_device_queue`, `bot_crypto_sent_txns`. State column:
+`bots.e2ee_state`.
 
-Refer to `docs/whitepaper.md` for the threat model — compromising
-the bot host gives an attacker access to the bot's Olm store and
-lets them decrypt past and future bot conversations.
+Compromising the bot host gives an attacker the bot's Olm store
+and lets them decrypt past and future bot conversations — see
+`docs/whitepaper.md`.
 
 ---
 
@@ -265,94 +226,56 @@ lets them decrypt past and future bot conversations.
 
 ### Generating an invite
 
-- **Single-use** — expires after one redemption.
-- **Multi-use** — unlimited redemptions until expiry.
-- **Role granted** — role assigned at redemption.
-- **Expiry** — optional ISO timestamp.
-- **Note** — internal note for staff (not visible to redeemer).
-
-Invites can be disabled (and re-enabled) without deletion. A
-single-use invite that was redeemed cannot be un-redeemed.
+Pick **Single-use** or **Multi-use**, set the **role granted** at
+redemption, an optional **expiry** (ISO timestamp), and an
+internal staff **note**. Invites can be disabled and re-enabled
+without deletion. A redeemed single-use invite cannot be undone.
 
 ### Daily quotas
 
-Each role has a daily invite generation limit. Defaults:
-
-| Role | Daily quota |
-|---|---|
-| user | 1 |
-| moderator | 10 |
-| admin | 100 |
-
-Quotas are configurable per role. Users with
-`invites.create.elevated` can exceed the standard quota.
+Defaults: `user` 1, `moderator` 10, `admin` 100. Configurable per
+role; `invites.create.elevated` exceeds the standard quota.
 
 ### Registration mode
 
-Set at `/admin/settings → Access`:
-
-- **Open** — anyone can register at `/register`.
-- **Invite-only** — registration requires a valid invite code.
-- **Closed** — no new registrations accepted.
-- **Telegram-only** — registration only through the Telegram bot
-  landing flow.
-
-Independently of registration mode, you can require all new
-accounts to register a **passkey** at signup
-(`require_passkey_at_registration`), and you can disable
-**Telegram magic-link login** for existing accounts
+Set at `/admin/settings → Access`: **Open** (anyone at
+`/register`), **Invite-only** (requires code), **Closed**, or
+**Telegram-only**. Independently, you can require a **passkey** at
+signup (`require_passkey_at_registration`) and disable **Telegram
+magic-link login** for existing accounts
 (`magic_link_login_disabled`).
 
 ---
 
 ## Moderation
 
-### Moderation queue
+`/admin/moderation` lists messages flagged by users (message,
+reporter, reason). Actions: **Dismiss** (clear flag), **Action**
+(warning/ban/mute), or **Delete**. Requires
+`moderation.queue.review`.
 
-`/admin/moderation` lists messages flagged by users. Each row
-shows the flagged message, the reporter, and the reason. Actions:
-
-- **Dismiss** — clear the flag with no action.
-- **Action** — record a moderation action (warning, ban, mute).
-- **Delete** — remove the message from the channel.
-
-Requires `moderation.queue.review`.
-
-### Bans & mutes
-
-`/admin/bans` lists every active ban and mute across the
-community, plus historical records. You can lift active rows
-before their natural expiry from this view.
-
-Bans take effect immediately and revoke all active sessions for
-the banned user. Mutes are per-topic and prevent posting (the
-user can still read).
+`/admin/bans` lists every active and historical ban/mute. Lift
+active rows before their natural expiry from this view. Bans take
+effect immediately and revoke all active sessions for the user;
+mutes are per-topic and block posting (read still works).
 
 ---
 
 ## GIF Library
 
 `/admin/symbols` manages the community GIF library shown in the
-in-chat GIF picker.
-
-- Upload new GIFs directly to the library.
-- Delete existing GIFs.
-- Enable **Giphy integration** in `/admin/settings → Integrations`
-  to supplement the local library with Giphy search results
-  (requires a Giphy API key).
-
-Uploading to the library requires the `content.gif.upload`
-permission.
+in-chat picker. Upload or delete GIFs here. Enable **Giphy
+integration** in `/admin/settings → Integrations` (requires API
+key) to supplement the local library. Uploading requires
+`content.gif.upload`.
 
 ---
 
 ## Broadcast Notifications
 
-`/admin/notifications` sends a push notification to every member
-of the community at once. Use this for community-wide
-announcements, maintenance notices, or major events. The push
-payload routes through your community's own VAPID keys (set in
-the `.env`); nothing is sent through a SaaS push relay.
+`/admin/notifications` sends a push to every member at once. The
+payload routes through your community's own VAPID keys (`.env`);
+nothing is sent through a SaaS push relay.
 
 ---
 
@@ -362,117 +285,87 @@ the `.env`); nothing is sent through a SaaS push relay.
 
 ### 1. Branding
 
-- **Community name** — browser tab title and PWA application name.
-- **Logo URL** — used in the sidebar header and welcome screens.
-- **Banner URL** — wide image shown above topics that have
-  banners enabled.
-- **Show banner in topics** — global on/off plus banner height,
-  content overlap, semi-transparent overlay opacity, fade-to-bg.
-- **PWA icon URL** — icon used when the app is installed.
+- **Community name** — browser tab title + PWA application name.
+- **Logo URL** — sidebar header and welcome screens.
+- **Banner URL** — wide image above banner-enabled topics.
+- **Show banner in topics** — global on/off + height, content
+  overlap, overlay opacity, fade-to-bg.
+- **PWA icon URL** — icon when installed.
 
 ### 2. Access
 
 - **Registration mode** — `open`, `invite-only`, `closed`, or
   `telegram_only` (see Invites).
-- **Require passkey at registration** — gate signup on a
-  successful passkey registration.
-- **Magic-link login disabled** — turn off Telegram magic-link
-  login for existing accounts (Telegram-side signup still works
-  if registration mode allows it).
+- **Require passkey at registration** — gate signup on a passkey.
+- **Magic-link login disabled** — turn off Telegram magic-link for
+  existing accounts (Telegram-side signup still works if reg mode
+  allows it).
 - **Invite flow** — require-invite toggle, code prefix, daily
   quota per role.
-- **Welcome flow** — default landing channel for new users,
-  welcome and farewell broadcast templates.
-- **Sidebar** — default collapsed style for new accounts
-  (`minimal` or `strip`).
+- **Welcome flow** — default landing channel, welcome/farewell
+  broadcast templates.
+- **Sidebar** — default collapsed style (`minimal` or `strip`).
 
 ### 3. Content
 
-P2P channel defaults:
-
-- Default max participants per P2P channel.
-- STUN servers (one URL per line).
-- TURN server URL, username, credential (optional).
+P2P channel defaults: max participants, STUN servers (one URL per
+line), and optional TURN URL + username + credential.
 
 ### 4. Media
 
-The upload pipeline. Defense in depth — every upload runs through
-both client-side metadata strip and server-side detection.
+Upload pipeline. Defense in depth — every upload runs through
+client-side metadata strip and server-side detection.
 
-- **Resize cap (px)** — longest-edge cap for image re-encoding.
-  Default 2560.
-- **JPEG quality (1–100)** — re-encode quality. Default 85.
-  Stored as 0..1 in `upload_jpeg_quality`.
-- **Max image size (MB)** — server-side reject threshold for the
-  image (compressed) path.
-- **Max file size (MB)** — server-side reject threshold for the
-  file (original-quality) path.
-- **Allow originals** — master toggle for the original-quality
-  upload button. Off disables the "file" path entirely.
-- **Originals per hour / per day** — per-user rate limits on the
-  original-quality path. Hourly window evaluated first; on hit,
-  client gets `429` + `Retry-After`.
+- **Resize cap (px)** — longest-edge cap for re-encoding (2560).
+- **JPEG quality (1–100)** — re-encode quality (85). Stored as
+  0..1 in `upload_jpeg_quality`.
+- **Max image / Max file size (MB)** — reject thresholds for the
+  compressed and original-quality paths.
+- **Allow originals** — master toggle for the original button.
+  Off disables the "file" path entirely.
+- **Originals per hour / per day** — per-user rate limits.
+  Hourly window first; on hit, client gets `429` + `Retry-After`.
 
-The server-side EXIF/XMP/ICC/IPTC scanner lives at
-`apps/web/lib/image-metadata.ts`. It rejects with HTTP 400 unless
-`preserveOriginal=true` is set on the form post (and the admin
-toggle is on).
+The server-side EXIF/XMP/ICC/IPTC scanner
+(`apps/web/lib/image-metadata.ts`) rejects with HTTP 400 unless
+`preserveOriginal=true` is on the form post (and the admin toggle
+is on).
 
 ### 5. Realtime
 
-GIF picker (community library + Giphy) lives here, alongside
-real-time delivery toggles. Set Giphy on/off + paste the API key
-to enable Giphy search inside the picker.
+GIF picker (community library + Giphy) and real-time delivery
+toggles. Set Giphy on/off and paste an API key to enable Giphy
+search inside the picker.
 
 ### 6. Integrations
 
 The link pipeline — three independent layers.
 
-- **Strip tracking parameters** — runs on every URL both at send
-  time (client) and at render time (server). Strips `utm_*`,
-  `fbclid`, `gclid`, `dclid`, `msclkid`, `yclid`, `igsh`, `mc_*`,
-  plus host-specific params for Twitter/X, YouTube, TikTok, and
-  Amazon. Defense in depth — the client strip catches typed-in
-  links, the server strip catches anything that slipped past.
-- **Shlink shortener** — optional self-hosted Shlink instance to
-  wrap outbound links under your own domain. Configure host URL +
-  API key + (optional) default domain + a regex deciding which
-  URLs get wrapped. Empty regex means wrap nothing (modern chat
-  default — Discord/Slack don't wrap, Twitter does). You can also
-  tag short links with the sender's user ID for click attribution
-  on the Shlink side.
-- **External-link warning dialog** — when a member clicks a link
-  that leaves the community, a confirmation dialog shows the full
-  URL with the host emphasised. Toggle on/off; whitelist
-  comma-separated host patterns that bypass the dialog. Opened
-  links use `window.open(url, "_blank", "noopener,noreferrer")`,
-  so the referrer is stripped and the new tab cannot navigate
-  back into chat.
+- **Strip tracking parameters** — runs at send (client) and render
+  (server). Strips `utm_*`, `fbclid`, `gclid`, `dclid`, `msclkid`,
+  `yclid`, `igsh`, `mc_*`, plus host-specific params for Twitter/X,
+  YouTube, TikTok, and Amazon.
+- **Shlink shortener** — optional self-hosted Shlink wrapping
+  outbound links under your domain. Configure host URL + API key +
+  optional default domain + a regex picking which URLs to wrap
+  (empty = wrap nothing). Short links can be tagged with the
+  sender's user ID for click attribution.
+- **External-link warning dialog** — clicking an outbound link
+  shows a dialog with the full URL (host emphasised). Toggle
+  on/off; whitelist comma-separated host patterns. Opens via
+  `window.open(url, "_blank", "noopener,noreferrer")` — referrer
+  stripped, new tab can't navigate back into chat.
 
 ---
 
 ## Themes
 
-`/admin/themes` customises the visual appearance.
-
-### Built-in themes
-
-- **dark** (default)
-- **cyberpunk**
-- **legends**
-- additional themes your community has added
-
-### Custom theme options
-
-- **Color palette editor** — modify CSS custom properties that
-  control every color in the UI.
-- **Glass morphism** — toggle frosted-glass effects on panels and
-  modals.
-- **Background gradient** — define a gradient applied to the
-  main background.
-- **Custom CSS injection** — paste arbitrary CSS for advanced
-  styling. Test in a non-production deployment first; a malformed
-  rule can break the interface.
+`/admin/themes` customises appearance. Built-in: **dark**
+(default), **cyberpunk**, **legends**, plus any added. Custom
+options: **Color palette editor** (CSS custom properties), **Glass
+morphism** (frosted-glass panels/modals), **Background gradient**,
+and **Custom CSS injection** (test off-prod first; a malformed
+rule can break the UI).
 
 ---
 
@@ -481,28 +374,26 @@ The link pipeline — three independent layers.
 ### What admins can read
 
 - **Plaintext topic + DM content** — yes, after the at-rest
-  decryption boundary. The operator running the server holds the
-  master key.
-- **E2EE topic content** — yes, when the admin is a participant.
+  decryption boundary; the operator holds the master key.
+- **E2EE topic content** — yes when the admin is a participant.
   Every Megolm session is shared with admin devices as permanent
-  recipients. The whitepaper has the full rationale.
-- **E2EE 1:1 DMs** — no admin recipient. The server stores only
+  recipients (see whitepaper).
+- **E2EE 1:1 DMs** — no admin recipient. Server stores only
   ciphertext; only the two participants can decrypt.
-- **E2EE bot DMs** — only the bot operator can decrypt (whoever
-  runs the bot host has the bot's Olm store).
-- **P2P content** — no, message bodies do not pass through the
-  server. The server still sees the WebRTC handshake metadata —
-  who connected to whom and when.
+- **E2EE bot DMs** — only the bot operator (whoever runs the bot
+  host has the Olm store).
+- **P2P content** — no, bodies do not pass through the server. The
+  server still sees WebRTC handshake metadata — who connected to
+  whom and when.
 
 ### Audit log
 
-Administrative actions are written to the audit log (role
-changes, bans, mutes, queue actions, settings changes). Surface
-TBD — accessible via DB query today.
+Admin actions (role changes, bans, mutes, queue actions, settings
+changes) are written to the audit log. Surface TBD — accessible
+via DB query today.
 
 ### Backups
 
-The deploy bundle does not take backups for you. Whatever
-Postgres backup strategy you run includes encrypted ciphertext —
-the security of those backups depends entirely on how you store
-them and who has access.
+The deploy bundle does not take backups. Whatever Postgres backup
+strategy you run includes encrypted ciphertext; its security
+depends entirely on how you store backups and who has access.
