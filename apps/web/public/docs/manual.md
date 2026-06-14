@@ -1,14 +1,10 @@
 # Legends Chat — User Manual
 
-Welcome to **Legends Chat**. This guide covers signing in, finding
-your way around, sending messages, direct messages, end-to-end
-encryption, and the day-to-day settings you can change yourself.
-
-Privacy and security details (what is and is not encrypted, who
-can read what) live in the **Privacy & Security Whitepaper** at
-`/docs/whitepaper`. The summary version is in the
-["What's private and what isn't"](#whats-private-and-what-isnt)
-section below.
+Welcome to **Legends Chat**. This guide covers signing in,
+messaging, DMs, end-to-end encryption, and your own settings. Full
+security details live in the **Privacy & Security Whitepaper** at
+`/docs/whitepaper`; the summary is in
+["What's private and what isn't"](#whats-private-and-what-isnt).
 
 ---
 
@@ -16,206 +12,158 @@ section below.
 
 ### Creating an Account
 
-There are two ways to join:
+Two ways to join:
 
 - **Register directly** at `/register` with email + password — only
-  available when your community's operator has enabled open
-  registration.
-- **Use an invite code** — if someone shared an invite link with
-  you, follow it. The registration page will pre-fill the code.
+  available when open registration is enabled.
+- **Use an invite code** — follow the invite link; the registration
+  page pre-fills the code.
 
-Some communities also let you join via the **Telegram bot**: open
-the bot, send `/start`, follow the magic link, and it will create
-your account or sign you in.
+Some communities also let you join via the **Telegram bot**: send
+`/start`, follow the magic link, and it signs you in or creates
+your account.
 
 ### Signing In
 
-Three login methods are supported. You can register more than one
-on the same account and pick whichever is most convenient.
+Three login methods; you can register more than one on the same
+account.
 
-- **Passkey** — fastest and most secure. Uses your device's
-  fingerprint sensor, face ID, or a hardware security key. Passkeys
-  are phishing-resistant: a fake login page cannot trick your
-  device into handing over the credential. Strongly recommended.
-- **Email + Password** — classic login with the email you
-  registered. You can optionally turn on **TOTP 2FA** (Aegis,
-  1Password, Google Authenticator, etc.) in **Settings → Security**.
+- **Passkey** — fastest and most secure. Phishing-resistant.
+  Strongly recommended.
+- **Email + Password** — classic login. Optionally turn on
+  **TOTP 2FA** in **Settings → Security**.
 - **Telegram magic link** — message the community's Telegram bot
-  and tap the one-time link it sends back.
+  and tap the one-time link.
 
-You can register a passkey after your first login from
+Add a passkey after first login from
 **Settings → Security → Passkeys**. KeePassXC, KeePassDX, and
-Microsoft Authenticator (cross-platform / external authenticators)
-are supported through the "Use external authenticator" path.
+Microsoft Authenticator work via "Use external authenticator".
 
 ---
 
 ## The App Shell
 
 After signing in you land at `/`. The app is a **single persistent
-shell** — the sidebar, top chrome, and your live server connection
-load once and stay loaded as you move between chats, settings, and
-admin. Switching screens does not drop your socket or re-fetch the
-sidebar. This is the same contract a native app gives you.
+shell** — sidebar, top chrome, and live socket load once and stay
+loaded across chats, settings, and admin.
 
 ### Installing as a PWA
 
-Legends Chat is a Progressive Web App. You can install it on your
-device for a native app-like experience — no app store required.
+- **iOS (Safari)** — Share → **Add to Home Screen**.
+- **Android (Chrome)** — menu → **Install App**.
+- **Desktop (Chrome / Edge)** — install icon in the address bar.
 
-- **iOS (Safari)** — tap the Share button, then **Add to Home
-  Screen**.
-- **Android (Chrome)** — open the browser menu and tap **Install
-  App**.
-- **Desktop (Chrome / Edge)** — look for the **install** icon in
-  the address bar.
-
-Once installed, Legends Chat opens in its own window without
-browser navigation bars. Cold-launching the installed app shows a
-brand splash once; moving between screens after that does not.
+Installed, the app opens in its own window. Cold-launching shows a
+brand splash once; in-app navigation does not.
 
 ---
 
 ## The Sidebar — Chats, Search, Filters
 
-The left sidebar lists everything you can chat in: **topic
-channels, 1:1 DMs with other users, and DMs with bots** — all in
-one merged list, sorted by most-recent activity. Each row shows
-the last message preview, a relative timestamp, and an **unread
-count** badge when relevant.
+The left sidebar lists **topic channels, 1:1 DMs with users, and
+DMs with bots** — merged, sorted by most-recent activity. Each row
+shows the last message preview, a relative timestamp, and an
+**unread count** badge. On mobile, tap the hamburger icon to open.
 
-On mobile, tap the hamburger icon (top-left) to open the sidebar.
-
-### Search
-
-The **search bar** at the top of the sidebar filters the list by
-name as you type. Both topics and DM peers (users and bots) match.
-
-### Filter chips
-
-Below the search bar are four chips: **All / Topics / DMs / Bots**.
-Click one to show only that kind of conversation. Tapping a chip
-always jumps back to the chat list home view; if you were inside
-a chat, the body switches to the empty state. Tab back to **All**
-returns to the full list.
-
-### Sidebar display mode
-
-You can pick how the sidebar looks in **Settings → Appearance**:
-
-- **Minimal** — icons only, maximises the chat area.
-- **Strip** — icons + labels.
+- **Search bar** — filters by name as you type. Topics and DM
+  peers (users and bots) both match.
+- **Filter chips** — `All / Topics / DMs / Bots`. Tap a chip to
+  jump to the chat list home; **All** returns the full list.
+- **Sidebar display mode** — **Settings → Appearance**:
+  **Minimal** (icons only) or **Strip** (icons + labels).
 
 ---
 
 ## Channel Types
 
-Not all channels work the same way.
-
-- **Regular topic channels** — standard group chat. Messages are
-  stored on the server, encrypted at rest.
-- **Feed-mode channels** — bulletin-board layout for announcements
-  or long-form posts. Press **Ctrl+Enter** to send (Enter inserts
-  a new line).
+- **Regular topic channels** — standard group chat. Stored on the
+  server, encrypted at rest.
+- **Feed-mode channels** — bulletin-board layout. Press
+  **Ctrl+Enter** to send (Enter inserts a new line).
 - **E2EE topic channels** — end-to-end encrypted. A lock icon
-  appears next to the channel name. A non-dismissible banner inside
-  the channel lists the moderator names who can decrypt. Read
-  ["What's private and what isn't"](#whats-private-and-what-isnt)
+  appears next to the channel name. A non-dismissible banner
+  inside the channel lists the moderator names who can decrypt.
+  Read ["What's private and what isn't"](#whats-private-and-what-isnt)
   before assuming "E2EE" means "private from your moderator."
 - **P2P channels** — direct WebRTC between participants. Message
-  bodies do not pass through or get stored on the chat server. The
-  server still brokers the WebRTC handshake, so it sees who
-  connected to whom and when.
+  bodies do not pass through the server. The server still brokers
+  the WebRTC handshake, so it sees who connected to whom and when.
 
 ---
 
 ## Direct Messages (1:1)
 
-DMs come in three flavors. The flavor is decided when the
-conversation is first opened, and it is shown on every chat-list
-row and in the chat header.
+DMs come in three flavors, shown on every chat-list row and in the
+chat header.
 
-- **Plaintext user-to-user DMs.** Messages are encrypted at rest
-  with XChaCha20-Poly1305; the server holds the key and can read
-  them. Same trust model as a regular topic — fine for casual chat.
-- **End-to-end encrypted user-to-user DMs.** Flip the **Encrypt
-  this chat** checkbox when you start the DM. Uses Matrix Olm.
-  The server only sees ciphertext. There is **no admin recipient**
-  — the admin-recipient rule applies only to topic channels.
-- **Bot DMs.** Bots can sit on either side of a DM when your admin
-  has enabled them as a DM principal. By default bot DMs are
-  plaintext. If the admin has enabled E2EE for a specific bot and
-  its state is **ready**, you can opt in by checking **Encrypt
-  this chat** when opening the DM with that bot.
+- **Plaintext user-to-user DMs.** Encrypted at rest with
+  XChaCha20-Poly1305; the server holds the key.
+- **End-to-end encrypted user-to-user DMs.** Check **Encrypt this
+  chat** when starting the DM. Uses Matrix Olm. The server sees
+  only ciphertext. **No admin recipient** — the admin-recipient
+  rule applies only to topic channels.
+- **Bot DMs.** Available when the admin has enabled the bot as a
+  DM principal. Plaintext by default. If the admin enabled E2EE
+  for that bot and its state is **ready**, you can opt in via
+  **Encrypt this chat**.
 
 ### Starting a DM
 
-1. Click the **New chat** button in the sidebar header.
+1. Click **New chat** in the sidebar header.
 2. Search for a user or bot.
-3. (Optional) Check **Encrypt this chat** to request E2EE. This
-   stays available for any user; for bots it is only enabled when
-   the bot is E2EE-ready.
+3. (Optional) Check **Encrypt this chat**. Always available for
+   users; for bots, only enabled when the bot is E2EE-ready.
 4. Click the row to open the conversation.
 
-The URL of a DM is `/c/<id>`. The peer's display name and avatar
-are shown in the right pane; clicking the avatar opens their
-profile.
+The URL of a DM is `/c/<id>`. Click the peer's avatar in the right
+pane to open their profile.
 
 ### Verifying your peer (E2EE DMs)
 
 E2EE DMs use **TOFU** (trust-on-first-use) identity pinning. The
 first time your device sees a peer's identity key, it pins the
-fingerprint locally. From the chat header you can open the
-**safety number** view to compare fingerprints with your peer
-out-of-band (read it to them on a call, in person, or via a
-separate channel) and verify nobody substituted the key.
+fingerprint locally. Open the **safety number** view from the chat
+header to compare fingerprints out-of-band (call, in person, or a
+separate channel).
 
 ---
 
 ## End-to-End Encryption — What You See
 
-E2EE topic channels and E2EE DMs use the same underlying crypto
-(Matrix Megolm/Olm). The user-facing UX is consistent across both.
+E2EE topics and E2EE DMs use the same crypto (Matrix Megolm/Olm).
 
 ### The admin-recipient banner (E2EE topics only)
 
-E2EE topics show a non-dismissible banner inside the channel
-listing the moderator names who can decrypt. This is by design —
-the operator chose end-to-end encryption so the public internet
-and the server itself cannot read the messages, but moderation
-still has to work. **If you need a conversation your admin cannot
-read, use an E2EE 1:1 DM** (no admin recipient) or a P2P channel.
+E2EE topics show a non-dismissible banner listing the moderator
+names who can decrypt. This is by design — the operator chose E2EE
+so the server itself cannot read messages, but moderation still
+has to work. **If you need a conversation your admin cannot read,
+use an E2EE 1:1 DM** (no admin recipient) or a P2P channel.
 
-E2EE DMs do not show this banner because no admin recipient
-exists for them.
+E2EE DMs do not show this banner — no admin recipient exists.
 
 ### Locked messages
 
-If you don't have the key for a message — you joined the channel
-after it was sent, the sender's session key hasn't arrived yet,
-or the sender's device explicitly declined to share — the message
-renders as a **blurred placeholder** with a small lock pill. Click
-the pill to open a modal that explains the specific reason:
+If you don't have the key for a message, it renders as a **blurred
+placeholder** with a small lock pill. Click the pill for the
+specific reason:
 
-- **Setup required** — you haven't run E2EE setup yet on this
-  device.
+- **Setup required** — you haven't run E2EE setup on this device.
 - **Initializing** — the crypto module is still bootstrapping.
 - **Missing room key** — the sender's session key has not arrived
   yet (often resolves in a few seconds).
-- **Predates current session** — you joined after this message was
-  encrypted. Megolm doesn't replay prior keys, by design.
+- **Predates current session** — you joined after this message
+  was encrypted. Megolm doesn't replay prior keys.
 - **Sender declined to share** — the sender's device chose not to
-  share the key with you.
+  share the key.
 
-Reactions, replies, and copy are **disabled on locked bubbles** so
-you don't accidentally amplify ciphertext you can't read.
+Reactions, replies, and copy are **disabled on locked bubbles**.
 
 ---
 
 ## Sending Messages
 
-Type in the input bar at the bottom of any channel and press
-**Enter** to send.
+Type in the input bar and press **Enter** to send.
 
 - **Shift+Enter** — new line without sending.
 - **Ctrl+Enter** — send in feed channels (where Enter adds a new
@@ -237,49 +185,39 @@ Markdown is supported:
 
 ### Mentions and hashtags
 
-- Type **@** + name to mention someone. A popup suggests matches;
-  pick one and they get a notification.
-- Type **#tag** and it's highlighted automatically.
+- **@** + name to mention someone. Pick from the popup; they get a
+  notification.
+- **#tag** is highlighted automatically.
 
 ### Attachments — image vs file
 
 The compose bar has two upload buttons:
 
-- **Image button** (image icon) — strips EXIF / XMP / ICC / GPS
-  metadata, resizes to a community-configured cap (default
-  2560 px longest edge), and recompresses (default JPEG quality
-  0.85). Smaller images pass through unchanged. GIF and WebP pass
-  through to preserve animation.
-- **File button** (paperclip icon) — uploads the original bytes
-  without stripping or recompressing. Use this when you genuinely
-  need pixel-perfect quality (screenshots, photos with color
-  profiles). Your admin may rate-limit how often you can do this,
-  or disable it entirely.
+- **Image button** — strips EXIF / XMP / ICC / GPS metadata,
+  resizes to a community-configured cap (default 2560 px longest
+  edge), and recompresses (default JPEG quality 0.85). Smaller
+  images pass through unchanged. GIF and WebP pass through to
+  preserve animation.
+- **File button** — uploads the original bytes without stripping
+  or recompressing. Your admin may rate-limit this path or disable
+  it entirely.
 
-You can also **drag-and-drop** a file onto the compose area. The
-drop zone splits into two halves: **Original quality** (top) and
-**Compressed image** (bottom). Drop in either zone to choose how
-the file is handled.
+You can also **drag-and-drop** a file. The drop zone splits into
+**Original quality** (top) and **Compressed image** (bottom).
 
-If an upload is rejected — over the size limit, hit the rate
-limit, or original-quality is disabled — a banner above the
-compose bar explains why and auto-clears after a few seconds.
+Rejected uploads (over size limit, rate-limited, or originals
+disabled) show a banner above compose that auto-clears.
 
 ### Drop a Markdown file as draft
 
-Drag a `.md` file onto the compose area and its contents load into
-the editor — no upload, ready to edit and send. Useful for posting
-long notes you wrote elsewhere.
-
-In **feed-mode channels**, the compose toolbar also has an
-**Export draft as Markdown** button that downloads your current
-draft as a `.md` file.
+Drag a `.md` file onto compose; its contents load into the editor
+(no upload, ready to edit and send). In **feed-mode channels**,
+the toolbar also has an **Export draft as Markdown** button.
 
 ### GIFs and emoji
 
-- **GIF picker** — if your admin has uploaded a community GIF
-  library or enabled Giphy integration, the GIF icon opens the
-  picker.
+- **GIF picker** — if your admin enabled a community GIF library
+  or Giphy, the GIF icon opens the picker.
 - **Emoji reactions** — hover a message and click the smile icon
   (desktop), or long-press (mobile).
 
@@ -287,29 +225,22 @@ draft as a `.md` file.
 
 ## Message Actions
 
-### Desktop
+**Desktop** — **Hover** for quick-action icons (react, reply,
+more). **Right-click** opens the full context menu anchored to
+your cursor with a preview, quick reactions, and the full action
+list; the native browser menu is suppressed where the app owns
+it. **Right-clicking a link** opens a small "Copy link / Open
+link" menu instead.
 
-- **Hover** a message to reveal quick-action icons (react, reply,
-  more).
-- **Right-click** opens the full context menu — a small popover
-  anchored to your cursor with a preview snippet, quick reactions,
-  and the full action list.
-- The native browser right-click menu is suppressed everywhere
-  the app owns the menu, so right-click always shows app actions.
-- **Right-clicking a link** opens a small "Copy link / Open link"
-  menu instead of the message menu.
-
-### Mobile
-
-- **Long-press** a message to open the action sheet from the
-  bottom of the screen.
+**Mobile** — **Long-press** opens the action sheet from the
+bottom of the screen.
 
 ### Available actions
 
-- **Reply** — quote-reply with a preview of the original.
+- **Reply** — quote-reply with a preview.
 - **React** — emoji reaction.
-- **Copy text** — copy the message body.
-- **Edit** — edit your own messages (also works in E2EE channels).
+- **Copy text** — copy the body.
+- **Edit** — edit your own messages (also in E2EE channels).
 - **Delete** — delete your own messages.
 - **Report** — flag for moderator review.
 - **Select** — pick multiple messages for bulk action.
@@ -317,36 +248,30 @@ draft as a `.md` file.
 ### Threads
 
 When a message has **3 or more replies**, a **View thread** button
-appears. Click it to open the thread in a side panel.
+opens it in a side panel.
 
 ---
 
 ## Link Safety
 
-Links posted in chat go through a small safety pipeline:
+- **Tracking parameters stripped** on send and render: `utm_*`,
+  `fbclid`, `gclid`, `dclid`, `msclkid`, `yclid`, `igsh`,
+  `mc_cid`, plus host-specific cleanups for Twitter/X, YouTube,
+  TikTok, and Amazon.
+- **Outbound links** open a confirmation dialog showing the full
+  destination with the host highlighted (Cancel / Open). Admins
+  can whitelist hosts that bypass it.
+- **Referrer is suppressed** on every outbound click.
 
-- **Tracking parameters are stripped** from URLs both when you
-  send and when they're rendered: `utm_*`, `fbclid`, `gclid`,
-  `dclid`, `msclkid`, `yclid`, `igsh`, `mc_cid`, plus host-specific
-  cleanups for Twitter/X, YouTube, TikTok, and Amazon.
-- **Clicking an outbound link** opens a confirmation dialog showing
-  the full destination URL with the host highlighted, plus
-  Cancel / Open. Admins can whitelist hosts that bypass the dialog
-  (your own community domain, for example).
-- **Referrer is suppressed** on every outbound click so the
-  destination site cannot tell which community you came from.
-
-If your admin has configured a community Shlink instance, some
-URLs may be wrapped in a community-controlled short link.
+If your admin configured a community Shlink instance, some URLs
+may be wrapped under a community-controlled short link.
 
 ---
 
 ## Polls
 
-Moderators and admins can post polls in channels. When you see one:
-
-- Click any option to cast or change your vote.
-- Results update live as people vote.
+Moderators and admins can post polls. Click any option to vote;
+results update live.
 
 ---
 
@@ -354,43 +279,26 @@ Moderators and admins can post polls in channels. When you see one:
 
 ### In-app
 
-Click the **bell icon** in the sidebar header for your
-notification feed. You get notified when:
-
-- Someone **@mentions** you in any channel
-- Someone **replies** to one of your messages
-- Someone wants to **start a DM** with you (pending DM request)
-- An admin sends a **broadcast announcement**
+Click the **bell icon** in the sidebar header. You're notified for
+**@mentions**, **replies** to your messages, incoming **DM
+requests**, and admin **broadcast announcements**.
 
 ### Push (system)
 
-To get notifications when the app isn't open:
+For notifications when the app isn't open, click **Enable
+notifications** when prompted and allow them in your browser. To
+re-enable later, use your browser's site settings.
 
-1. When prompted, click **Enable notifications** in the app.
-2. Allow notifications in your browser when it asks.
-
-If you dismissed the prompt, you can re-enable it later from your
-browser's site settings for this community.
-
-Notification previews are kept deliberately short and never
-include ciphertext from E2EE messages — your phone's lock screen
-only sees a generic "New message" prompt for E2EE chats.
+Previews are short and never include ciphertext from E2EE
+messages — your lock screen sees a generic "New message" for E2EE
+chats.
 
 ---
 
 ## Profile & Settings
 
-### Your profile
-
 Click your **avatar / display name** in the sidebar footer to
-open your profile. From there:
-
-- Change your **display name**.
-- Upload or change your **avatar**.
-- Set a **profile banner** image.
-- Write a **short bio** that's visible to other members.
-
-### Settings
+change display name, avatar, banner, and bio.
 
 Open **Settings** from the sidebar or profile menu. Three tabs:
 
@@ -399,52 +307,44 @@ Open **Settings** from the sidebar or profile menu. Three tabs:
 - **Account** — notification preferences, sessions, sign-out
   everywhere.
 
-### Themes
-
-Several themes ship by default: **dark**, **cyberpunk**,
-**legends**, and any your admin has added. Pick one in
-**Settings → Appearance → Theme**.
+Default themes: **dark**, **cyberpunk**, **legends**, plus any
+your admin added. Pick one in **Settings → Appearance → Theme**.
 
 ---
 
 ## What's Private and What Isn't
 
-The trust model in a nutshell — full version is in
-`/docs/whitepaper`.
+Trust model in a nutshell — full version in `/docs/whitepaper`.
 
-- **Regular channels and plaintext DMs.** The operator running
-  the server can read these. They are encrypted at rest, not
-  end-to-end. Same trust model as most mainstream chat apps.
+- **Regular channels and plaintext DMs.** The operator can read
+  these. Encrypted at rest, not end-to-end. Same trust model as
+  most mainstream chat apps.
 - **E2EE topic channels.** The server cannot read them, **but the
   community admin is a permanent key recipient** so moderation
-  still works. A non-dismissible banner in the channel lists the
-  moderator names who can decrypt.
+  still works. A non-dismissible banner lists the moderator names
+  who can decrypt.
 - **E2EE 1:1 DMs.** The server cannot read them, and **there is
   no admin recipient**. Only the two participants can decrypt.
-- **Bot DMs.** Plaintext by default. If the admin has enabled
-  E2EE for the bot and the bot's state is `ready`, the DM can be
-  E2EE — in that case the chat server only sees ciphertext, but
-  whoever runs the bot has access to the bot's Olm store and can
-  decrypt the bot side of those conversations.
-- **P2P channels.** Message bodies never touch the server, but
-  the server still brokers the WebRTC signalling — it sees who
-  connected to whom and when.
+- **Bot DMs.** Plaintext by default. With admin-enabled E2EE and
+  the bot in state `ready`, the chat server only sees ciphertext,
+  but whoever runs the bot has access to the bot's Olm store and
+  can decrypt the bot side.
+- **P2P channels.** Bodies never touch the server, but the server
+  brokers the WebRTC signalling — it sees who connected to whom.
 - **Your IP address** is always visible to the operator. Legends
   Chat has no built-in anonymous network layer.
 - **No per-message forward secrecy on E2EE.** Megolm sessions
-  rotate (default: once a week, every 100 messages, on membership
+  rotate (default: weekly, every 100 messages, on membership
   change). Within a session, prior messages are decryptable by
   anyone holding the current session key.
 - **Device compromise breaks everything.** E2EE protects data in
-  transit and at rest on the server. It does not protect against
-  someone with your unlocked device.
+  transit and at rest on the server, not against someone with your
+  unlocked device.
 
-If you have questions about how a specific deployment is
-configured — backups, admin access, whether E2EE is enabled, who
-the admin recipients are — ask your community administrator
-directly.
+Questions about how a specific deployment is configured — backups,
+admin access, E2EE on/off, recipient list — ask your community
+administrator directly.
 
 ---
 
-*If you run into issues, reach out to a moderator or admin in the
-community.*
+*If you run into issues, reach out to a moderator or admin.*
