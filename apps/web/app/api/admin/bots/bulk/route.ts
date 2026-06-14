@@ -22,7 +22,7 @@ const BodySchema = z.discriminatedUnion("action", [
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
-  if (!user || !user.permissions.has(PERMISSIONS.ADMIN_CONFIG)) {
+  if (!user || !user.permissions.has(PERMISSIONS.BOTS_MANAGE)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

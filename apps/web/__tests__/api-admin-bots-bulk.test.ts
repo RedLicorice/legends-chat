@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Hoisted mock state — mutated per test.
 const state = {
-  currentUser: { id: "admin-1", permissions: new Set(["admin.config"]) } as
+  currentUser: { id: "admin-1", permissions: new Set(["bots.manage"]) } as
     | { id: string; permissions: Set<string> }
     | null,
   botRows: [] as { id: string }[],
@@ -74,7 +74,7 @@ const UUID_B = "22222222-2222-4222-8222-222222222222";
 const UUID_C = "33333333-3333-4333-8333-333333333333";
 
 beforeEach(() => {
-  state.currentUser = { id: "admin-1", permissions: new Set(["admin.config"]) };
+  state.currentUser = { id: "admin-1", permissions: new Set(["bots.manage"]) };
   state.botRows = [];
   state.deletes = [];
 });
