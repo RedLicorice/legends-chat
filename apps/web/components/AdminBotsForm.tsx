@@ -100,23 +100,30 @@ export function AdminBotsForm({
     setBulkBusy(true);
     setBulkError(null);
     try {
-      const res = await apiFetch("/api/admin/bots/bulk", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "delete", ids }),
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => null);
-        console.error("[admin-bots] bulk delete failed", res.status, detail);
-        throw new Error(
-          `bulk delete failed (${res.status}: ${detail?.error ?? "unknown"})`,
-        );
+      // Server caps each bulk call at 200 ids. Chunk client-side so the user
+      // can mass-delete arbitrarily large selections without seeing 400s.
+      const CHUNK = 200;
+      const deletedAll = new Set<string>();
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const res = await apiFetch("/api/admin/bots/bulk", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "delete", ids: chunk }),
+        });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => null);
+          console.error("[admin-bots] bulk delete failed", res.status, detail);
+          throw new Error(
+            `bulk delete failed (${res.status}: ${detail?.error ?? "unknown"})`,
+          );
+        }
+        const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
+        for (const id of data.ids) deletedAll.add(id);
       }
-      const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
-      const deletedSet = new Set(data.ids);
-      setBots((prev) => prev.filter((b) => !deletedSet.has(b.id)));
-      setAssignments((prev) => prev.filter((a) => !deletedSet.has(a.botId)));
-      if (selectedId && deletedSet.has(selectedId)) setSelectedId(null);
+      setBots((prev) => prev.filter((b) => !deletedAll.has(b.id)));
+      setAssignments((prev) => prev.filter((a) => !deletedAll.has(a.botId)));
+      if (selectedId && deletedAll.has(selectedId)) setSelectedId(null);
       setBulkSelected(new Set());
       setBulkConfirmOpen(false);
       router.refresh();

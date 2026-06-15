@@ -169,21 +169,34 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
     setBulkBusy(true);
     setBulkError(null);
     try {
-      const res = await apiFetch("/api/admin/topics/bulk", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "delete", ids }),
-      });
-      if (!res.ok) throw new Error("bulk delete failed");
-      const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
-      const deletedSet = new Set(data.ids);
-      setTopics((prev) => prev.filter((t) => !deletedSet.has(t.id)));
-      if (selected && deletedSet.has(selected)) setSelected(null);
+      // Server caps each bulk call at 200 ids. Chunk client-side so users can
+      // mass-delete arbitrarily large selections without seeing 400s.
+      const CHUNK = 200;
+      const deletedAll = new Set<string>();
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const res = await apiFetch("/api/admin/topics/bulk", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "delete", ids: chunk }),
+        });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => null);
+          console.error("[admin-topics] bulk delete failed", res.status, detail);
+          throw new Error(
+            `bulk delete failed (${res.status}: ${detail?.error ?? "unknown"})`,
+          );
+        }
+        const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
+        for (const id of data.ids) deletedAll.add(id);
+      }
+      setTopics((prev) => prev.filter((t) => !deletedAll.has(t.id)));
+      if (selected && deletedAll.has(selected)) setSelected(null);
       setBulkSelected(new Set());
       setBulkConfirmOpen(false);
       router.refresh();
-    } catch {
-      setBulkError("Delete failed");
+    } catch (e) {
+      setBulkError((e as Error).message ?? "Delete failed");
       // Keep selection so the user can retry.
     } finally {
       setBulkBusy(false);
