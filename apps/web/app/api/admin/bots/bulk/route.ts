@@ -34,7 +34,10 @@ export async function POST(req: Request) {
   }
   const parsed = BodySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "invalid_body", issues: parsed.error.flatten() },
+      { status: 400 },
+    );
   }
 
   const { ids } = parsed.data;

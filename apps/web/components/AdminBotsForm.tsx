@@ -105,7 +105,13 @@ export function AdminBotsForm({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "delete", ids }),
       });
-      if (!res.ok) throw new Error("bulk delete failed");
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        console.error("[admin-bots] bulk delete failed", res.status, detail);
+        throw new Error(
+          `bulk delete failed (${res.status}: ${detail?.error ?? "unknown"})`,
+        );
+      }
       const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
       const deletedSet = new Set(data.ids);
       setBots((prev) => prev.filter((b) => !deletedSet.has(b.id)));
@@ -114,8 +120,8 @@ export function AdminBotsForm({
       setBulkSelected(new Set());
       setBulkConfirmOpen(false);
       router.refresh();
-    } catch {
-      setBulkError("Delete failed");
+    } catch (e) {
+      setBulkError((e as Error).message ?? "Delete failed");
       // Keep selection so the user can retry.
     } finally {
       setBulkBusy(false);
