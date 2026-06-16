@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
-import { Search, Pencil, Trash2, Ban, VolumeX, Check, X, Info, Copy } from "lucide-react";
+import { Search, Pencil, Trash2, Ban, VolumeX, Check, X, Info, Copy, Plus, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 interface UserRow {
@@ -94,6 +94,23 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
   const [roleForm, setRoleForm] = useState({ role: "", roleExpiresAt: "", roleFallback: "" });
   const [overrides, setOverrides] = useState<Override[]>([]);
   const [overridesLoading, setOverridesLoading] = useState(false);
+
+  // "Create user" inline form state.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createRole, setCreateRole] = useState<"user" | "admin">("user");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Per-user login-link state. Keyed by userId so opening details on a
+  // different row doesn't surface a stale link.
+  const [loginLink, setLoginLink] = useState<
+    | { userId: string; url: string; expiresAt: string }
+    | null
+  >(null);
+  const [loginLinkBusy, setLoginLinkBusy] = useState(false);
+  const [loginLinkError, setLoginLinkError] = useState<string | null>(null);
+  const [loginLinkCopied, setLoginLinkCopied] = useState(false);
 
   const search = useCallback((q: string) => {
     setLoading(true);
@@ -243,17 +260,172 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
     }
   }, [activityLimit, detailsUserId, fetchActivity]);
 
+  const generateLoginLink = useCallback(
+    async (userId: string) => {
+      setLoginLinkBusy(true);
+      setLoginLinkError(null);
+      setLoginLinkCopied(false);
+      try {
+        const res = await apiFetch(`/api/admin/users/${userId}/login-link`, {
+          method: "POST",
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(body || `Failed (${res.status})`);
+        }
+        const data = (await res.json()) as { url: string; expiresAt: string };
+        setLoginLink({ userId, url: data.url, expiresAt: data.expiresAt });
+      } catch (e) {
+        setLoginLinkError(e instanceof Error ? e.message : "Failed");
+      } finally {
+        setLoginLinkBusy(false);
+      }
+    },
+    [],
+  );
+
+  async function createUser() {
+    const name = createName.trim();
+    if (!name) {
+      setCreateError("Display name is required");
+      return;
+    }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await apiFetch("/api/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName: name, role: createRole }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(body || `Failed (${res.status})`);
+      }
+      const created = (await res.json()) as {
+        id: string;
+        displayName: string;
+        role: string;
+      };
+
+      // Prepend a stub row so the list reflects the new user without a
+      // refetch. The next search refresh will replace it with the canonical
+      // shape including ban/mute flags (all defaults are false for a fresh
+      // user so the UI rendering is correct).
+      const stub: UserRow = {
+        id: created.id,
+        displayName: created.displayName,
+        avatarUrl: null,
+        role: created.role,
+        isAnon: false,
+        telegramUsername: null,
+        email: null,
+        createdAt: new Date().toISOString(),
+        isBanned: false,
+        banExpiresAt: null,
+        isMuted: false,
+        muteExpiresAt: null,
+      };
+      setUsers((prev) => [stub, ...prev.filter((u) => u.id !== stub.id)]);
+
+      // Reset the create form and auto-open details — a freshly-created
+      // user has no auth path yet, so we immediately mint a login link.
+      setCreateOpen(false);
+      setCreateName("");
+      setCreateRole("user");
+      await openDetails(created.id);
+      void generateLoginLink(created.id);
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // Clear the login link surface whenever the details target changes —
+  // a link generated for user A must not survive into user B's panel.
+  useEffect(() => {
+    setLoginLink(null);
+    setLoginLinkError(null);
+    setLoginLinkCopied(false);
+  }, [detailsUserId]);
+
   return (
     <div>
-      <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name or @username…"
-          className="w-full rounded-xl border border-border bg-panel py-2 pl-9 pr-4 text-sm outline-none focus:border-accent placeholder:text-muted"
-        />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name or @username…"
+            className="w-full rounded-xl border border-border bg-panel py-2 pl-9 pr-4 text-sm outline-none focus:border-accent placeholder:text-muted"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setCreateOpen((v) => !v);
+            setCreateError(null);
+          }}
+          className="flex items-center gap-1.5 rounded-xl border border-border bg-panel px-3 py-2 text-sm font-medium hover:border-accent hover:text-accent"
+        >
+          <Plus className="h-4 w-4" />
+          New user
+        </button>
       </div>
+
+      {createOpen && (
+        <div className="mb-4 rounded-xl border border-border bg-panel p-4 space-y-3">
+          <div className="text-sm font-medium">Create user</div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs text-muted">Display name</label>
+              <input
+                autoFocus
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createUser();
+                  if (e.key === "Escape") setCreateOpen(false);
+                }}
+                placeholder="e.g. Alice"
+                maxLength={40}
+                className="w-full rounded-lg border border-border bg-panel2 px-3 py-1.5 text-sm outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted">Role</label>
+              <select
+                value={createRole}
+                onChange={(e) => setCreateRole(e.target.value as "user" | "admin")}
+                className="w-full rounded-lg border border-border bg-panel2 px-3 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+          </div>
+          {createError && <p className="text-sm text-danger">{createError}</p>}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void createUser()}
+              disabled={creating || !createName.trim()}
+              className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {creating ? "Creating…" : "Create user"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCreateOpen(false); setCreateError(null); }}
+              className="rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-panel2"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading && <p className="text-sm text-muted">Loading…</p>}
       {!loading && users.length === 0 && <p className="text-sm text-muted">No users found.</p>}
@@ -599,6 +771,68 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
                     ))}
                   </tbody>
                 </table>
+                {/* Login link generator — privileged surface, gated server-side on admin.config. */}
+                <div className="mt-4">
+                  <h4 className="mb-2 text-xs font-semibold text-muted uppercase tracking-wide">Login link</h4>
+                  <p className="mb-2 text-xs text-muted">
+                    Anyone with this link can log in as this user until it&apos;s used or expires.
+                    Send through a private channel.
+                  </p>
+                  {loginLink && loginLink.userId === detailsUserId ? (
+                    <div className="space-y-2">
+                      <div className="flex items-stretch gap-2">
+                        <input
+                          readOnly
+                          value={loginLink.url}
+                          onFocus={(e) => e.currentTarget.select()}
+                          className="flex-1 rounded-lg border border-border bg-panel2 px-3 py-1.5 text-xs font-mono outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(loginLink.url);
+                              setLoginLinkCopied(true);
+                              setTimeout(() => setLoginLinkCopied(false), 1500);
+                            } catch {
+                              setLoginLinkError("Copy failed");
+                            }
+                          }}
+                          className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-accent hover:text-accent"
+                        >
+                          {loginLinkCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                          {loginLinkCopied ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted">
+                          {formatExpiresIn(loginLink.expiresAt)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void generateLoginLink(detailsUserId!)}
+                          disabled={loginLinkBusy}
+                          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-accent hover:text-accent disabled:opacity-50"
+                        >
+                          {loginLinkBusy ? "Regenerating…" : "Regenerate"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void generateLoginLink(detailsUserId!)}
+                      disabled={loginLinkBusy}
+                      className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      <LinkIcon className="h-3.5 w-3.5" />
+                      {loginLinkBusy ? "Generating…" : "Generate link"}
+                    </button>
+                  )}
+                  {loginLinkError && (
+                    <p className="mt-2 text-xs text-danger">{loginLinkError}</p>
+                  )}
+                </div>
                 {details.activeBans.length > 0 && (
                   <div>
                     <p className="mb-1 text-xs font-medium text-danger uppercase tracking-wide">Active Bans</p>
@@ -685,6 +919,25 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
       )}
     </div>
   );
+}
+
+function formatExpiresIn(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "Expired";
+  const totalSeconds = Math.floor(diffMs / 1000);
+  if (totalSeconds < 60) return `Expires in ${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds > 0
+      ? `Expires in ${minutes}m ${seconds}s`
+      : `Expires in ${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMin = minutes % 60;
+  return remMin > 0
+    ? `Expires in ${hours}h ${remMin}m`
+    : `Expires in ${hours}h`;
 }
 
 function UserAddOverrideForm({ onAdd }: { onAdd: (permission: string, effect: string, expiresAt: string | null) => Promise<void> }) {
