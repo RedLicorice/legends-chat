@@ -24,9 +24,12 @@ export const dynamic = "force-static";
 export const metadata: Metadata = {
   title: "Legends Chat",
   description: "Community chat",
+  // Browser-tab favicon + apple-touch icon both go through /api/favicon,
+  // which 302s to the admin-configured pwa_icon_url (or the placeholder when
+  // unset). Static metadata can't read the DB; the redirect route can.
   icons: {
-    icon: [{ url: "/icon-192.png" }],
-    apple: [{ url: "/icon-192.png" }],
+    icon: [{ url: "/api/favicon" }],
+    apple: [{ url: "/api/favicon" }],
   },
   appleWebApp: {
     capable: true,
