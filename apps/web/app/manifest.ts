@@ -28,11 +28,17 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
 
   const themeColor = accentColor ?? "#7c5cff";
 
+  // Admin-uploaded pwa_icon_url is NOT declared maskable: operators upload
+  // a logo that fills the canvas edge-to-edge with no safe zone, so Chrome's
+  // maskable safe-zone crop reveals the theme_color underneath (the "purple
+  // square" symptom). Keep the system /icon-512.png as the maskable fallback
+  // — it has a real safe zone. Browsers prefer the larger `any` icon for
+  // normal install/favicon use anyway.
   const icons: MetadataRoute.Manifest["icons"] = iconUrl
     ? [
-        { src: iconUrl, sizes: "512x512", type: "image/png", purpose: "any maskable" as "any" },
+        { src: iconUrl, sizes: "512x512", type: "image/png", purpose: "any" },
         { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" as "any" },
       ]
     : [
         { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
