@@ -148,8 +148,10 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
           </button>
         </div>
 
-        {/* Filter chips */}
-        <div className="flex items-center gap-1 pt-1 pb-1">
+        {/* Filter chips. On mobile we use larger tap targets (≥36px / iOS
+            HIG minimum); on md+ desktop we shrink to compact text-[11px]
+            chips since pointer accuracy is far higher with a mouse. */}
+        <div className="flex items-center gap-1.5 pt-1 pb-1 md:gap-1">
           {FILTERS.map((f) => {
             const isActive = filter === f.key;
             return (
@@ -158,7 +160,8 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
                 type="button"
                 onClick={() => setFilter(f.key)}
                 className={cn(
-                  "rounded-full px-2 py-0.5 text-[11px] font-medium transition",
+                  "rounded-full px-3 py-1.5 text-xs font-medium transition",
+                  "md:px-2 md:py-0.5 md:text-[11px]",
                   isActive
                     ? "bg-accent text-white"
                     : "bg-panel2 text-muted hover:text-text",

@@ -1355,9 +1355,28 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     if (att) setPendingAttachments((prev) => [...prev, att]);
   }
 
+  // In-flight guard so rapid double-click / repeated Enter keys can't issue
+  // duplicate POSTs. Using a ref (not state) because the check needs to be
+  // synchronous on entry — by the time a state update propagates, a second
+  // click could already have started running send().
+  const sendingRef = useRef(false);
+  const [sending, setSending] = useState(false);
+
   async function send() {
+    if (sendingRef.current) return;
     const text = draft.trim();
     if ((!text && pendingAttachments.length === 0) || topicMute) return;
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      await sendInner(text);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+
+  async function sendInner(text: string) {
 
     const processed = text ? await processLinks(text) : text;
 
@@ -1427,7 +1446,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     localStorage.removeItem(draftKey);
   }
 
-  const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !topicMute && !uploading && canPost;
+  const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !topicMute && !uploading && !sending && canPost;
 
   function toggleThread(postId: string) {
     setExpandedThreads((prev) => {
