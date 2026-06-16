@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 //
 // Cache-Control intentionally short: when an admin uploads a new icon we
 // want browsers to pick it up within a minute, not 24h.
-export async function GET(req: NextRequest): Promise<NextResponse> {
+export async function GET(_req: NextRequest): Promise<NextResponse> {
   let target = "/icon-512.png";
   try {
     const v = await getSetting(db, "pwa_icon_url");
@@ -22,10 +22,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   } catch {
     // best-effort; fall through to placeholder
   }
-  const url = new URL(target, req.nextUrl.origin);
-  return NextResponse.redirect(url, {
+  // Relative Location: lets the browser resolve against the public origin
+  // it actually loaded from. NextResponse.redirect insists on an absolute URL,
+  // so build a raw Response manually.
+  return new NextResponse(null, {
     status: 302,
     headers: {
+      Location: target,
       "Cache-Control": "public, max-age=60, must-revalidate",
     },
   });
