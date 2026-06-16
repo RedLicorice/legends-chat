@@ -1,7 +1,7 @@
 // Legends Chat service worker — SPA shell cache + push notifications.
 
 // Bump on every deploy that needs to invalidate cached SPA shells / bundles.
-const CACHE_VERSION = "v6-bulk-admin";
+const CACHE_VERSION = "v7-sw-no-redirect-cache";
 const SHELL_CACHE = `legends-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `legends-static-${CACHE_VERSION}`;
 
@@ -9,6 +9,26 @@ const STATIC_CACHE = `legends-static-${CACHE_VERSION}`;
 // the response to `/` (warmed after first visit) and serve it for any
 // in-scope document navigation, so warm navs hit zero server-render.
 const SHELL_URL = "/";
+
+// A response is safe to cache + serve to a navigation FetchEvent only when:
+//   - it's 2xx (skip CF challenges, 5xx, etc.)
+//   - it wasn't transparently redirected (the browser refuses to consume a
+//     `redirected: true` response for a navigation whose redirect mode is
+//     not "follow")
+//   - it isn't a Cloudflare challenge response (cf-mitigated: challenge)
+function isCacheableShellResponse(res) {
+  if (!res || !res.ok) return false;
+  if (res.redirected) return false;
+  if (res.headers.get("cf-mitigated") === "challenge") return false;
+  return true;
+}
+
+// Rebuild a Response from its body so the browser doesn't see the
+// `redirected` flag when handing it back to a navigation FetchEvent.
+async function stripRedirectedFlag(res) {
+  const body = await res.clone().blob();
+  return new Response(body, { status: res.status, headers: res.headers });
+}
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -18,7 +38,7 @@ self.addEventListener("install", (event) => {
     try {
       const cache = await caches.open(SHELL_CACHE);
       const res = await fetch(SHELL_URL, { credentials: "include" });
-      if (res.ok) await cache.put(SHELL_URL, res.clone());
+      if (isCacheableShellResponse(res)) await cache.put(SHELL_URL, res.clone());
     } catch {}
   })());
 });
@@ -110,10 +130,12 @@ async function navigationHandler(req) {
   const cache = await caches.open(SHELL_CACHE);
   const cached = await cache.match(SHELL_URL);
 
-  // Always revalidate in background.
+  // Always revalidate in background. Only cache 2xx, non-redirected,
+  // non-CF-challenge responses — anything else would either poison the
+  // cache or trip the "redirected response for navigation" failure mode.
   const networkPromise = fetch(SHELL_URL, { credentials: "include" })
     .then(async (res) => {
-      if (res.ok) {
+      if (isCacheableShellResponse(res)) {
         try { await cache.put(SHELL_URL, res.clone()); } catch {}
       }
       return res;
@@ -123,7 +145,13 @@ async function navigationHandler(req) {
   if (cached) return cached;
 
   const net = await networkPromise;
-  if (net) return net;
+  if (net) {
+    // If the response was redirected, the browser will refuse to consume
+    // it for a navigation FetchEvent. Strip the flag by rebuilding a fresh
+    // Response from the body before handing it back.
+    if (net.redirected) return await stripRedirectedFlag(net);
+    return net;
+  }
   // Last resort: pass through to browser default failure.
   return fetch(req);
 }
