@@ -105,7 +105,26 @@ const HOMESERVER = "legends.local";
 const META_DB_NAME = "legends-crypto-meta";
 const META_STORE = "meta";
 const CRYPTO_STORE_PREFIX = "legends-crypto-store";
+// Bug B: when matrix-sdk-crypto-wasm bumps its IndexedDB schema across
+// versions, OlmMachine.initialize() throws on the old DB and the user
+// silently can't decrypt any historical message — including their own
+// outbound ones — because the inbound session copies live in the
+// orphaned store. We catch that failure, leave the old DB intact (so
+// support can grep+inspect later), and fall back to a versioned store
+// name. Bump CRYPTO_STORE_VERSION whenever you need to force a reset.
+const CRYPTO_STORE_VERSION = "v2";
 const DEVICE_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // base32, no 0/1/O/I
+
+/**
+ * Set true by `initCrypto` when the previous CryptoStore failed to open
+ * (e.g. schema mismatch after a matrix-sdk-crypto-wasm upgrade) and we
+ * fell back to a fresh store. UI can read this to show a one-time toast
+ * explaining that historical encrypted messages are no longer decryptable.
+ */
+let lastInitKeysReset = false;
+export function didKeysResetOnInit(): boolean {
+  return lastInitKeysReset;
+}
 
 /** Megolm session rotation policy (also useful to surface server-side). */
 export const MEGOLM_ROTATION_PERIOD_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -249,15 +268,51 @@ export async function initCrypto(userId: string): Promise<CryptoSession> {
 
   // Per-user store name; passphrase is empty (we trust the same-origin
   // IndexedDB sandbox).
-  const storeName = `${CRYPTO_STORE_PREFIX}-${userId}`;
+  const legacyStoreName = `${CRYPTO_STORE_PREFIX}-${userId}`;
+  const storeName = `${CRYPTO_STORE_PREFIX}-${CRYPTO_STORE_VERSION}-${userId}`;
+  const resetKey = `crypto_store_reset:${userId}`;
 
-  machinePromise = OlmMachine.initialize(
-    new UserId(matrixUserId),
-    new DeviceId(deviceId),
-    storeName,
-  );
-
-  const machine = await machinePromise;
+  // Bug B: try to open the live store. If matrix-sdk-crypto-wasm rejects
+  // the existing schema (post-upgrade), fall back to a fresh store name
+  // and mark `lastInitKeysReset` so the UI can warn the user that
+  // historical encrypted messages won't decrypt anymore. We intentionally
+  // do NOT delete the orphaned IndexedDB DB — support can grep + inspect
+  // it later if needed.
+  lastInitKeysReset = false;
+  let machine: OlmMachineT;
+  let effectiveDeviceId = deviceId;
+  try {
+    machinePromise = OlmMachine.initialize(
+      new UserId(matrixUserId),
+      new DeviceId(deviceId),
+      storeName,
+    );
+    machine = await machinePromise;
+  } catch (err) {
+    if (typeof console !== "undefined") {
+      console.warn(
+        "[crypto] OlmMachine.initialize failed on primary store; falling back to a fresh device",
+        { storeName, legacyStoreName, err },
+      );
+    }
+    machinePromise = null;
+    // Rotate the device id so the server treats this as a brand-new
+    // device (the old device's published OTKs are tied to an
+    // unrecoverable private key). This matches what a "logout + login"
+    // would naturally do.
+    const freshDeviceId = generateDeviceId();
+    await metaPut(`device:${userId}`, freshDeviceId);
+    const freshStoreName = `${CRYPTO_STORE_PREFIX}-${CRYPTO_STORE_VERSION}-reset-${Date.now()}-${userId}`;
+    machinePromise = OlmMachine.initialize(
+      new UserId(matrixUserId),
+      new DeviceId(freshDeviceId),
+      freshStoreName,
+    );
+    machine = await machinePromise;
+    lastInitKeysReset = true;
+    effectiveDeviceId = freshDeviceId;
+    await metaPut(resetKey, Date.now());
+  }
   const ik = machine.identityKeys;
   const ed25519 = ik.ed25519.toBase64();
   const curve25519 = ik.curve25519.toBase64();
@@ -266,7 +321,7 @@ export async function initCrypto(userId: string): Promise<CryptoSession> {
   cachedSession = {
     userId,
     matrixUserId,
-    deviceId,
+    deviceId: effectiveDeviceId,
     fingerprint,
     identityKeys: { ed25519, curve25519 },
   };

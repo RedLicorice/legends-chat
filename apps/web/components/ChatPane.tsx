@@ -320,6 +320,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const [showSearch, setShowSearch] = useState(false);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [e2eeError, setE2eeError] = useState<string | null>(null);
+  // Bug B: surfaces when the previous CryptoStore failed to load (schema
+  // mismatch after a matrix-sdk-crypto-wasm upgrade) and we fell back to
+  // a fresh device. The banner is suppressed after the user dismisses it
+  // (per-user localStorage flag) so it doesn't reappear on every reload.
+  const [e2eeKeysResetNotice, setE2eeKeysResetNotice] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [showTopicInfo, setShowTopicInfo] = useState(false);
   const [hashtagFilter, setHashtagFilter] = useState<string | null>(null);
@@ -552,6 +557,17 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         setE2eeReady(true);
         setE2eeSetupNeeded(false);
         try { localStorage.setItem(`legends-crypto-bootstrapped:${currentUser.id}`, "1"); } catch {}
+        // Bug B: if the underlying CryptoStore got reset on this init,
+        // surface a one-time banner (per user) so the user understands
+        // why historical encrypted messages they sent or received before
+        // the upgrade no longer decrypt.
+        if (cc.wasReset()) {
+          let dismissed = false;
+          try {
+            dismissed = localStorage.getItem(`legends-crypto-reset-dismissed:${currentUser.id}`) === "1";
+          } catch { /* localStorage unavailable */ }
+          if (!dismissed) setE2eeKeysResetNotice(true);
+        }
       } catch (e) {
         setE2eeError((e as Error).message);
         setE2eeSetupNeeded(true);
@@ -2009,6 +2025,31 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           <div className="mb-3 flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
             <span className="flex-1">{e2eeError}</span>
             <button type="button" onClick={() => setE2eeError(null)} className="text-danger/70 hover:text-danger underline">dismiss</button>
+          </div>
+        )}
+        {e2eeKeysResetNotice && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-accent2/40 bg-accent2/10 px-3 py-2 text-xs text-accent2">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              <span className="font-medium">Encryption keys reset on this device.</span>{" "}
+              Past encrypted messages you sent or received are no longer
+              readable here. New conversations work normally.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setE2eeKeysResetNotice(false);
+                try {
+                  localStorage.setItem(
+                    `legends-crypto-reset-dismissed:${currentUser.id}`,
+                    "1",
+                  );
+                } catch { /* localStorage unavailable */ }
+              }}
+              className="text-accent2/70 hover:text-accent2 underline"
+            >
+              dismiss
+            </button>
           </div>
         )}
         {(() => {

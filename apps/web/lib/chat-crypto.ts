@@ -15,6 +15,13 @@ export interface ChatCrypto {
    * flag from a previous one.
    */
   ready(): boolean;
+  /**
+   * True when the underlying CryptoStore failed to open during the most
+   * recent `init()` and we fell back to a fresh device. UI uses this to
+   * show a one-time warning that historical encrypted messages can no
+   * longer be decrypted. See `didKeysResetOnInit` in `@/lib/crypto`.
+   */
+  wasReset(): boolean;
   ensureSession(memberUserIds: string[]): Promise<void>;
   encrypt(plaintext: string): Promise<EncryptedEnvelope>;
   decrypt(envelope: IncomingEnvelope): Promise<string>;
@@ -32,18 +39,21 @@ async function loadCrypto(): Promise<CryptoMod> {
 export function createMegolmChatCrypto(roomId: string): ChatCrypto {
   let mod: CryptoMod | null = null;
   let initPromise: Promise<void> | null = null;
+  let wasResetFlag = false;
   return {
     kind: "megolm",
     matrixSenderFor(senderUserId, fallbackUserId) {
       return toMatrixUserId(senderUserId ?? fallbackUserId);
     },
     ready() { return mod !== null; },
+    wasReset() { return wasResetFlag; },
     async init(currentUserId: string) {
       if (mod) return;
       if (initPromise) { await initPromise; return; }
       initPromise = (async () => {
         const m = await loadCrypto();
         await m.initCrypto(currentUserId);
+        wasResetFlag = m.didKeysResetOnInit();
         await m.bootstrap();
         mod = m;
       })();
@@ -87,6 +97,7 @@ export function createMegolmChatCrypto(roomId: string): ChatCrypto {
 export function createOlmChatCrypto(roomKey: string, peerMatrixId: string): ChatCrypto {
   let mod: CryptoMod | null = null;
   let initPromise: Promise<void> | null = null;
+  let wasResetFlag = false;
   return {
     kind: "olm",
     matrixSenderFor(senderUserId, fallbackUserId) {
@@ -94,12 +105,14 @@ export function createOlmChatCrypto(roomKey: string, peerMatrixId: string): Chat
       return toMatrixUserId(id);
     },
     ready() { return mod !== null; },
+    wasReset() { return wasResetFlag; },
     async init(currentUserId: string) {
       if (mod) return;
       if (initPromise) { await initPromise; return; }
       initPromise = (async () => {
         const m = await loadCrypto();
         await m.initCrypto(currentUserId);
+        wasResetFlag = m.didKeysResetOnInit();
         await m.bootstrap();
         mod = m;
       })();
