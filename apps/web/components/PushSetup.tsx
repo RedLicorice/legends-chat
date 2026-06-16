@@ -36,8 +36,21 @@ export function PushSetup() {
         const existing = await reg.pushManager.getSubscription();
         if (existing) return;
 
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") return;
+        // Modern browsers (Chrome 80+, Firefox) require Notification.requestPermission()
+        // and pushManager.subscribe() to be triggered from a user gesture. Calling
+        // them on mount silently fails with AbortError. Only proceed when the user
+        // has already granted permission via an explicit gesture elsewhere.
+        // TODO: add a settings UI button that gestures into a subscribe flow for
+        // users whose permission is still "default".
+        if (typeof Notification === "undefined") return;
+        if (Notification.permission !== "granted") {
+          console.info(
+            "[push] skipping auto-subscribe: notification permission is",
+            Notification.permission,
+            "(user must opt in via a gesture)",
+          );
+          return;
+        }
 
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
