@@ -653,10 +653,25 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         onConnectionChange?.(true);
         if (initial.messages) {
           setMessages(initial.messages);
+          // Seed decrypted plaintext for any messages whose ciphertext we
+          // already know (we sent them this page session). Bug A fix.
+          const seeded: Array<[string, string]> = [];
           for (const m of initial.messages) {
             if (m.ciphertextJson && !decryptedRef.current.has(m.id)) {
-              pendingDecryptRef.current.add(m.id);
+              const plain = lookupOwnPlaintext(m.ciphertextJson);
+              if (plain !== null) {
+                seeded.push([m.id, plain]);
+              } else {
+                pendingDecryptRef.current.add(m.id);
+              }
             }
+          }
+          if (seeded.length > 0) {
+            setDecryptedTexts((prev) => {
+              const next = new Map(prev);
+              for (const [id, p] of seeded) next.set(id, p);
+              return next;
+            });
           }
         }
         if (initial.reactions) setReactions(initial.reactions);
@@ -668,7 +683,19 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         if (!active) return;
         setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         if (msg.ciphertextJson && !decryptedRef.current.has(msg.id)) {
-          pendingDecryptRef.current.add(msg.id);
+          // Bug A: synchronously resolve our own messages from the
+          // ciphertext cache so the bubble never flashes "(encrypted…)".
+          const ownPlain = lookupOwnPlaintext(msg.ciphertextJson);
+          if (ownPlain !== null) {
+            setDecryptedTexts((prev) => {
+              if (prev.get(msg.id) === ownPlain) return prev;
+              const next = new Map(prev);
+              next.set(msg.id, ownPlain);
+              return next;
+            });
+          } else {
+            pendingDecryptRef.current.add(msg.id);
+          }
         }
         if (msg.replyToMessageId && isFeed) {
           setExpandedThreads((prev) => new Set([...prev, String(msg.replyToMessageId)]));
@@ -680,13 +707,26 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           ? { ...m, text: updated.text, editedAt: updated.editedAt, attachments: updated.attachments, ciphertextJson: updated.ciphertextJson ?? m.ciphertextJson }
           : m));
         if (updated.ciphertextJson) {
-          setDecryptedTexts((prev) => {
-            if (!prev.has(updated.id)) return prev;
-            const next = new Map(prev);
-            next.delete(updated.id);
-            return next;
-          });
-          pendingDecryptRef.current.add(updated.id);
+          // Bug A (edit path): if we just sent this edit, restore plaintext
+          // synchronously from the cache; otherwise drop the stale entry
+          // and re-queue for async decrypt.
+          const ownPlain = lookupOwnPlaintext(updated.ciphertextJson);
+          if (ownPlain !== null) {
+            setDecryptedTexts((prev) => {
+              if (prev.get(updated.id) === ownPlain) return prev;
+              const next = new Map(prev);
+              next.set(updated.id, ownPlain);
+              return next;
+            });
+          } else {
+            setDecryptedTexts((prev) => {
+              if (!prev.has(updated.id)) return prev;
+              const next = new Map(prev);
+              next.delete(updated.id);
+              return next;
+            });
+            pendingDecryptRef.current.add(updated.id);
+          }
         }
       },
       onDelete: (id) => {
@@ -960,6 +1000,10 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         }
       }
       await source.edit(messageId, { ciphertextJson: envelope });
+      // Bug A: seed the own-plaintext cache so when the edit gets
+      // WS-relayed back (potentially clearing our local plaintext) we can
+      // restore it synchronously without flashing "(encrypted…)".
+      rememberOwnPlaintext(envelope["ciphertext"] as string | undefined, text);
       setDecryptedTexts((prev) => {
         const next = new Map(prev);
         next.set(messageId, text);
@@ -1029,6 +1073,33 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   // sync interval drains the Set instead of scanning the entire messages
   // array on each tick — O(pending) vs O(messages).
   const pendingDecryptRef = useRef<Set<string>>(new Set());
+
+  // Bug A: own-message plaintext cache keyed by the ciphertext string. When
+  // we send an E2EE message, the server WS-relays the same envelope back
+  // through `onNew`. Without this cache the message-list pipeline calls the
+  // full async decryptRoomEvent path on our OWN message — between the WS
+  // round-trip and the decrypt completing the bubble briefly renders
+  // "(encrypted…)". By seeding `decryptedTexts` synchronously in `onNew`
+  // when the ciphertext matches one we just sent, the bubble renders
+  // plaintext on its very first paint.
+  const ownPlaintextByCiphertextRef = useRef<Map<string, string>>(new Map());
+  const OWN_PLAINTEXT_CACHE_LIMIT = 200;
+  const rememberOwnPlaintext = useCallback((ciphertext: string | undefined, plaintext: string) => {
+    if (!ciphertext) return;
+    const cache = ownPlaintextByCiphertextRef.current;
+    if (cache.has(ciphertext)) cache.delete(ciphertext);
+    cache.set(ciphertext, plaintext);
+    if (cache.size > OWN_PLAINTEXT_CACHE_LIMIT) {
+      const first = cache.keys().next().value;
+      if (first !== undefined) cache.delete(first);
+    }
+  }, []);
+  const lookupOwnPlaintext = useCallback((ciphertextJson: Record<string, unknown> | null | undefined): string | null => {
+    if (!ciphertextJson) return null;
+    const ct = ciphertextJson["ciphertext"];
+    if (typeof ct !== "string" || !ct) return null;
+    return ownPlaintextByCiphertextRef.current.get(ct) ?? null;
+  }, []);
 
   const toIncomingEnvelope = useCallback((args: {
     envelope: Record<string, unknown>;
@@ -1189,11 +1260,24 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   function getDisplayText(msg: Message): string {
     if (!isE2ee) return msg.text;
     if (!msg.ciphertextJson) return msg.text;
-    return decryptedTexts.get(msg.id) ?? "(encrypted…)";
+    const cached = decryptedTexts.get(msg.id);
+    if (cached !== undefined) return cached;
+    // Bug A safety net: even if onNew hasn't yet flushed its setState for
+    // our own message, the synchronous own-plaintext cache still has the
+    // text — return it so the bubble never flashes "(encrypted…)".
+    const own = lookupOwnPlaintext(msg.ciphertextJson);
+    if (own !== null) return own;
+    return "(encrypted…)";
   }
 
   function isStillEncrypted(msg: Message): boolean {
-    return isE2ee && !!msg.ciphertextJson && !decryptedTexts.has(msg.id);
+    if (!isE2ee || !msg.ciphertextJson) return false;
+    if (decryptedTexts.has(msg.id)) return false;
+    // Bug A safety net (same shape as getDisplayText): our own ciphertext
+    // counts as decrypted, so the Lock overlay isn't shown over our own
+    // message during the WS-relay window.
+    if (lookupOwnPlaintext(msg.ciphertextJson) !== null) return false;
+    return true;
   }
 
   function getEncryptedReason(msg: Message): EncryptedReason {
@@ -1431,6 +1515,16 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     }
 
     const isE2eeSend = isE2ee && ciphertextEnvelope !== null;
+    if (isE2eeSend && ciphertextEnvelope) {
+      // Bug A: seed the own-plaintext cache BEFORE the server WS-relays
+      // this back. The relay typically arrives on the next tick; without
+      // this, getDisplayText would render "(encrypted…)" until the async
+      // decrypt path catches up.
+      rememberOwnPlaintext(
+        ciphertextEnvelope["ciphertext"] as string | undefined,
+        processed,
+      );
+    }
     await source.send({
       text: finalText,
       attachments: isE2eeSend

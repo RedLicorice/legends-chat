@@ -170,6 +170,41 @@ async function getOrCreateDeviceId(userId: string): Promise<string> {
   return fresh;
 }
 
+// ── Own-plaintext cache ───────────────────────────────────────────────────────
+//
+// Bug A fix: when we encrypt our own outbound message and the server WS-relays
+// it back to us, the message-list pipeline kicks off a full
+// `decryptRoomEvent` round-trip just to recover what we already know. Until
+// it resolves the bubble briefly renders "(encrypted…)". We avoid that by
+// caching the plaintext at encrypt time keyed by the raw ciphertext string
+// (Megolm output is deterministic for a (session, index) pair, so the same
+// ciphertext arriving back over WS is an exact match). decryptRoom checks
+// this cache first and bypasses the wasm machine on a hit.
+//
+// Scope: per page session. Bounded at 1000 entries; FIFO eviction is good
+// enough — older messages get a fresh decrypt via the normal path.
+const OWN_PLAINTEXT_CACHE_LIMIT = 1000;
+const ownPlaintextByCiphertext = new Map<string, string>();
+
+function rememberOwnPlaintext(ciphertext: string, plaintext: string): void {
+  if (!ciphertext) return;
+  // Re-inserting refreshes recency on Maps.
+  if (ownPlaintextByCiphertext.has(ciphertext)) {
+    ownPlaintextByCiphertext.delete(ciphertext);
+  }
+  ownPlaintextByCiphertext.set(ciphertext, plaintext);
+  if (ownPlaintextByCiphertext.size > OWN_PLAINTEXT_CACHE_LIMIT) {
+    // Evict oldest insertion (Map iteration order).
+    const firstKey = ownPlaintextByCiphertext.keys().next().value;
+    if (firstKey !== undefined) ownPlaintextByCiphertext.delete(firstKey);
+  }
+}
+
+export function getOwnPlaintext(ciphertext: string): string | null {
+  if (!ciphertext) return null;
+  return ownPlaintextByCiphertext.get(ciphertext) ?? null;
+}
+
 // ── Singleton OlmMachine ──────────────────────────────────────────────────────
 
 let machinePromise: Promise<OlmMachineT> | null = null;
@@ -637,13 +672,25 @@ export async function encryptRoom(
     "m.room.message",
     JSON.stringify({ msgtype: "m.text", body: plaintext }),
   );
-  return JSON.parse(contentJson) as EncryptedEnvelope;
+  const envelope = JSON.parse(contentJson) as EncryptedEnvelope;
+  // Bug A: remember our own plaintext so when the server WS-relays this
+  // ciphertext back to the message list we can short-circuit decryptRoom
+  // and avoid the brief "(encrypted…)" flash on our own bubble.
+  rememberOwnPlaintext(envelope.ciphertext, plaintext);
+  return envelope;
 }
 
 export async function decryptRoom(
   roomId: string,
   envelope: IncomingEnvelope,
 ): Promise<string> {
+  // Bug A: own-plaintext cache hit. When we just encrypted this message
+  // ourselves, the WS-relayed copy carries the same ciphertext string; we
+  // already know the plaintext, so we skip the full decryptRoomEvent
+  // round-trip (which would otherwise cause a one-render flash of
+  // "(encrypted…)" on our own bubble).
+  const cached = getOwnPlaintext(envelope.content.ciphertext);
+  if (cached !== null) return cached;
   const machine = await getMachine();
   const eventJson = JSON.stringify({
     type: envelope.type,
