@@ -1,5 +1,6 @@
 import { and, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 import { userBans, userMutes, users } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
@@ -64,4 +65,51 @@ export async function GET(req: NextRequest) {
       muteExpiresAt: mutedMap.get(r.id) ?? null,
     })),
   );
+}
+
+// Manual user creation for admins. Telegram is still the primary auth path,
+// but admins create empty user shells they can hand a login-link to (see
+// POST /api/admin/users/[id]/login-link). No email/password fields here —
+// keep the surface small and lean on the login-link for first access.
+const CreateBodySchema = z.object({
+  displayName: z.string().trim().min(1).max(40),
+  role: z.enum(["user", "admin"]).optional(),
+  isAnon: z.boolean().optional(),
+});
+
+export async function POST(req: Request) {
+  const actor = await getCurrentUser();
+  if (!actor || !actor.permissions.has(PERMISSIONS.ADMIN_CONFIG)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+  const parsed = CreateBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "invalid_body", issues: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { displayName, role, isAnon } = parsed.data;
+  const [row] = await db
+    .insert(users)
+    .values({
+      displayName,
+      role: role ?? "user",
+      isAnon: isAnon ?? false,
+    })
+    .returning({
+      id: users.id,
+      displayName: users.displayName,
+      role: users.role,
+    });
+
+  return NextResponse.json(row);
 }
