@@ -92,12 +92,12 @@ function buildMentionSuggestion(membersRef: React.RefObject<MentionMember[]>) {
           btn.className = [
             "w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition cursor-pointer",
             i === selectedIndex
-              ? "bg-[color:var(--ch-panel2,#1e2130)] text-[color:var(--ch-text,#e8eaf2)]"
-              : "text-[color:var(--ch-muted,#6b7280)] hover:bg-[color:var(--ch-panel2,#1e2130)] hover:text-[color:var(--ch-text,#e8eaf2)]",
+              ? "bg-panel2 text-text"
+              : "text-muted hover:bg-panel2 hover:text-text",
           ].join(" ");
 
           const avatar = document.createElement("div");
-          avatar.className = "h-6 w-6 rounded-full bg-[color:var(--ch-accent2,#7c3aed)] flex items-center justify-center text-xs text-white font-semibold shrink-0 overflow-hidden";
+          avatar.className = "h-6 w-6 rounded-full bg-accent2 flex items-center justify-center text-xs text-white font-semibold shrink-0 overflow-hidden";
           if (item.avatarUrl) {
             const img = document.createElement("img");
             img.src = item.avatarUrl;
@@ -146,7 +146,7 @@ function buildMentionSuggestion(membersRef: React.RefObject<MentionMember[]>) {
           selectedIndex = 0;
 
           el = document.createElement("div");
-          el.className = "fixed z-[9999] min-w-[180px] rounded-xl border border-[color:var(--ch-border,#2a2d3e)] bg-[color:var(--ch-panel,#141721)] shadow-2xl py-1 overflow-y-auto";
+          el.className = "fixed z-[9999] min-w-[180px] rounded-xl border border-border bg-panel shadow-2xl py-1 overflow-y-auto";
           el.style.maxHeight = "320px";
           document.body.appendChild(el);
           position(props.clientRect as (() => DOMRect | null) | null | undefined);
@@ -210,8 +210,8 @@ function buildTagSuggestion(
           btn.className = [
             "w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition cursor-pointer",
             i === selectedIndex
-              ? "bg-[color:var(--ch-panel2,#1e2130)] text-[color:var(--ch-text,#e8eaf2)]"
-              : "text-[color:var(--ch-muted,#6b7280)] hover:bg-[color:var(--ch-panel2,#1e2130)] hover:text-[color:var(--ch-text,#e8eaf2)]",
+              ? "bg-panel2 text-text"
+              : "text-muted hover:bg-panel2 hover:text-text",
           ].join(" ");
           if (item.avatarUrl) {
             const img = document.createElement("img");
@@ -224,7 +224,7 @@ function buildTagSuggestion(
           btn.appendChild(labelEl);
           if (item.sub) {
             const sub = document.createElement("span");
-            sub.className = "text-xs text-[color:var(--ch-muted,#6b7280)] ml-auto";
+            sub.className = "text-xs text-muted ml-auto";
             sub.textContent = item.sub;
             btn.appendChild(sub);
           }
@@ -259,7 +259,7 @@ function buildTagSuggestion(
           currentCommand = props.command;
           selectedIndex = 0;
           el = document.createElement("div");
-          el.className = "fixed z-[9999] min-w-[180px] rounded-xl border border-[color:var(--ch-border,#2a2d3e)] bg-[color:var(--ch-panel,#141721)] shadow-2xl py-1 overflow-y-auto";
+          el.className = "fixed z-[9999] min-w-[180px] rounded-xl border border-border bg-panel shadow-2xl py-1 overflow-y-auto";
           el.style.maxHeight = "320px";
           document.body.appendChild(el);
           position(props.clientRect);
