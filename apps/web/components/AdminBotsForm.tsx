@@ -191,15 +191,17 @@ export function AdminBotsForm({
           {/* Header: select-all + new */}
           <div className="flex items-center justify-between gap-2 border-b border-border p-3">
             <div className="flex items-center gap-2">
-              <input
-                ref={selectAllRef}
-                type="checkbox"
-                className="accent-accent"
-                aria-label="Select all bots"
-                checked={allFilteredSelected}
-                onChange={(e) => toggleSelectAll(e.target.checked)}
-                disabled={filteredBots.length === 0}
-              />
+              <label className="flex h-11 w-11 cursor-pointer items-center justify-center">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  className="accent-accent"
+                  aria-label="Select all bots"
+                  checked={allFilteredSelected}
+                  onChange={(e) => toggleSelectAll(e.target.checked)}
+                  disabled={filteredBots.length === 0}
+                />
+              </label>
               <span className="text-xs font-medium uppercase tracking-wide text-muted">
                 Bots
               </span>

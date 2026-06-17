@@ -3,6 +3,7 @@ import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Plus, RefreshCw, Trash2, PowerOff, Power } from "lucide-react";
+import { Toggle } from "@/components/ui/Toggle";
 
 type Role = string;
 
@@ -151,10 +152,14 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
               <input type="number" min={1} disabled={role !== "user" || unlimited}
                 value={role === "user" ? maxUses : "1"} onChange={(e) => setMaxUses(e.target.value)}
                 className="w-20 rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none disabled:opacity-50" />
-              <label className="flex items-center gap-1 text-xs">
-                <input type="checkbox" disabled={role !== "user"} checked={role === "user" && unlimited}
-                  onChange={(e) => setUnlimited(e.target.checked)} /> ∞
-              </label>
+              <div className="flex items-center gap-1 text-xs">
+                <Toggle
+                  disabled={role !== "user"}
+                  checked={role === "user" && unlimited}
+                  onChange={setUnlimited}
+                  aria-label="Unlimited uses"
+                /> ∞
+              </div>
             </div>
             {role !== "user" && <span className="text-[10px] text-muted">(forced single-use)</span>}
           </label>
@@ -171,9 +176,13 @@ export function InvitesPanel({ canCreateElevated }: { canCreateElevated: boolean
             <input type="datetime-local" disabled={noExpiry} value={noExpiry ? "" : expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
               className="rounded-lg border border-border bg-panel2 px-3 py-2 text-sm outline-none disabled:opacity-50" />
-            <label className="flex items-center gap-1 text-xs">
-              <input type="checkbox" checked={noExpiry} onChange={(e) => setNoExpiry(e.target.checked)} /> No expiry
-            </label>
+            <div className="flex items-center gap-1 text-xs">
+              <Toggle
+                checked={noExpiry}
+                onChange={setNoExpiry}
+                aria-label="No expiry"
+              /> No expiry
+            </div>
           </label>
         </div>
         <label className="mt-3 flex flex-col gap-1 text-xs text-muted">

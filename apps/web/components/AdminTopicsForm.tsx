@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Plus, Trash2, Radio } from "lucide-react";
 import { ImageUploadButton } from "@/components/ImageUploadButton";
+import { Toggle } from "@/components/ui/Toggle";
 
 interface TopicRow {
   id: string;
@@ -54,27 +55,31 @@ function RolesCheckboxes({
     <div className="flex flex-wrap gap-3">
       {allRoles.map((role) => (
         <label key={role} className="flex cursor-pointer items-center gap-1.5 text-sm">
-          <input
-            type="checkbox"
-            className="accent-accent"
-            checked={roles.length === 0 || roles.includes(role)}
-            disabled={roles.length === 0 || disabled}
-            onChange={(e) => {
-              const next = e.target.checked ? [...roles, role] : roles.filter((r) => r !== role);
-              onSave(next);
-            }}
-          />
+          <span className="flex h-11 w-11 items-center justify-center">
+            <input
+              type="checkbox"
+              className="accent-accent"
+              checked={roles.length === 0 || roles.includes(role)}
+              disabled={roles.length === 0 || disabled}
+              onChange={(e) => {
+                const next = e.target.checked ? [...roles, role] : roles.filter((r) => r !== role);
+                onSave(next);
+              }}
+            />
+          </span>
           {role}
         </label>
       ))}
       <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-        <input
-          type="checkbox"
-          className="accent-accent"
-          checked={roles.length === 0}
-          disabled={disabled}
-          onChange={(e) => onSave(e.target.checked ? [] : ["admin"])}
-        />
+        <span className="flex h-11 w-11 items-center justify-center">
+          <input
+            type="checkbox"
+            className="accent-accent"
+            checked={roles.length === 0}
+            disabled={disabled}
+            onChange={(e) => onSave(e.target.checked ? [] : ["admin"])}
+          />
+        </span>
         everyone
       </label>
     </div>
@@ -432,15 +437,17 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
       <div className={`flex-col border-r border-border bg-panel ${selected ? "hidden md:flex md:w-56 md:shrink-0" : "flex w-full md:w-56 md:shrink-0"}`}>
         <div className="flex items-center justify-between border-b border-border p-3">
           <div className="flex items-center gap-2">
-            <input
-              ref={selectAllRef}
-              type="checkbox"
-              className="accent-accent"
-              aria-label="Select all topics"
-              checked={allSelected}
-              onChange={(e) => toggleSelectAll(e.target.checked)}
-              disabled={topics.length === 0}
-            />
+            <label className="flex h-11 w-11 cursor-pointer items-center justify-center">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                className="accent-accent"
+                aria-label="Select all topics"
+                checked={allSelected}
+                onChange={(e) => toggleSelectAll(e.target.checked)}
+                disabled={topics.length === 0}
+              />
+            </label>
             <span className="text-xs font-medium uppercase tracking-wide text-muted">Topics</span>
           </div>
           <button
@@ -486,14 +493,16 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
               key={t.id}
               className={`flex items-start gap-2 border-b border-border px-3 py-2.5 transition-colors hover:bg-panel2 ${selected === t.id ? "border-l-2 border-l-accent bg-panel2" : ""}`}
             >
-              <input
-                type="checkbox"
-                className="mt-1 shrink-0 accent-accent"
-                aria-label={`Select topic ${t.title}`}
-                checked={bulkSelected.has(t.id)}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => toggleSelected(t.id, e.target.checked)}
-              />
+              <label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
+                <input
+                  type="checkbox"
+                  className="accent-accent"
+                  aria-label={`Select topic ${t.title}`}
+                  checked={bulkSelected.has(t.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => toggleSelected(t.id, e.target.checked)}
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => setSelected(t.id)}
@@ -626,19 +635,34 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                 {(["isFeed", "isHomeTopic", "isSticky"] as const).map((key) => (
-                  <label key={key} className="flex cursor-pointer items-center gap-2">
-                    <input type="checkbox" checked={topic[key] as boolean} onChange={(e) => save(topic.id, { [key]: e.target.checked })} className="accent-accent" disabled={dis} />
+                  <div key={key} className="flex items-center gap-2">
+                    <Toggle
+                      checked={topic[key] as boolean}
+                      onChange={(next) => save(topic.id, { [key]: next })}
+                      disabled={dis}
+                      aria-label={{ isFeed: "Feed", isHomeTopic: "Home", isSticky: "Sticky" }[key]}
+                    />
                     {{ isFeed: "Feed", isHomeTopic: "Home", isSticky: "Sticky" }[key]}
-                  </label>
+                  </div>
                 ))}
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input type="checkbox" checked={topic.isE2ee} onChange={(e) => toggleE2ee(topic.id, e.target.checked)} className="accent-accent" disabled={dis} />
+                <div className="flex items-center gap-2">
+                  <Toggle
+                    checked={topic.isE2ee}
+                    onChange={(next) => toggleE2ee(topic.id, next)}
+                    disabled={dis}
+                    aria-label="E2EE"
+                  />
                   E2EE
-                </label>
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input type="checkbox" checked={topic.isP2p} onChange={(e) => save(topic.id, { isP2p: e.target.checked })} className="accent-accent" disabled={dis} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Toggle
+                    checked={topic.isP2p}
+                    onChange={(next) => save(topic.id, { isP2p: next })}
+                    disabled={dis}
+                    aria-label="P2P"
+                  />
                   <Radio className="h-3.5 w-3.5" /> P2P
-                </label>
+                </div>
                 <button
                   onClick={() => deleteTopic(topic.id, topic.title)}
                   disabled={dis}
@@ -711,13 +735,18 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
                 <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted">
                   <Radio className="h-3.5 w-3.5" /> P2P settings
                 </div>
-                <label className="flex cursor-pointer items-center gap-3 text-sm">
-                  <input type="checkbox" checked={topic.p2pFallbackE2ee} onChange={(e) => save(topic.id, { p2pFallbackE2ee: e.target.checked })} className="accent-accent" disabled={dis || !topic.isE2ee} />
+                <div className="flex items-center gap-3 text-sm">
+                  <Toggle
+                    checked={topic.p2pFallbackE2ee}
+                    onChange={(next) => save(topic.id, { p2pFallbackE2ee: next })}
+                    disabled={dis || !topic.isE2ee}
+                    aria-label="Fall back to server E2EE relay when over participant limit"
+                  />
                   <span>
                     Fall back to server E2EE relay when over participant limit
                     {!topic.isE2ee && <span className="ml-1 text-muted">(requires E2EE to be enabled)</span>}
                   </span>
-                </label>
+                </div>
                 <div className="flex items-center gap-3">
                   <label className="w-40 text-xs text-muted">Max participants override</label>
                   <input
@@ -817,13 +846,15 @@ export function AdminTopicsForm({ topics: initial, initialSelected }: { topics: 
                   </div>
                   {(topic.passwordProtected || pwDraft[topic.id]!.newPassword.trim()) && (
                     <label className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        className="accent-accent"
-                        checked={pwDraft[topic.id]!.requireImmediate}
-                        disabled={dis || pwDraft[topic.id]!.saving}
-                        onChange={(e) => setPwDraft((d) => ({ ...d, [topic.id]: { ...d[topic.id]!, requireImmediate: e.target.checked } }))}
-                      />
+                      <span className="flex h-11 w-11 items-center justify-center">
+                        <input
+                          type="checkbox"
+                          className="accent-accent"
+                          checked={pwDraft[topic.id]!.requireImmediate}
+                          disabled={dis || pwDraft[topic.id]!.saving}
+                          onChange={(e) => setPwDraft((d) => ({ ...d, [topic.id]: { ...d[topic.id]!, requireImmediate: e.target.checked } }))}
+                        />
+                      </span>
                       Require immediate re-entry (invalidates all cached entries)
                     </label>
                   )}

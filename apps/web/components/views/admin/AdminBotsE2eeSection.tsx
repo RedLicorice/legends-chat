@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { Toggle } from "@/components/ui/Toggle";
 
 export interface AdminBotsE2eeSectionProps {
   bot: {
@@ -83,15 +84,15 @@ export function AdminBotsE2eeSection({ bot, onChange }: AdminBotsE2eeSectionProp
         <StateBadge state={bot.e2ee_state} />
       </div>
 
-      <label className="flex items-center gap-2 text-sm cursor-pointer">
-        <input
-          type="checkbox"
+      <div className="flex items-center gap-2 text-sm">
+        <Toggle
           checked={enabled}
           disabled={busy}
-          onChange={(e) => void patch({ enabled: e.target.checked })}
+          onChange={(next) => void patch({ enabled: next })}
+          aria-label="End-to-end encryption"
         />
         <span>End-to-end encryption</span>
-      </label>
+      </div>
 
       {bot.e2ee_device_id && (bot.e2ee_state === "ready" || bot.e2ee_state === "pending") && (
         <div className="space-y-1 text-xs text-muted">

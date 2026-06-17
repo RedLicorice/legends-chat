@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { Lock, Search, X, Bot, User as UserIcon } from "lucide-react";
 import { apiFetch } from "@/lib/fetch";
 import { cn } from "@/lib/cn";
+import { Toggle } from "@/components/ui/Toggle";
 
 // ---------------------------------------------------------------------------
 // Types — mirror the `/api/dm/search` response shape
@@ -198,19 +199,18 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
                 : "This bot isn't ready for end-to-end encryption yet."
               : undefined;
             return (
-              <label
+              <div
                 className={cn(
                   "mt-3 flex items-center gap-2 text-xs text-muted",
-                  disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                  disabled && "opacity-60",
                 )}
                 title={title}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={requestE2EE && !disabled}
                   disabled={disabled}
-                  onChange={(e) => setRequestE2EE(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-[var(--accent)]"
+                  onChange={(next) => setRequestE2EE(next)}
+                  aria-label="Encrypt this chat"
                 />
                 <Lock className="h-3 w-3" />
                 <span>
@@ -220,7 +220,7 @@ export function NewChatModal({ open, onClose }: NewChatModalProps) {
                       : "Encrypt this chat (bot not ready)"
                     : "Encrypt this chat"}
                 </span>
-              </label>
+              </div>
             );
           })()}
         </div>

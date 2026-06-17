@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Palette, Shield, MessageSquare, Upload, Radio, Link2 } from "lucide-react";
 import { ImageUrlField } from "@/components/ImageUrlField";
 import { SettingsTabs } from "@/components/SettingsTabs";
+import { Toggle } from "@/components/ui/Toggle";
 
 interface Topic { id: string; title: string; slug: string }
 
@@ -216,7 +217,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
 
         <Field label="Show banner in topics">
           <label className="flex cursor-pointer items-center gap-3">
-            <Toggle value={bannerInTopics} onChange={setBannerInTopics} />
+            <Toggle checked={bannerInTopics} onChange={setBannerInTopics} />
             <span className="text-sm">{bannerInTopics ? "Banner shown as topic background" : "Banner hidden in topics"}</span>
           </label>
         </Field>
@@ -233,7 +234,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
             </Field>
             <Field label="Semi-transparent overlay">
               <label className="flex cursor-pointer items-center gap-3">
-                <Toggle value={bannerOverlayEnabled} onChange={setBannerOverlayEnabled} />
+                <Toggle checked={bannerOverlayEnabled} onChange={setBannerOverlayEnabled} />
                 <span className="text-sm">{bannerOverlayEnabled ? "Overlay enabled" : "No overlay"}</span>
               </label>
             </Field>
@@ -247,7 +248,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
             )}
             <Field label="Fade to background">
               <label className="flex cursor-pointer items-center gap-3">
-                <Toggle value={bannerFadeEnabled} onChange={setBannerFadeEnabled} />
+                <Toggle checked={bannerFadeEnabled} onChange={setBannerFadeEnabled} />
                 <span className="text-sm">{bannerFadeEnabled ? "Banner fades to transparent at the bottom" : "Hard edge"}</span>
               </label>
             </Field>
@@ -370,7 +371,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         </Field>
         <Field label="Allow native-resolution uploads">
           <label className="flex cursor-pointer items-center gap-3">
-            <Toggle value={uploadAllowOriginal} onChange={setUploadAllowOriginal} />
+            <Toggle checked={uploadAllowOriginal} onChange={setUploadAllowOriginal} />
             <span className="text-sm">{uploadAllowOriginal ? "Users may opt to keep originals (rate-limited)" : "All uploads stripped and resized"}</span>
           </label>
         </Field>
@@ -390,7 +391,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
               <Section title="GIF — Giphy integration">
                 <Field label="Enable Giphy">
                   <label className="flex cursor-pointer items-center gap-3">
-                    <Toggle value={giphyEnabled} onChange={setGiphyEnabled} />
+                    <Toggle checked={giphyEnabled} onChange={setGiphyEnabled} />
                     <span className="text-sm">{giphyEnabled ? "Giphy search enabled" : "Giphy disabled (library only)"}</span>
                   </label>
                 </Field>
@@ -405,14 +406,14 @@ export function AdminSettingsForm({ settings, topics }: Props) {
               <Section title="Link wrapping">
                 <Field label="Strip tracking parameters">
                   <label className="flex cursor-pointer items-center gap-3">
-                    <Toggle value={stripTrackingParams} onChange={setStripTrackingParams} />
+                    <Toggle checked={stripTrackingParams} onChange={setStripTrackingParams} />
                     <span className="text-sm">{stripTrackingParams ? "Tracking params removed from outbound links" : "Links sent as-is"}</span>
                   </label>
                   <p className="mt-1 text-xs text-muted">Removes utm_*, fbclid, igsh, and host-scoped trackers (Twitter/X, YouTube, TikTok, Amazon). Works independently of Shlink.</p>
                 </Field>
                 <Field label="Enable Shlink shortener">
                   <label className="flex cursor-pointer items-center gap-3">
-                    <Toggle value={shlinkEnabled} onChange={setShlinkEnabled} />
+                    <Toggle checked={shlinkEnabled} onChange={setShlinkEnabled} />
                     <span className="text-sm">{shlinkEnabled ? "External links wrapped via Shlink" : "Shlink disabled"}</span>
                   </label>
                   <p className="mt-1 text-xs text-muted">Self-hosted URL shortener. Processing happens server-side; API key never reaches the browser.</p>
@@ -433,7 +434,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
                     </Field>
                     <Field label="Tag with sender user ID">
                       <label className="flex cursor-pointer items-center gap-3">
-                        <Toggle value={shlinkTagWithUser} onChange={setShlinkTagWithUser} />
+                        <Toggle checked={shlinkTagWithUser} onChange={setShlinkTagWithUser} />
                         <span className="text-sm">{shlinkTagWithUser ? "Each short URL tagged user:<id>" : "No per-sender tagging"}</span>
                       </label>
                       <p className="mt-1 text-xs text-muted">Lets admins attribute clicks to senders in Shlink stats. Privacy implication: the bare user ID is stored on the Shlink server alongside the short URL.</p>
@@ -446,7 +447,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
                 )}
                 <Field label="External-link warning dialog">
                   <label className="flex cursor-pointer items-center gap-3">
-                    <Toggle value={extLinkInterstitial} onChange={setExtLinkInterstitial} />
+                    <Toggle checked={extLinkInterstitial} onChange={setExtLinkInterstitial} />
                     <span className="text-sm">{extLinkInterstitial ? "Confirm before leaving the app" : "Links open without warning"}</span>
                   </label>
                   <p className="mt-1 text-xs text-muted">Shows the destination URL in a dialog. User must explicitly click "Open link" to proceed. Modifier-click (Ctrl/Cmd/middle) bypasses for power users.</p>
@@ -473,18 +474,6 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   );
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div
-      role="switch"
-      aria-checked={value}
-      onClick={() => onChange(!value)}
-      className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${value ? "bg-accent" : "bg-border"}`}
-    >
-      <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? "translate-x-6" : "translate-x-1"}`} />
-    </div>
-  );
-}
 
 const ROLES = ["user", "moderator", "admin"] as const;
 
@@ -530,7 +519,7 @@ function InviteConfigSection() {
     <Section title="Invite flow">
       <Field label="Require invite code">
         <label className="flex cursor-pointer items-center gap-3">
-          <Toggle value={invitesEnabled} onChange={setInvitesEnabled} />
+          <Toggle checked={invitesEnabled} onChange={setInvitesEnabled} />
           <span className="text-sm">{invitesEnabled ? "Invite code required" : "Anyone can register without invite"}</span>
         </label>
         <p className="mt-1 text-xs text-muted">When enabled, new users must present a valid invite code during registration.</p>
@@ -609,30 +598,28 @@ function SecuritySection({
   return (
     <section className="mt-8 space-y-4">
       <h2 className="text-lg font-semibold">Security</h2>
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
+      <div className="flex items-start gap-2 text-sm">
+        <Toggle
           checked={requirePasskey}
-          onChange={(e) => setRequirePasskey(e.target.checked)}
-          className="mt-1"
+          onChange={setRequirePasskey}
+          aria-label="Require passkey at registration"
         />
-        <span>
+        <span className="mt-2">
           <span className="font-medium">Require passkey at registration</span>
           <span className="block text-xs text-muted">New users via Telegram must complete passkey setup before their session is issued.</span>
         </span>
-      </label>
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
+      </div>
+      <div className="flex items-start gap-2 text-sm">
+        <Toggle
           checked={magicLinkDisabled}
-          onChange={(e) => setMagicLinkDisabled(e.target.checked)}
-          className="mt-1"
+          onChange={setMagicLinkDisabled}
+          aria-label="Passkey-only login"
         />
-        <span>
+        <span className="mt-2">
           <span className="font-medium">Passkey-only login</span>
           <span className="block text-xs text-muted">Bot is funnel only. Existing users with passkeys authenticate inside the app. Users without passkeys are exempt.</span>
         </span>
-      </label>
+      </div>
       <SaveBar saving={saving} error={error} saved={saved} onSave={save} />
     </section>
   );

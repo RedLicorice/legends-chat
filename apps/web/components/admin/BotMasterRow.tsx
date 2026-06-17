@@ -65,14 +65,16 @@ export function BotMasterRow({
         active && "border-l-2 border-l-accent bg-panel2",
       )}
     >
-      <input
-        type="checkbox"
-        className="mt-1.5 shrink-0 accent-accent"
-        aria-label={`Select bot ${bot.name}`}
-        checked={checked}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => onToggleChecked(e.target.checked)}
-      />
+      <label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
+        <input
+          type="checkbox"
+          className="accent-accent"
+          aria-label={`Select bot ${bot.name}`}
+          checked={checked}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onToggleChecked(e.target.checked)}
+        />
+      </label>
       <button
         type="button"
         onClick={onSelect}

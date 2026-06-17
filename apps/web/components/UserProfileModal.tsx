@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { X, Camera, LogOut } from "lucide-react";
 import Link from "next/link";
 import { Settings } from "lucide-react";
+import { Toggle } from "@/components/ui/Toggle";
 
 interface Props {
   user: { id: string; displayName: string; avatarUrl: string | null; role: string; presenceOptOut?: boolean; permissions?: string[] };
@@ -191,23 +192,17 @@ export function UserProfileModal({ user, onClose, onUpdate }: Props) {
           <div className="text-right text-xs text-muted">{bio.length}/200</div>
         </div>
 
-        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-panel2">
+        <div className="flex items-start gap-3 rounded-lg border border-border p-3 hover:bg-panel2">
           <div className="flex-1">
             <div className="text-sm font-medium">Hide online status</div>
             <div className="text-xs text-muted">When on, you appear offline and cannot see others' status</div>
           </div>
-          <div className="relative mt-0.5">
-            <input
-              type="checkbox"
-              className="sr-only"
-              checked={presenceOptOut}
-              onChange={(e) => setPresenceOptOut(e.target.checked)}
-            />
-            <div className={`h-5 w-9 rounded-full transition ${presenceOptOut ? "bg-accent" : "bg-panel2 border border-border"}`}>
-              <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${presenceOptOut ? "translate-x-4" : "translate-x-0.5"}`} />
-            </div>
-          </div>
-        </label>
+          <Toggle
+            checked={presenceOptOut}
+            onChange={setPresenceOptOut}
+            aria-label="Hide online status"
+          />
+        </div>
 
         {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 

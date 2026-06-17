@@ -284,7 +284,9 @@ export function AdminRolesForm({ roles: initial }: Props) {
               <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
                 {STATIC_PERMISSIONS.map((perm) => (
                   <label key={perm} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <input type="checkbox" className="accent-accent" checked={(editPerms[role.name] ?? []).includes(perm)} disabled={dis} onChange={() => togglePerm(role.name, perm)} />
+                    <span className="flex h-11 w-11 items-center justify-center">
+                      <input type="checkbox" className="accent-accent" checked={(editPerms[role.name] ?? []).includes(perm)} disabled={dis} onChange={() => togglePerm(role.name, perm)} />
+                    </span>
                     <span className="min-w-0 truncate" title={perm}>{PERMISSION_LABELS[perm] ?? perm}</span>
                   </label>
                 ))}
@@ -306,7 +308,9 @@ export function AdminRolesForm({ roles: initial }: Props) {
                           const perm = `topic.${tp.slug}.${action}`;
                           return (
                             <label key={action} className="flex cursor-pointer items-center gap-1.5 text-sm capitalize">
-                              <input type="checkbox" className="accent-accent" checked={(editPerms[role.name] ?? []).includes(perm)} disabled={dis} onChange={() => togglePerm(role.name, perm)} />
+                              <span className="flex h-11 w-11 items-center justify-center">
+                                <input type="checkbox" className="accent-accent" checked={(editPerms[role.name] ?? []).includes(perm)} disabled={dis} onChange={() => togglePerm(role.name, perm)} />
+                              </span>
                               {action}
                             </label>
                           );
