@@ -77,6 +77,37 @@ const PRE_REACT_BOOT_SCRIPT = `
   // bubble-phase listener fires; preventDefault here just keeps the browser
   // chrome from appearing on everything else.
   document.addEventListener("contextmenu", function (e) { e.preventDefault(); }, { passive: false });
+
+  // Stale-SW self-heal: ChunkLoadError fires when the SW serves a cached
+  // shell that references _next chunk hashes the current server no longer
+  // ships (typical after a deploy if the SW didn't refresh). Catch the
+  // first occurrence per page session, drop SW + caches, then hard-reload
+  // with a cache-bust query so the browser fetches a fresh shell.
+  var didChunkReload = false;
+  function onChunkError(ev) {
+    var msg = (ev && (ev.reason && ev.reason.name || ev.error && ev.error.name) || "") + " " + (ev && (ev.message || (ev.reason && ev.reason.message) || (ev.error && ev.error.message)) || "");
+    if (msg.indexOf("ChunkLoadError") === -1 && msg.indexOf("Loading chunk") === -1) return;
+    if (didChunkReload) return;
+    didChunkReload = true;
+    try { sessionStorage.setItem("legends:chunk-error-reload", String(Date.now())); } catch (e) {}
+    (async function () {
+      try {
+        if ("serviceWorker" in navigator) {
+          var regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(function (r) { return r.unregister(); }));
+        }
+        if ("caches" in window) {
+          var names = await caches.keys();
+          await Promise.all(names.map(function (n) { return caches.delete(n); }));
+        }
+      } catch (e) {}
+      var url = new URL(window.location.href);
+      url.searchParams.set("_cb", Date.now().toString());
+      window.location.replace(url.toString());
+    })();
+  }
+  window.addEventListener("error", onChunkError);
+  window.addEventListener("unhandledrejection", onChunkError);
 })();
 `.trim();
 

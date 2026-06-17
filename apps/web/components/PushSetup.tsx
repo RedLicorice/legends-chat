@@ -69,7 +69,20 @@ export function PushSetup() {
           }),
         });
       } catch (err) {
-        console.warn("[push] setup failed", err);
+        // AbortError = the push service refused the subscription. Common in
+        // dev when the cached subscription belongs to prod's VAPID key, or
+        // when the user's browser blocks push at the OS level. Not an app
+        // bug; downgrade to info to keep the console quiet.
+        const isAbort =
+          err instanceof DOMException && err.name === "AbortError";
+        if (isAbort) {
+          console.info(
+            "[push] subscribe aborted by browser (VAPID mismatch or OS-level block):",
+            err.message,
+          );
+        } else {
+          console.warn("[push] setup failed", err);
+        }
       }
     })();
     return () => {
