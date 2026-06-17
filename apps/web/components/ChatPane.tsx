@@ -2536,7 +2536,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
 
       {/* Multi-select action bar */}
       {isSelecting && (
-        <div className="border-t border-border bg-panel px-4 pt-2.5 pb-[calc(0.625rem+var(--sab))] flex items-center gap-3 shrink-0">
+        <div className="border-t border-border bg-panel px-4 pt-2.5 pb-[max(0.5rem,var(--sab))] flex items-center gap-3 shrink-0">
           <span className="text-sm font-semibold text-text">{selectedIds.size} selected</span>
           <div className="flex-1" />
           {caps.delete && (canDeleteOwn || canDeleteAny) && (
@@ -2559,12 +2559,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
       )}
 
       {!hashtagFilter && (topicMute ? (
-        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-danger shrink-0">
+        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[max(0.75rem,var(--sab))] text-sm text-danger shrink-0">
           You are muted: {topicMute.reason}
           {topicMute.expiresAt ? ` (until ${new Date(topicMute.expiresAt).toLocaleString()})` : " (permanent)"}
         </div>
       ) : !canPost ? (
-        <div className="border-t border-border bg-panel px-6 pt-4 pb-[calc(1rem+var(--sab))] text-sm text-muted shrink-0">
+        <div className="border-t border-border bg-panel px-6 pt-4 pb-[max(0.75rem,var(--sab))] text-sm text-muted shrink-0">
           {isTopicMode && topic
             ? `Only ${topic.postRoles.join(", ")} can post in this channel.`
             : isDmMode && dmConversation?.state === "pending"
@@ -2572,7 +2572,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
               : "You cannot post in this conversation."}
         </div>
       ) : (
-        <div className="border-t border-border bg-panel px-3 pt-2 pb-[calc(0.375rem+var(--sab))] shrink-0">
+        <div className="border-t border-border bg-panel px-3 pt-2 pb-[max(0.375rem,var(--sab))] shrink-0">
           {caps.threads && replyingTo && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
               <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent2" />
