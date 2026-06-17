@@ -46,6 +46,19 @@ const nextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
         ],
       },
+      // Service worker bytes must NEVER be cached by the browser HTTP cache.
+      // Default Next serving was `public, max-age=14400` (4h), which meant iOS
+      // Safari kept stale sw.js bytes for hours after a deploy — the in-page
+      // `registration.update()` would short-circuit because the cached bytes
+      // looked identical. With no-store every update() call hits the server
+      // and the byte-difference check sees the new SW immediately.
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
     ];
   },
 };

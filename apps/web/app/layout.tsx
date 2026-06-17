@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { PushSetup } from "@/components/PushSetup";
+import { SwUpdate } from "@/components/SwUpdate";
 import { TokenRefresh } from "@/components/TokenRefresh";
 import { SymbolsProvider } from "@/contexts/SymbolsContext";
 import { SessionBootstrapProvider } from "@/contexts/SessionBootstrapContext";
@@ -127,6 +128,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-bg text-text">
         <SessionBootstrapProvider>
           <PushSetup />
+          <SwUpdate />
           <TokenRefresh />
           <ExternalLinkBootstrap>
             <SymbolsProvider>

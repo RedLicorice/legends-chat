@@ -1,7 +1,7 @@
 // Legends Chat service worker — SPA shell cache + push notifications.
 
 // Bump on every deploy that needs to invalidate cached SPA shells / bundles.
-const CACHE_VERSION = "v7-sw-no-redirect-cache";
+const CACHE_VERSION = "v8-skip-waiting";
 const SHELL_CACHE = `legends-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `legends-static-${CACHE_VERSION}`;
 
@@ -29,6 +29,14 @@ async function stripRedirectedFlag(res) {
   const body = await res.clone().blob();
   return new Response(body, { status: res.status, headers: res.headers });
 }
+
+// Honor an explicit SKIP_WAITING from the page so the SwUpdate driver can
+// promote a freshly installed SW without waiting for every tab to close.
+self.addEventListener("message", (event) => {
+  if (event && event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
