@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, Pencil, Trash2, Ban, VolumeX, Check, X, Info, Copy, Plus, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -260,6 +260,11 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
     }
   }, [activityLimit, detailsUserId, fetchActivity]);
 
+  // Track current target so generateLoginLink can drop stale writes if the
+  // admin switches users mid-fetch.
+  const detailsUserIdRef = useRef<string | null>(null);
+  useEffect(() => { detailsUserIdRef.current = detailsUserId; }, [detailsUserId]);
+
   const generateLoginLink = useCallback(
     async (userId: string) => {
       setLoginLinkBusy(true);
@@ -274,11 +279,13 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
           throw new Error(body || `Failed (${res.status})`);
         }
         const data = (await res.json()) as { url: string; expiresAt: string };
+        if (detailsUserIdRef.current !== userId) return;
         setLoginLink({ userId, url: data.url, expiresAt: data.expiresAt });
       } catch (e) {
+        if (detailsUserIdRef.current !== userId) return;
         setLoginLinkError(e instanceof Error ? e.message : "Failed");
       } finally {
-        setLoginLinkBusy(false);
+        if (detailsUserIdRef.current === userId) setLoginLinkBusy(false);
       }
     },
     [],
@@ -333,8 +340,10 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
       setCreateOpen(false);
       setCreateName("");
       setCreateRole("user");
-      await openDetails(created.id);
-      void generateLoginLink(created.id);
+      await Promise.all([
+        openDetails(created.id),
+        generateLoginLink(created.id),
+      ]);
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -344,10 +353,13 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
 
   // Clear the login link surface whenever the details target changes —
   // a link generated for user A must not survive into user B's panel.
+  // Also reset busy so a stale fetch (which generateLoginLink will now
+  // ignore on completion) doesn't keep B's button looking active.
   useEffect(() => {
     setLoginLink(null);
     setLoginLinkError(null);
     setLoginLinkCopied(false);
+    setLoginLinkBusy(false);
   }, [detailsUserId]);
 
   return (

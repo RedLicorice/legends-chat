@@ -932,13 +932,19 @@ export async function getRoomFingerprint(
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 
 export async function freeResources(): Promise<void> {
-  if (!machinePromise) return;
-  try {
-    const m = await machinePromise;
-    m.close();
-  } catch {
-    // ignore
+  // Clear per-session state regardless of whether a machine was initialized:
+  // the own-plaintext cache may hold the previous user's outbound text, and
+  // lastInitKeysReset must not survive into the next login.
+  ownPlaintextByCiphertext.clear();
+  lastInitKeysReset = false;
+  if (machinePromise) {
+    try {
+      const m = await machinePromise;
+      m.close();
+    } catch {
+      // ignore
+    }
+    machinePromise = null;
   }
-  machinePromise = null;
   cachedSession = null;
 }

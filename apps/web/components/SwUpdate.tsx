@@ -24,13 +24,38 @@ export function SwUpdate(): null {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
-    let cancelled = false;
-    let intervalId: number | null = null;
-    let reloading = false;
+    // Captured at mount: if the page is uncontrolled now (first install,
+    // post-unregister), an upcoming controllerchange would be the FIRST
+    // controller — that is a fresh install, not an update. We only reload
+    // when we transition from one controller to another (a real update).
+    const hadInitialController = !!navigator.serviceWorker.controller;
 
-    async function setup() {
+    const state: {
+      cancelled: boolean;
+      intervalId: number | null;
+      reg: ServiceWorkerRegistration | null;
+      reloading: boolean;
+      updateFoundHandler: (() => void) | null;
+      onControllerChange: (() => void) | null;
+      onFocus: (() => void) | null;
+      onVisible: (() => void) | null;
+      onOnline: (() => void) | null;
+    } = {
+      cancelled: false,
+      intervalId: null,
+      reg: null,
+      reloading: false,
+      updateFoundHandler: null,
+      onControllerChange: null,
+      onFocus: null,
+      onVisible: null,
+      onOnline: null,
+    };
+
+    void (async () => {
       const reg = await navigator.serviceWorker.register("/sw.js");
-      if (cancelled) return;
+      if (state.cancelled) return;
+      state.reg = reg;
 
       // Push a waiting worker into active state. Safe because activation also
       // clears old caches and claims clients.
@@ -44,24 +69,29 @@ export function SwUpdate(): null {
 
       if (reg.waiting) skipWaiting(reg.waiting);
 
-      reg.addEventListener("updatefound", () => {
+      const updateFoundHandler = () => {
         const installing = reg.installing;
         if (!installing) return;
         installing.addEventListener("statechange", () => {
           if (installing.state === "installed" && navigator.serviceWorker.controller) {
-            // A new SW took the waiting slot — promote it.
             skipWaiting(installing);
           }
         });
-      });
+      };
+      state.updateFoundHandler = updateFoundHandler;
+      reg.addEventListener("updatefound", updateFoundHandler);
 
       // When the active SW switches, soft-reload so the page picks up the new
-      // chunk graph. Guarded so we don't loop on devtools "Update on reload".
+      // chunk graph. Guarded so we don't loop on devtools "Update on reload"
+      // and skipped on the first-ever install (hadInitialController=false)
+      // since that's not a real update.
       const onControllerChange = () => {
-        if (reloading) return;
-        reloading = true;
+        if (state.reloading) return;
+        if (!hadInitialController) return;
+        state.reloading = true;
         window.location.reload();
       };
+      state.onControllerChange = onControllerChange;
       navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
 
       // Always probe on mount; sw.js is now no-store so each call hits the
@@ -70,30 +100,37 @@ export function SwUpdate(): null {
       try { await reg.update(); } catch {
         // Network issue; next interval will retry.
       }
+      if (state.cancelled) return;
 
       const tick = () => { reg.update().catch(() => undefined); };
-      intervalId = window.setInterval(tick, UPDATE_INTERVAL_MS);
+      state.intervalId = window.setInterval(tick, UPDATE_INTERVAL_MS);
 
       const onFocus = () => tick();
       const onVisible = () => { if (document.visibilityState === "visible") tick(); };
       const onOnline = () => tick();
+      state.onFocus = onFocus;
+      state.onVisible = onVisible;
+      state.onOnline = onOnline;
       window.addEventListener("focus", onFocus);
       document.addEventListener("visibilitychange", onVisible);
       window.addEventListener("online", onOnline);
+    })();
 
-      return () => {
-        navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
-        window.removeEventListener("focus", onFocus);
-        document.removeEventListener("visibilitychange", onVisible);
-        window.removeEventListener("online", onOnline);
-      };
-    }
-
-    const cleanupPromise = setup();
     return () => {
-      cancelled = true;
-      if (intervalId !== null) window.clearInterval(intervalId);
-      cleanupPromise.then((fn) => fn?.()).catch(() => undefined);
+      state.cancelled = true;
+      if (state.intervalId !== null) {
+        window.clearInterval(state.intervalId);
+        state.intervalId = null;
+      }
+      if (state.reg && state.updateFoundHandler) {
+        state.reg.removeEventListener("updatefound", state.updateFoundHandler);
+      }
+      if (state.onControllerChange) {
+        navigator.serviceWorker.removeEventListener("controllerchange", state.onControllerChange);
+      }
+      if (state.onFocus) window.removeEventListener("focus", state.onFocus);
+      if (state.onVisible) document.removeEventListener("visibilitychange", state.onVisible);
+      if (state.onOnline) window.removeEventListener("online", state.onOnline);
     };
   }, []);
 

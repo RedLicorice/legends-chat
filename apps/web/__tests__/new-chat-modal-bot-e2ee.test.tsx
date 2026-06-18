@@ -80,7 +80,7 @@ describe("<NewChatModal /> bot E2EE", () => {
     const botRow = await screen.findByRole("button", { name: /ReadyBot/i });
 
     // Toggle E2EE on.
-    const checkbox = screen.getByRole("checkbox", { name: /encrypt/i });
+    const checkbox = screen.getByRole("switch", { name: /encrypt/i });
     expect(checkbox).not.toBeDisabled();
     await userEvent.click(checkbox);
     expect(checkbox).toBeChecked();
@@ -123,7 +123,7 @@ describe("<NewChatModal /> bot E2EE", () => {
     // Wait for hit
     await screen.findByRole("button", { name: /PendingBot/i });
 
-    const checkbox = screen.getByRole("checkbox", { name: /encrypt/i });
+    const checkbox = screen.getByRole("switch", { name: /encrypt/i });
     expect(checkbox).toBeDisabled();
   });
 });

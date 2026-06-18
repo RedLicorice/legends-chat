@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
@@ -13,29 +13,35 @@ interface Props {
 }
 
 // Authentication options stay valid for 5 minutes on the server (Redis TTL).
-// Prefetch when the button mounts so the click → OS passkey sheet gap is
-// dominated by WebAuthn, not by a 200-500ms round-trip to /api/auth/passkey
-// — the latter was the entire user-perceived delay on mobile.
+// Prefetch on first user intent (pointer/focus) so the click → OS passkey
+// sheet gap is dominated by WebAuthn, not by a 200-500ms round-trip. Avoids
+// burning a global Redis challenge slot on every page load when the button
+// is never engaged.
 const PREFETCH_STALE_MS = 4 * 60 * 1000; // 4 min — refresh before the 5 min TTL
 
 export function PasskeyAuthButton({ onSuccess, className }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const prefetched = useRef<{ at: number; opts: PublicKeyCredentialRequestOptionsJSON } | null>(null);
+  const prefetchInFlight = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const prefetch = useCallback(() => {
+    if (prefetchInFlight.current) return;
+    const fresh = prefetched.current && Date.now() - prefetched.current.at < PREFETCH_STALE_MS;
+    if (fresh) return;
+    prefetchInFlight.current = true;
+    void (async () => {
       try {
         const r = await apiFetch("/api/auth/passkey/authenticate");
-        if (!r.ok || cancelled) return;
+        if (!r.ok) return;
         const opts = (await r.json()) as PublicKeyCredentialRequestOptionsJSON;
-        if (!cancelled) prefetched.current = { at: Date.now(), opts };
+        prefetched.current = { at: Date.now(), opts };
       } catch {
-        // Best-effort prefetch; click path will fall back to live fetch.
+        // Best-effort; click path falls back to live fetch.
+      } finally {
+        prefetchInFlight.current = false;
       }
     })();
-    return () => { cancelled = true; };
   }, []);
 
   async function authenticate() {
@@ -87,6 +93,8 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
       <button
         type="button"
         onClick={authenticate}
+        onPointerEnter={prefetch}
+        onFocus={prefetch}
         disabled={loading}
         className={cn(
           "flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-panel px-4 py-2.5 text-sm font-medium transition hover:bg-panel2 disabled:opacity-50",

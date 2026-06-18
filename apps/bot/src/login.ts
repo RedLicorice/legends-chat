@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { authLoginTokens } from "@legends/db/schema";
 import { db } from "./db";
 
@@ -28,6 +28,11 @@ export interface IssuedToken {
  */
 export async function issueLoginToken(userId: string): Promise<IssuedToken> {
   return db.transaction(async (tx) => {
+    // Serialize concurrent token issuance for the same user — without this
+    // lock, two concurrent callers both read mostRecent before either
+    // UPDATE lands, both pass the reuse-window check, and both INSERT a
+    // fresh token, leaving two simultaneously-valid login links.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`login-token:${userId}`}))`);
     const now = new Date();
 
     const [mostRecent] = await tx

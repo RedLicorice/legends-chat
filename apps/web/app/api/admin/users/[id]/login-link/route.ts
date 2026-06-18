@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { authLoginTokens, users } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
@@ -35,6 +35,11 @@ export async function POST(
   }
 
   const { token, expiresAt } = await db.transaction(async (tx) => {
+    // Serialize concurrent token issuance for the same user — without this
+    // lock, two concurrent POSTs both read mostRecent before either UPDATE
+    // lands, both pass the reuse-window check, and both INSERT a fresh
+    // token, leaving two simultaneously-valid links.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`login-token:${id}`}))`);
     const now = new Date();
 
     const [mostRecent] = await tx

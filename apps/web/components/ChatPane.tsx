@@ -23,6 +23,7 @@ import { TopicInfoModal } from "@/components/TopicInfoModal";
 import { EncryptedMessageContent } from "@/components/EncryptedMessageContent";
 import { EncryptedReasonModal, type EncryptedReason } from "@/components/EncryptedReasonModal";
 import type { IncomingEnvelope } from "@/lib/crypto";
+import { getOwnPlaintext } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
 import { useTopicHashtags } from "@/hooks/useTopicHashtags";
@@ -1016,10 +1017,6 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         }
       }
       await source.edit(messageId, { ciphertextJson: envelope });
-      // Bug A: seed the own-plaintext cache so when the edit gets
-      // WS-relayed back (potentially clearing our local plaintext) we can
-      // restore it synchronously without flashing "(encrypted…)".
-      rememberOwnPlaintext(envelope["ciphertext"] as string | undefined, text);
       setDecryptedTexts((prev) => {
         const next = new Map(prev);
         next.set(messageId, text);
@@ -1090,31 +1087,14 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   // array on each tick — O(pending) vs O(messages).
   const pendingDecryptRef = useRef<Set<string>>(new Set());
 
-  // Bug A: own-message plaintext cache keyed by the ciphertext string. When
-  // we send an E2EE message, the server WS-relays the same envelope back
-  // through `onNew`. Without this cache the message-list pipeline calls the
-  // full async decryptRoomEvent path on our OWN message — between the WS
-  // round-trip and the decrypt completing the bubble briefly renders
-  // "(encrypted…)". By seeding `decryptedTexts` synchronously in `onNew`
-  // when the ciphertext matches one we just sent, the bubble renders
-  // plaintext on its very first paint.
-  const ownPlaintextByCiphertextRef = useRef<Map<string, string>>(new Map());
-  const OWN_PLAINTEXT_CACHE_LIMIT = 200;
-  const rememberOwnPlaintext = useCallback((ciphertext: string | undefined, plaintext: string) => {
-    if (!ciphertext) return;
-    const cache = ownPlaintextByCiphertextRef.current;
-    if (cache.has(ciphertext)) cache.delete(ciphertext);
-    cache.set(ciphertext, plaintext);
-    if (cache.size > OWN_PLAINTEXT_CACHE_LIMIT) {
-      const first = cache.keys().next().value;
-      if (first !== undefined) cache.delete(first);
-    }
-  }, []);
+  // Bug A: own-message plaintext lookup keyed by ciphertext. encryptRoom in
+  // lib/crypto.ts populates the cache on every outbound encrypt, so reads
+  // here go to the single module-level Map (no duplicate component cache).
   const lookupOwnPlaintext = useCallback((ciphertextJson: Record<string, unknown> | null | undefined): string | null => {
     if (!ciphertextJson) return null;
     const ct = ciphertextJson["ciphertext"];
     if (typeof ct !== "string" || !ct) return null;
-    return ownPlaintextByCiphertextRef.current.get(ct) ?? null;
+    return getOwnPlaintext(ct);
   }, []);
 
   const toIncomingEnvelope = useCallback((args: {
@@ -1466,6 +1446,13 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     if (sendingRef.current) return;
     const text = draft.trim();
     if ((!text && pendingAttachments.length === 0) || topicMute) return;
+    // Attachments aren't carried through the E2EE envelope yet — the
+    // server send strips them when isE2eeSend. Surface the limitation
+    // instead of silently dropping the picked file.
+    if (isE2ee && pendingAttachments.length > 0) {
+      setE2eeError("Attachments aren't supported in encrypted channels yet.");
+      return;
+    }
     sendingRef.current = true;
     setSending(true);
     try {
@@ -1531,16 +1518,6 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     }
 
     const isE2eeSend = isE2ee && ciphertextEnvelope !== null;
-    if (isE2eeSend && ciphertextEnvelope) {
-      // Bug A: seed the own-plaintext cache BEFORE the server WS-relays
-      // this back. The relay typically arrives on the next tick; without
-      // this, getDisplayText would render "(encrypted…)" until the async
-      // decrypt path catches up.
-      rememberOwnPlaintext(
-        ciphertextEnvelope["ciphertext"] as string | undefined,
-        processed,
-      );
-    }
     await source.send({
       text: finalText,
       attachments: isE2eeSend

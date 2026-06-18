@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   generateAuthenticationOptions,
@@ -12,7 +14,11 @@ import { issueSession, setAuthCookies } from "@/lib/auth";
 import { getRpConfig } from "@/lib/passkey";
 
 const CHALLENGE_TTL = 300;
-const CHALLENGE_KEY = "passkey:auth:global";
+const CHALLENGE_COOKIE = "lc_passkey_chal";
+
+function challengeKey(sessionId: string): string {
+  return `passkey:auth:${sessionId}`;
+}
 
 export async function GET(req: Request) {
   const { rpID } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
@@ -23,7 +29,21 @@ export async function GET(req: Request) {
     allowCredentials: [], // discoverable credential — browser picks
   });
 
-  await redis.set(CHALLENGE_KEY, options.challenge, "EX", CHALLENGE_TTL);
+  // Per-session challenge: a random cookie binds this GET's challenge to the
+  // same client. A second GET (another tab, retry, devtools refresh) gets a
+  // different cookie + key, so concurrent passkey flows don't clobber each
+  // other.
+  const sessionId = randomBytes(16).toString("base64url");
+  await redis.set(challengeKey(sessionId), options.challenge, "EX", CHALLENGE_TTL);
+
+  const jar = await cookies();
+  jar.set(CHALLENGE_COOKIE, sessionId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: CHALLENGE_TTL,
+  });
 
   return NextResponse.json(options);
 }
@@ -32,9 +52,14 @@ export async function POST(req: Request) {
   const { rpID, origin } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
   const body = await req.json() as { response: AuthenticationResponseJSON };
 
-  const challenge = await redis.get(CHALLENGE_KEY);
+  const jar = await cookies();
+  const sessionId = jar.get(CHALLENGE_COOKIE)?.value;
+  if (!sessionId) return NextResponse.json({ error: "Challenge expired." }, { status: 400 });
+  const key = challengeKey(sessionId);
+  const challenge = await redis.get(key);
   if (!challenge) return NextResponse.json({ error: "Challenge expired." }, { status: 400 });
-  await redis.del(CHALLENGE_KEY);
+  await redis.del(key);
+  jar.delete(CHALLENGE_COOKIE);
 
   const credId = body.response.id;
   const [cred] = await db

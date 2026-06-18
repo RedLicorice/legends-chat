@@ -22,6 +22,13 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   } catch {
     // best-effort; fall through to placeholder
   }
+  // Normalize to either an absolute URL or a site-root path. Relative paths
+  // (e.g. "uploads/foo.png") would resolve against /api/favicon and break;
+  // also strip CR/LF to prevent header-injection if admin data is malformed.
+  target = target.replace(/[\r\n]/g, "");
+  if (!/^https?:\/\//i.test(target) && !target.startsWith("/")) {
+    target = `/${target}`;
+  }
   // Relative Location: lets the browser resolve against the public origin
   // it actually loaded from. NextResponse.redirect insists on an absolute URL,
   // so build a raw Response manually.

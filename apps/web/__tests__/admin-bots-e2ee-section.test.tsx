@@ -72,7 +72,7 @@ describe("<AdminBotsE2eeSection />", () => {
 
   it("toggle off fires PATCH {enabled:false}", async () => {
     render(<AdminBotsE2eeSection {...botProps({ e2ee_state: "ready", e2ee_device_id: "D1" })} />);
-    const cb = screen.getByRole("checkbox", { name: /end-to-end encryption/i });
+    const cb = screen.getByRole("switch", { name: /end-to-end encryption/i });
     expect(cb).toBeChecked();
     await userEvent.click(cb);
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
@@ -84,7 +84,7 @@ describe("<AdminBotsE2eeSection />", () => {
 
   it("toggle on (from disabled) fires PATCH {enabled:true}", async () => {
     render(<AdminBotsE2eeSection {...botProps({ e2ee_state: "disabled" })} />);
-    const cb = screen.getByRole("checkbox", { name: /end-to-end encryption/i });
+    const cb = screen.getByRole("switch", { name: /end-to-end encryption/i });
     expect(cb).not.toBeChecked();
     await userEvent.click(cb);
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));

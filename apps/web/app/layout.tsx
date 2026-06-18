@@ -84,7 +84,16 @@ const PRE_REACT_BOOT_SCRIPT = `
   // ships (typical after a deploy if the SW didn't refresh). Catch the
   // first occurrence per page session, drop SW + caches, then hard-reload
   // with a cache-bust query so the browser fetches a fresh shell.
+  //
+  // Loop guard: a broken-deploy could chunk-error again immediately after
+  // reload. sessionStorage carries the last-reload timestamp across reloads;
+  // if we reloaded within the last 60s, give up and surface the error
+  // instead of looping forever.
   var didChunkReload = false;
+  try {
+    var lastReloadAt = +(sessionStorage.getItem("legends:chunk-error-reload") || 0);
+    didChunkReload = lastReloadAt > 0 && Date.now() - lastReloadAt < 60000;
+  } catch (e) {}
   function onChunkError(ev) {
     var msg = (ev && (ev.reason && ev.reason.name || ev.error && ev.error.name) || "") + " " + (ev && (ev.message || (ev.reason && ev.reason.message) || (ev.error && ev.error.message)) || "");
     if (msg.indexOf("ChunkLoadError") === -1 && msg.indexOf("Loading chunk") === -1) return;
