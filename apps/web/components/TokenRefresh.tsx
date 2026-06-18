@@ -17,7 +17,16 @@ function isPublic(): boolean {
 
 async function readExpiry(): Promise<number | null> {
   try {
-    const r = await apiFetch("/api/me");
+    let r = await apiFetch("/api/me");
+    if (r.status === 401) {
+      // PWA cold-open path: the SW served a cached shell that bypassed the
+      // middleware's HTML-shell refresh fallback. /api/me returns 401 because
+      // the access cookie expired. Try the refresh cookie directly here — if
+      // it works, retry /api/me to read the fresh expiry.
+      const ref = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" });
+      if (!ref.ok) return null;
+      r = await apiFetch("/api/me");
+    }
     if (!r.ok) return null;
     const d = (await r.json()) as { tokenExpiresAt?: string | null };
     if (!d.tokenExpiresAt) return null;

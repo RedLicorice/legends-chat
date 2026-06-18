@@ -24,8 +24,16 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
   const [error, setError] = useState<string | null>(null);
   const prefetched = useRef<{ at: number; opts: PublicKeyCredentialRequestOptionsJSON } | null>(null);
   const prefetchInFlight = useRef(false);
+  // While authenticating, prefetch MUST NOT fire: each GET rotates the
+  // per-session cookie + Redis challenge. If the button refocuses (e.g. when
+  // the native passkey sheet closes) and prefetch overwrites the cookie
+  // before the POST lands, the server's stored challenge no longer matches
+  // the WebAuthn-signed one and verification fails. The user then has to
+  // retry, sometimes multiple times, until the timing aligns.
+  const authBusy = useRef(false);
 
   const prefetch = useCallback(() => {
+    if (authBusy.current) return;
     if (prefetchInFlight.current) return;
     const fresh = prefetched.current && Date.now() - prefetched.current.at < PREFETCH_STALE_MS;
     if (fresh) return;
@@ -47,6 +55,7 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
   async function authenticate() {
     setError(null);
     setLoading(true);
+    authBusy.current = true;
     try {
       let options: PublicKeyCredentialRequestOptionsJSON;
       const cached = prefetched.current;
@@ -85,6 +94,7 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
       }
     } finally {
       setLoading(false);
+      authBusy.current = false;
     }
   }
 

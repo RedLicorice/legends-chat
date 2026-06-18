@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Search, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ChatListItem, type ChatItem } from "@/components/ChatListItem";
@@ -83,7 +83,6 @@ const FILTERS: { key: ChatListFilter; label: string }[] = [
 ];
 
 export function ChatListPane({ activeHref }: ChatListPaneProps) {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // Items + socket live in the layout-level provider so they survive
@@ -95,16 +94,14 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
   const debouncedQuery = useDebouncedValue(query, 150);
   const [newChatOpen, setNewChatOpen] = useState(false);
 
-  // Filter is a Home-anchored action: jumping to "Bots" from inside a topic
-  // or DM must go to `/?filter=bots`, not append the query to the current
-  // route. router.push (not replace) so the user can Back out cleanly.
-  const filter = parseFilter(searchParams?.get("filter") ?? null);
-  const setFilter = useCallback(
-    (next: ChatListFilter) => {
-      const target = next === "all" ? "/" : `/?filter=${next}`;
-      router.push(target, { scroll: false });
-    },
-    [router],
+  // Filter is local view state — driven from the sidebar without navigating
+  // the current route. Previously this was URL-anchored (router.push to
+  // `/?filter=X`), but that triggered AppShell's pathname-change effect that
+  // auto-closes the mobile sidebar — so tapping a filter chip on phones
+  // closed the sidebar instead of filtering. Initial value still seeds from
+  // ?filter= so deep-links work; later changes don't write back to the URL.
+  const [filter, setFilter] = useState<ChatListFilter>(() =>
+    parseFilter(searchParams?.get("filter") ?? null),
   );
 
   // ── Derived view ──────────────────────────────────────────────────────────
