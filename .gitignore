@@ -20,3 +20,9 @@ apps/bots/jane/data/
 
 # Local-only Claude Code settings
 .claude/settings.local.json
+
+# E2E test screenshots
+.e2e-shots/
+
+# Local AI banner asset
+banner-ai-2.png
