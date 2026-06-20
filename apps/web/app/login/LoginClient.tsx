@@ -5,6 +5,7 @@ import { clearSessionId } from "@/lib/e2ee-session";
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { PasskeyAuthButton } from "@/components/PasskeyAuthButton";
 
 export function LoginClient() {
@@ -143,8 +144,9 @@ export function LoginClient() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl bg-accent py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
+              {loading && <Loader2 className="h-4 w-4 shrink-0 animate-spin" />}
               {loading ? "Signing in…" : "Sign in"}
             </button>
           </form>

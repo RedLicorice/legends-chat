@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/fetch";
 
 import { useCallback, useRef, useState } from "react";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Loader2 } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { cn } from "@/lib/cn";
@@ -111,7 +111,9 @@ export function PasskeyAuthButton({ onSuccess, className }: Props) {
           className,
         )}
       >
-        <KeyRound className="h-4 w-4 shrink-0" />
+        {loading
+          ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          : <KeyRound className="h-4 w-4 shrink-0" />}
         {loading ? "Waiting for passkey…" : "Sign in with Passkey"}
       </button>
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}

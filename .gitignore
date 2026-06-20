@@ -17,3 +17,6 @@ apps/web/public/uploads/
 apps/web/forge-token.mjs
 token_error
 apps/bots/jane/data/
+
+# Local-only Claude Code settings
+.claude/settings.local.json
