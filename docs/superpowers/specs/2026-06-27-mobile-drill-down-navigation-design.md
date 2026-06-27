@@ -133,6 +133,45 @@ the mobile-overlay branch of `AppSidebar` is retired.
   `ChatPane` header (hamburger → Back on mobile; thread open/close via
   `?thread=`); `ThreadPanel` (full-screen on mobile); the cold-boot effect.
 
+## SPA / PWA invariants (must not break)
+
+This app is a strict SPA: a `force-static` shell hydrated on the client, with a
+single persistent `AppShell` that never unmounts across navigations (see
+`PLAN_SPA_MIGRATION.md` and `app/layout.tsx`). The drill-down must preserve all
+of it. Guardrails the implementation MUST follow:
+
+1. **Persistent shell.** The `AppShell` root container stays mounted across every
+   navigation. The mobile/desktop split and the slide stack live *inside* it;
+   only inner panes mount/unmount (exactly as route content does today). Do not
+   move the breakpoint branch above `AppShell` or remount it per route.
+2. **Client-side navigation only.** Every in-app transition — row tap, Back,
+   thread open/close — uses the Next router (`<Link>`, `router.push/replace/back`).
+   **Never** `window.location` for in-app nav (that forces a full reload and
+   breaks the SPA). The existing `window.location.replace` auth redirects are the
+   only exception and are untouched.
+3. **No server/RSC changes.** `layout.tsx` stays `force-static` and pure; no new
+   server data fetching. AppShell remains the `"use client"` boundary; the
+   catch-all RSC payload stays a constant `{children}` passthrough, so client-side
+   branching on `usePathname()`/breakpoint never touches RSC reconciliation.
+4. **Thread param is client-side.** `?thread=:id` is set/cleared via the router
+   (shallow client nav), not a navigation that re-renders the server tree.
+5. **Slide stack keyed by route *level* (0/1/2), not full path.** So push/pop
+   animates between levels; navigating between sibling chats (both level 1) is a
+   content swap, never a server round-trip or shell remount. `AnimatePresence`
+   exits must not block or defer the actual route change.
+6. **Breakpoint cross is a client re-render, never a navigation/reload.**
+   Crossing `md` swaps the client presentation. Because mobile and desktop use
+   different client subtrees, the visible pane may remount on the cross — that is
+   a client React remount, not a route change, full reload, or RSC re-render.
+   It's acceptable because (a) resize across `md` is rare in practice, and
+   (b) volatile state survives: drafts persist to `localStorage`, scroll
+   re-pins, and the socket lives in `ChatListProvider` *above* `AppShell` so it
+   is untouched. The `AppShell` shell itself and the providers above it never
+   unmount.
+7. **SW shell cache intact.** No change to the cached shell contract; warm navs
+   keep hitting the SW-served shell. Bundle changes ship via the existing
+   `CACHE_VERSION` bump.
+
 ## Testing
 
 Puppeteer at 390px (mobile) and 1280px (desktop):
