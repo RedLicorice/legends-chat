@@ -4,7 +4,7 @@ import { stripImageMetadata } from "@/lib/upload";
 import { Tooltip } from "@/components/Tooltip";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
@@ -321,6 +321,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const threadId = searchParams?.get("thread") ?? null;
   const threadFor = useMemo(
     () => (threadId ? messages.find((m) => String(m.id) === threadId) ?? null : null),
@@ -331,9 +332,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     [router],
   );
   const closeThread = useCallback(() => {
-    if (window.history.length > 1) router.back();
-    else router.push(window.location.pathname, { scroll: false });
-  }, [router]);
+    // Drop the ?thread= param and stay on the conversation. Never router.back()
+    // here — a cold-loaded ?thread= link has browser history that back() would
+    // escape into, leaving the app.
+    router.push(pathname, { scroll: false });
+  }, [router, pathname]);
   const [showSearch, setShowSearch] = useState(false);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [e2eeError, setE2eeError] = useState<string | null>(null);
