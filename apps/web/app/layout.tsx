@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { PushSetup } from "@/components/PushSetup";
@@ -151,7 +152,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <SymbolsProvider>
               <ChatListProvider>
                 <ClientErrorReporter>
-                  <AppShell>{children}</AppShell>
+                  <Suspense fallback={null}>
+                    <AppShell>{children}</AppShell>
+                  </Suspense>
                 </ClientErrorReporter>
               </ChatListProvider>
             </SymbolsProvider>
