@@ -5,7 +5,33 @@ import { NextResponse } from "next/server";
 // (and in dev, in the terminal). No external telemetry service, no storage —
 // deliberately small. Reporting is opt-out client-side (see ClientErrorReporter),
 // so by the time a request reaches here the user has not opted out.
+
+// ponytail: in-memory rate limit — max 20 requests per 10 s per IP.
+// Module-level; resets on cold start. Good enough for a logging endpoint.
+const RATE_WINDOW_MS = 10_000;
+const RATE_LIMIT = 20;
+const ipTimestamps = new Map<string, number[]>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const times = (ipTimestamps.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (times.length >= RATE_LIMIT) return true;
+  times.push(now);
+  ipTimestamps.set(ip, times);
+  return false;
+}
+
 export async function POST(req: Request) {
+  const ip = req.headers.get("x-forwarded-for") ?? "anon";
+  if (isRateLimited(ip)) {
+    return NextResponse.json({ ok: false }, { status: 429 });
+  }
+
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > 16 * 1024) {
+    return NextResponse.json({ ok: false }, { status: 413 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();

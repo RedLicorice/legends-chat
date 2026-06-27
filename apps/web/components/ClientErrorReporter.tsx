@@ -19,6 +19,8 @@ function send(payload: {
   componentStack?: string;
 }): void {
   if (!reportingEnabled()) return;
+  if (globalReportCount >= GLOBAL_REPORT_CEILING) return;
+  globalReportCount++;
   try {
     const body = JSON.stringify({ ...payload, url: location.href });
     // keepalive so a report still flushes if the error is mid-navigation.
@@ -34,10 +36,17 @@ function send(payload: {
 }
 
 let globalsInstalled = false;
+// Hard global ceiling: stops ALL send() after this many reports per page session
+// so a tight error loop can't flood /api/client-error.
+// ponytail: module-level counter; resets only on page reload (intentional).
+let globalReportCount = 0;
+const GLOBAL_REPORT_CEILING = 50;
 // Dedupe so a render loop (which logs the same console.error thousands of times)
 // doesn't hammer the sink — report each distinct message at most a few times.
 const consoleReportCounts = new Map<string, number>();
 const CONSOLE_REPORT_CAP = 3;
+// Shared dedupe map for window.error + unhandledrejection handlers (same cap).
+const windowReportCounts = new Map<string, number>();
 // React logs these via console.error WITHOUT throwing, so the error boundary and
 // window.onerror never see them. We still want them captured.
 const CONSOLE_CAPTURE = /maximum update depth|too many re-?renders|update depth exceeded/i;
@@ -46,17 +55,27 @@ function installGlobalHandlers(): void {
   if (globalsInstalled) return;
   globalsInstalled = true;
   window.addEventListener("error", (e) => {
+    const msg = e.message || String(e.error ?? "error");
+    const key = msg.slice(0, 80);
+    const n = windowReportCounts.get(key) ?? 0;
+    if (n >= CONSOLE_REPORT_CAP) return;
+    windowReportCounts.set(key, n + 1);
     send({
       kind: "window.error",
-      message: e.message || String(e.error ?? "error"),
+      message: msg,
       stack: e.error?.stack,
     });
   });
   window.addEventListener("unhandledrejection", (e) => {
     const r = e.reason;
+    const msg = typeof r === "string" ? r : r?.message || "unhandled rejection";
+    const key = msg.slice(0, 80);
+    const n = windowReportCounts.get(key) ?? 0;
+    if (n >= CONSOLE_REPORT_CAP) return;
+    windowReportCounts.set(key, n + 1);
     send({
       kind: "unhandledrejection",
-      message: typeof r === "string" ? r : r?.message || "unhandled rejection",
+      message: msg,
       stack: r?.stack,
     });
   });
