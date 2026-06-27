@@ -404,7 +404,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   useEffect(() => {
     if (coldBootHandledRef.current) return;
     if (chatListStatus !== "ready" || !chatList) return;
-    if (isMobile) { coldBootHandledRef.current = true; return; } // mobile lands on list root
+    // ponytail: read isMobile synchronously so the cold-boot check isn't
+    // racing against the useIsMobile hydration tick (isMobile is false on
+    // first commit, causing a desktop redirect before the flag flips).
+    const mobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+    if (mobile) { coldBootHandledRef.current = true; return; } // mobile lands on list root
     coldBootHandledRef.current = true;
     try {
       if (sessionStorage.getItem(COLD_BOOT_FLAG)) return;
@@ -424,7 +428,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     } catch {
       // SessionStorage / localStorage may throw in privacy modes — best-effort.
     }
-  }, [rawPathname, router, chatListStatus, chatList, isMobile]);
+  }, [rawPathname, router, chatListStatus, chatList]);
 
   // ── Auto-close the mobile sidebar overlay on navigation ──────────────────
   useEffect(() => {
@@ -560,6 +564,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   markSpaPainted();
 
+  // ponytail: collapse pane level so list=0 and ANY detail (1 or 2)=1.
+  // MobileStack keys on this; ThreadPanel is an overlay inside <main>, not a
+  // separate pane, so bumping to level 2 was unmounting/remounting ChatPane.
+  const paneLevel = level === 0 ? 0 : 1;
+
   return (
     <AppShellContext.Provider value={contextValue}>
       {/* Fills the layout viewport. Note: on iOS standalone this stops at the
@@ -569,7 +578,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           --kb on <main> below. */}
       <div className="fixed inset-0 flex overflow-hidden">
         {isMobile ? (
-          <MobileStack level={level}>
+          <MobileStack level={paneLevel as 0 | 1 | 2}>
             {level === 0 ? (
               <AppSidebar
                 user={sidebarUser}

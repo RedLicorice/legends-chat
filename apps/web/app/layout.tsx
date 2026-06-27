@@ -11,6 +11,7 @@ import { ExternalLinkBootstrap } from "@/components/ExternalLinkBootstrap";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
 import { LinkContextMenu } from "@/components/LinkContextMenu";
 import { AppShell } from "@/components/AppShell";
+import { PWASplash } from "@/components/PWASplash";
 import { ClientErrorReporter } from "@/components/ClientErrorReporter";
 
 // Strict-SPA root layout: pure, sync, no cookies(), no DB. Dynamic data
@@ -152,7 +153,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <SymbolsProvider>
               <ChatListProvider>
                 <ClientErrorReporter>
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<PWASplash />}>
                     <AppShell>{children}</AppShell>
                   </Suspense>
                 </ClientErrorReporter>
