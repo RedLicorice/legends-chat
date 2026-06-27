@@ -1,5 +1,5 @@
 "use client";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 interface Props {
@@ -7,16 +7,27 @@ interface Props {
   children: React.ReactNode;
 }
 
+// Variant FUNCTIONS so AnimatePresence's `custom` can thread the live direction
+// into the exiting element (plain objects bake the direction at mount → pops
+// would animate the wrong way).
+const variants = {
+  initial: (dir: number) => ({ x: dir > 0 ? "100%" : "-30%" }),
+  animate: { x: 0 },
+  exit: (dir: number) => ({ x: dir > 0 ? "-30%" : "100%" }),
+};
+
 /**
  * Full-screen drill-down stack for mobile. One pane visible at a time, keyed by
  * `level` so push (level↑) slides in from the right and pop (level↓) slides back
- * out. Keyed by LEVEL not route, so sibling navigations at the same level are a
- * plain content swap (no slide, no remount churn).
+ * out to the right. Keyed by LEVEL not route, so sibling navigations at the same
+ * level are a plain content swap (no slide, no remount churn).
  */
 export function MobileStack({ level, children }: Props) {
   const prevLevel = useRef(level);
   const dir = level >= prevLevel.current ? 1 : -1; // 1 = push (R→L), -1 = pop
-  prevLevel.current = level;
+  useEffect(() => {
+    prevLevel.current = level;
+  }, [level]);
   const reduce = useReducedMotion();
 
   return (
@@ -26,9 +37,10 @@ export function MobileStack({ level, children }: Props) {
           key={level}
           custom={dir}
           className="absolute inset-0 flex flex-col"
-          initial={reduce ? false : { x: dir > 0 ? "100%" : "-30%" }}
-          animate={{ x: 0 }}
-          exit={reduce ? { opacity: 0 } : { x: dir > 0 ? "-30%" : "100%" }}
+          variants={variants}
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          exit={reduce ? { opacity: 0 } : "exit"}
           transition={{ duration: 0.24, ease: [0.32, 0.72, 0, 1] }}
         >
           {children}
