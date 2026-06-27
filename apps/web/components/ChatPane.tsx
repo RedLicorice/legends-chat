@@ -323,6 +323,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const threadId = searchParams?.get("thread") ?? null;
+  // ponytail: if threadId is set but the message isn't in `messages` yet
+  // (cold deep-link before WS connect), threadFor is null and ThreadPanel
+  // silently doesn't open. No single-message-by-id endpoint exists
+  // (/api/topics/[id]/messages only supports ?replyTo and ?hashtag), so
+  // we leave the behavior as-is rather than building new backend surface.
   const threadFor = useMemo(
     () => (threadId ? messages.find((m) => String(m.id) === threadId) ?? null : null),
     [threadId, messages],

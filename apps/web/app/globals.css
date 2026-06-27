@@ -22,10 +22,6 @@
 }
 
 :root {
-  /* Visual viewport vars — updated by JS to follow soft keyboard */
-  --vvh: 100dvh;
-  --vvy: 0px;
-
   --ch-bg:      11  13  18;
   --ch-panel:   20  24  33;
   --ch-panel2:  26  31  43;
