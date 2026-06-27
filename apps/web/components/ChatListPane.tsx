@@ -12,7 +12,7 @@ import { useChatListContext } from "@/contexts/ChatListContext";
 // Public API
 // ---------------------------------------------------------------------------
 
-export type ChatListFilter = "all" | "topics" | "dms" | "bots";
+export type ChatListFilter = "all" | "topics" | "feed" | "dms" | "bots";
 
 export interface ChatListPaneProps {
   /**
@@ -56,6 +56,8 @@ function matchesFilter(item: ChatItem, filter: ChatListFilter): boolean {
   switch (filter) {
     case "topics":
       return item.kind === "topic";
+    case "feed":
+      return item.kind === "topic" && item.isFeed === true;
     case "dms":
       return item.kind === "dm-user";
     case "bots":
@@ -67,7 +69,7 @@ function matchesFilter(item: ChatItem, filter: ChatListFilter): boolean {
 }
 
 function parseFilter(raw: string | null): ChatListFilter {
-  if (raw === "topics" || raw === "dms" || raw === "bots" || raw === "all") return raw;
+  if (raw === "topics" || raw === "feed" || raw === "dms" || raw === "bots" || raw === "all") return raw;
   return "all";
 }
 
@@ -78,6 +80,7 @@ function parseFilter(raw: string | null): ChatListFilter {
 const FILTERS: { key: ChatListFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "topics", label: "Topics" },
+  { key: "feed", label: "Feed" },
   { key: "dms", label: "DMs" },
   { key: "bots", label: "Bots" },
 ];
@@ -148,7 +151,7 @@ export function ChatListPane({ activeHref }: ChatListPaneProps) {
         {/* Filter chips. On mobile we use larger tap targets (≥36px / iOS
             HIG minimum); on md+ desktop we shrink to compact text-[11px]
             chips since pointer accuracy is far higher with a mouse. */}
-        <div className="flex items-center gap-1.5 pt-1 pb-1 md:gap-1">
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 pb-1 md:gap-1">
           {FILTERS.map((f) => {
             const isActive = filter === f.key;
             return (

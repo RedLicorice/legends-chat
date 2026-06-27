@@ -22,6 +22,8 @@ export type ChatItem = {
   lastPreview: string | null;
   unreadCount: number;
   isE2ee?: boolean;
+  /** True for feed-style topics (kind === "topic" only). Drives the Feed filter. */
+  isFeed?: boolean;
   /**
    * Topic description, only populated for `kind === "topic"` rows. Rendered
    * as the secondary line on E2EE topic rows (where we never see plaintext

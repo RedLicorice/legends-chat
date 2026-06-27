@@ -315,7 +315,7 @@ export function NotificationBell({ align = "right" }: { align?: "left" | "right"
         ref={btnRef}
         type="button"
         onClick={openPanel}
-        className={cn("relative rounded-lg p-1.5 transition hover:bg-panel2 text-muted hover:text-text", open && "bg-panel2 text-accent")}
+        className={cn("relative rounded-lg p-2.5 transition hover:bg-panel2 text-muted hover:text-text", open && "bg-panel2 text-accent")}
         title="Notifications"
       >
         <Bell className="h-4 w-4" />

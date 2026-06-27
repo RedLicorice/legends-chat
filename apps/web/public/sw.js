@@ -1,7 +1,7 @@
 // Legends Chat service worker — SPA shell cache + push notifications.
 
 // Bump on every deploy that needs to invalidate cached SPA shells / bundles.
-const CACHE_VERSION = "v8-skip-waiting";
+const CACHE_VERSION = "v21-chin-revert";
 const SHELL_CACHE = `legends-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `legends-static-${CACHE_VERSION}`;
 
@@ -47,6 +47,20 @@ self.addEventListener("install", (event) => {
       const cache = await caches.open(SHELL_CACHE);
       const res = await fetch(SHELL_URL, { credentials: "include" });
       if (isCacheableShellResponse(res)) await cache.put(SHELL_URL, res.clone());
+    } catch {}
+    // Precache the splash logo so it paints instantly on a cold reopen instead
+    // of losing the network race against the bundle (black screen with no logo).
+    // /api/favicon 302s to the configured PWA icon; fetch follows the redirect.
+    try {
+      const sc = await caches.open(STATIC_CACHE);
+      await Promise.all(
+        ["/api/favicon", "/icon-512.png"].map(async (u) => {
+          try {
+            const r = await fetch(u, { credentials: "include" });
+            if (r.ok) await sc.put(u, r.clone());
+          } catch {}
+        }),
+      );
     } catch {}
   })());
 });
@@ -122,6 +136,13 @@ self.addEventListener("fetch", (event) => {
 
   // Static asset cache (cache-first).
   if (isStaticAsset(url) && req.method === "GET") {
+    event.respondWith(staticHandler(req));
+    return;
+  }
+
+  // Splash logo: cache-first so the cold-reopen splash paints without a network
+  // round-trip. Exception to the API rule below.
+  if (url.pathname === "/api/favicon" && req.method === "GET") {
     event.respondWith(staticHandler(req));
     return;
   }

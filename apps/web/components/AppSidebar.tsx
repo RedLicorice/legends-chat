@@ -234,7 +234,7 @@ export function AppSidebar({
               type="button"
               onClick={() => setShowProfile(true)}
               title="Profile"
-              className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition"
+              className="rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition"
             >
               <User className="h-4 w-4" />
             </button>
@@ -244,7 +244,7 @@ export function AppSidebar({
                 type="button"
                 onClick={() => setShowModQueue(true)}
                 title="Mod Queue"
-                className="relative rounded-lg p-1.5 text-amber-400 hover:bg-panel2 transition"
+                className="relative rounded-lg p-2.5 text-amber-400 hover:bg-panel2 transition"
               >
                 <AlertTriangle className="h-4 w-4" />
                 {pendingFlags !== null && pendingFlags > 0 && (
@@ -267,7 +267,7 @@ export function AppSidebar({
             <button
               type="button"
               onClick={close}
-              className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
+              className="rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
               aria-label="Close menu"
             >
               <X className="h-4 w-4" />

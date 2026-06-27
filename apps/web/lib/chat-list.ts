@@ -37,6 +37,8 @@ export type ChatItem = {
   lastPreview: string | null;
   unreadCount: number;
   isE2ee?: boolean;
+  /** True for feed-style topics (kind === "topic" only). Drives the Feed filter. */
+  isFeed?: boolean;
   /**
    * Topic description, only populated for `kind === "topic"` rows. Rendered as
    * the secondary line on E2EE topic rows in place of a last-message preview
@@ -58,6 +60,7 @@ function topicToItem(t: TopicListItem): ChatItem {
     lastPreview: t.isE2ee ? null : t.lastMessage?.preview ?? t.description ?? null,
     unreadCount: t.unreadCount,
     isE2ee: t.isE2ee,
+    isFeed: t.isFeed,
     description: t.description ?? null,
   };
 }

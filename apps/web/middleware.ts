@@ -10,6 +10,9 @@ const PUBLIC_PATHS = [
   "/auth/landing",
   "/auth/refresh",
   "/api/health",
+  // Client-error sink must accept reports even when the user is unauthenticated
+  // (a crash can happen before/around auth) — it only logs, reads no session.
+  "/api/client-error",
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/refresh",

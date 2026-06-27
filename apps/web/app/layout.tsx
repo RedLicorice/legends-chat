@@ -10,6 +10,7 @@ import { ExternalLinkBootstrap } from "@/components/ExternalLinkBootstrap";
 import { ExternalLinkDialog } from "@/components/ExternalLinkDialog";
 import { LinkContextMenu } from "@/components/LinkContextMenu";
 import { AppShell } from "@/components/AppShell";
+import { ClientErrorReporter } from "@/components/ClientErrorReporter";
 
 // Strict-SPA root layout: pure, sync, no cookies(), no DB. Dynamic data
 // (theme attributes, branding, external-link config) is resolved on the
@@ -77,7 +78,14 @@ const PRE_REACT_BOOT_SCRIPT = `
   // own onContextMenu handler during the target/capture phase before this
   // bubble-phase listener fires; preventDefault here just keeps the browser
   // chrome from appearing on everything else.
-  document.addEventListener("contextmenu", function (e) { e.preventDefault(); }, { passive: false });
+  document.addEventListener("contextmenu", function (e) {
+    // Don't swallow right-click on the Next.js dev error overlay — devs need
+    // to copy stack traces out of it. The overlay lives in a <nextjs-portal>
+    // shadow host, so events retarget to that host element.
+    var t = e.target;
+    if (t && t.closest && t.closest("nextjs-portal, [data-nextjs-dialog-overlay], [data-nextjs-toast]")) return;
+    e.preventDefault();
+  }, { passive: false });
 
   // Stale-SW self-heal: ChunkLoadError fires when the SW serves a cached
   // shell that references _next chunk hashes the current server no longer
@@ -142,7 +150,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ExternalLinkBootstrap>
             <SymbolsProvider>
               <ChatListProvider>
-                <AppShell>{children}</AppShell>
+                <ClientErrorReporter>
+                  <AppShell>{children}</AppShell>
+                </ClientErrorReporter>
               </ChatListProvider>
             </SymbolsProvider>
             <ExternalLinkDialog />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { Loader2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { ChatPane } from "@/components/ChatPane";
 import { P2PView } from "@/components/P2PView";
@@ -66,7 +67,19 @@ export function TopicRightPane({ slug }: Props) {
       </div>
     );
   }
-  if (!data || !me || !list) return <PWASplash />;
+  // Session not ready yet (cold app boot) — AppShell shows the splash too.
+  if (!me || !list) return <PWASplash />;
+
+  // No topic data, or data still for the previous slug (the one render between
+  // a slug change and the hook clearing it). Hold a spinner — never paint the
+  // old thread during a switch.
+  if (!data || data.topic.slug !== slug) {
+    return (
+      <div className="flex h-dvh items-center justify-center bg-bg">
+        <Loader2 className="h-6 w-6 animate-spin text-muted" aria-label="Loading" />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -82,6 +95,7 @@ export function TopicRightPane({ slug }: Props) {
       >
         {data.topic.isP2p ? (
           <P2PView
+            key={data.topic.id}
             topic={{
               id: data.topic.id,
               slug: data.topic.slug,
@@ -101,6 +115,7 @@ export function TopicRightPane({ slug }: Props) {
           />
         ) : (
           <TopicChatPaneHost
+            key={data.topic.id}
             user={{
               id: me.id,
               displayName: me.displayName,

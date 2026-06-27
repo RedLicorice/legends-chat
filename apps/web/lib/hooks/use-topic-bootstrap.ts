@@ -33,13 +33,21 @@ export function useTopicBootstrap(slug: string | undefined): UseTopicBootstrapRe
   const [status, setStatus] = useState<ResourceStatus>("loading");
   const slugRef = useRef<string | undefined>(slug);
   slugRef.current = slug;
+  // Tracks the slug the effect last ran for, so we can distinguish a real
+  // topic switch from a socket reconnect (both re-fire the effect).
+  const loadedSlugRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!slug) { setData(null); setStatus("loading"); return; }
     let cancelled = false;
-    // Stale-while-revalidate: keep prior data on slug/socket change so the
-    // UI never falls back to PWASplash between renders. Only `setStatus`
-    // flips to "loading" — `setData` is updated when fresh data arrives.
+    // On an actual slug change, drop the previous topic's data outright so the
+    // old thread can't linger (no stale-while-revalidate flash, and the reused
+    // state is gone, not just masked). On a socket reconnect (same slug) we
+    // keep the data so the current topic doesn't blank out.
+    if (loadedSlugRef.current !== slug) {
+      setData(null);
+      loadedSlugRef.current = slug;
+    }
     setStatus("loading");
 
     async function bootstrapOverSocket() {

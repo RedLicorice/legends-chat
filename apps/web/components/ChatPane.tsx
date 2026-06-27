@@ -1771,7 +1771,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         />
       )}
 
-      <header className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-4 pt-[calc(1rem+var(--sat))] md:px-6">
+      <header className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-2.5 pt-[calc(0.75rem+var(--sat))] md:px-6">
         <button
           type="button"
           onClick={onMenuOpen}
@@ -1799,13 +1799,18 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           )}
           <div className="min-w-0 flex-1">
             <h1 className={cn("text-lg font-semibold truncate", isTopicMode && "hover:underline decoration-muted underline-offset-2")}>{headerTitle}</h1>
-            <p className="flex items-center gap-1.5 text-xs text-muted">
-              {isE2ee
-                ? <Lock className="h-3 w-3 text-accent2" />
-                : <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
-              }
-              {connected ? "connected" : "connecting…"}
-            </p>
+            {/* Status line is persistent chrome — only worth a row when it
+                carries signal: E2EE lock, or a non-connected state. A plain
+                "connected" (the steady state) just eats vertical space. */}
+            {(isE2ee || !connected) && (
+              <p className="flex items-center gap-1.5 text-xs text-muted">
+                {isE2ee
+                  ? <Lock className="h-3 w-3 text-accent2" />
+                  : <span className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
+                }
+                {connected ? (isE2ee ? "encrypted" : "connected") : "connecting…"}
+              </p>
+            )}
           </div>
         </button>
         {caps.members && (
@@ -1846,13 +1851,17 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         </div>
       )}
 
+      {/* Members panel anchors to this relative row (which begins *below* the
+          header), not to a hardcoded 65px header height — the header grows by
+          var(--sat) on notched devices, so the old top-[65px] left a gap. */}
+      <div className="relative flex flex-1 min-w-0 min-h-0 overflow-hidden">
       <AnimatePresence>
         {caps.members && showUsers && (
           <motion.div
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 16 }}
-            className="absolute right-0 top-[65px] z-20 flex h-[calc(100%-65px)] w-72 flex-col border-l border-border bg-panel shadow-xl"
+            className="absolute inset-y-0 right-0 z-20 flex w-72 flex-col border-l border-border bg-panel shadow-xl"
           >
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <span className="text-sm font-semibold">Members</span>
@@ -1892,7 +1901,6 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         )}
       </AnimatePresence>
 
-      <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
       {hashtagFilter ? (
         <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
           {hashtagFilter.startsWith("$") && (() => {
@@ -2009,7 +2017,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           </div>
         </div>
       ) : (<>
-      <div ref={scrollerRef} className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4", isFeed ? "space-y-4" : "space-y-1")}>
+      <div ref={scrollerRef} className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-4">
+        {/* Cap the conversation to a readable column and centre it — full-pane
+            width on a wide desktop scatters bubbles and opens a dead centre
+            channel. Scrollbar stays at the pane edge; content centres. */}
+        <div className={cn("mx-auto w-full max-w-3xl", isFeed ? "space-y-4" : "space-y-1")}>
         {isE2ee && (
           <div className="mb-3 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
             <span aria-hidden="true">🔒</span>{" "}
@@ -2522,6 +2534,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         </AnimatePresence>
           );
         })()}
+        </div>
       </div>
 
       {threadFor && caps.threads && isTopicMode && topic && (
@@ -2543,7 +2556,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
 
       {/* Multi-select action bar */}
       {isSelecting && (
-        <div className="border-t border-border bg-panel px-4 pt-2.5 pb-[max(0.5rem,var(--sab))] flex items-center gap-3 shrink-0">
+        <div className="border-t border-border bg-panel px-4 pt-2.5 pb-[max(0.5rem,calc(var(--sab)*0.5))] flex items-center gap-3 shrink-0">
           <span className="text-sm font-semibold text-text">{selectedIds.size} selected</span>
           <div className="flex-1" />
           {caps.delete && (canDeleteOwn || canDeleteAny) && (
@@ -2566,12 +2579,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
       )}
 
       {!hashtagFilter && (topicMute ? (
-        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[max(0.75rem,var(--sab))] text-sm text-danger shrink-0">
+        <div suppressHydrationWarning className="border-t border-border bg-panel px-6 pt-4 pb-[max(0.75rem,calc(var(--sab)*0.5))] text-sm text-danger shrink-0">
           You are muted: {topicMute.reason}
           {topicMute.expiresAt ? ` (until ${new Date(topicMute.expiresAt).toLocaleString()})` : " (permanent)"}
         </div>
       ) : !canPost ? (
-        <div className="border-t border-border bg-panel px-6 pt-4 pb-[max(0.75rem,var(--sab))] text-sm text-muted shrink-0">
+        <div className="border-t border-border bg-panel px-6 pt-4 pb-[max(0.75rem,calc(var(--sab)*0.5))] text-sm text-muted shrink-0">
           {isTopicMode && topic
             ? `Only ${topic.postRoles.join(", ")} can post in this channel.`
             : isDmMode && dmConversation?.state === "pending"
@@ -2579,7 +2592,8 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
               : "You cannot post in this conversation."}
         </div>
       ) : (
-        <div className="border-t border-border bg-panel px-3 pt-2 pb-[max(0.375rem,var(--sab))] shrink-0">
+        <div className="border-t border-border bg-panel px-3 pt-2 pb-[max(0.375rem,calc(var(--sab)*0.5))] shrink-0">
+          <div className="mx-auto w-full max-w-3xl">
           {caps.threads && replyingTo && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
               <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent2" />
@@ -2739,6 +2753,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                 if (files.length === 0) return;
                 await uploadAndAttach(files, "original");
               }} />
+          </div>
           </div>
         </div>
       ))}
