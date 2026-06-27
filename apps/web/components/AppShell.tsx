@@ -17,6 +17,7 @@ import { routeLevel, backTarget } from "@/lib/mobile-nav";
 import { Menu, PanelLeftOpen, Hash } from "lucide-react";
 import { PERMISSIONS } from "@legends/shared";
 import { AppSidebar, AdminNav } from "@/components/AppSidebar";
+import { MobileStack } from "@/components/MobileStack";
 import { ChatListPane } from "@/components/ChatListPane";
 import { PWASplash, markSpaPainted } from "@/components/PWASplash";
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse";
@@ -452,61 +453,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     };
   }, [isPublicPath]);
 
-  // ── Mobile edge-swipe to open the sidebar drawer ────────────────────────
-  // A left-edge horizontal drag opens the chat drawer — native one-gesture
-  // access with zero permanent chrome. The 24px start zone is intentionally
-  // narrow so it never hijacks horizontal scroll inside code blocks or other
-  // wide content.
-  //
-  // The catch: the same left-edge drag also triggers the browser/iOS
-  // swipe-back gesture. To win it, once we detect horizontal intent from the
-  // edge we *claim* the gesture by calling preventDefault() on the (non-passive)
-  // touchmove — that suppresses swipe-back. We only claim on clear horizontal
-  // motion, so vertical scrolls and taps near the edge are left untouched.
-  useEffect(() => {
-    if (isPublicPath) return;
-    let startX = 0;
-    let startY = 0;
-    let tracking = false;
-    let claimed = false;
-    function onStart(e: TouchEvent) {
-      const t = e.touches[0];
-      if (!t) return;
-      tracking = t.clientX <= 24 && !sidebarOpen;
-      claimed = false;
-      startX = t.clientX;
-      startY = t.clientY;
-    }
-    function onMove(e: TouchEvent) {
-      if (!tracking) return;
-      const t = e.touches[0];
-      if (!t) return;
-      const dx = t.clientX - startX;
-      const dy = t.clientY - startY;
-      if (!claimed) {
-        // Decide intent on the first meaningful movement.
-        if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
-          tracking = false; // vertical scroll — hand it back to the page
-          return;
-        }
-        if (dx > 8) claimed = true; // horizontal from the edge — it's ours
-        else return;
-      }
-      // Claim the gesture so the browser/iOS swipe-back doesn't also fire.
-      if (e.cancelable) e.preventDefault();
-      if (dx > 60 && Math.abs(dy) < 40) {
-        tracking = false;
-        setSidebarOpen(true);
-      }
-    }
-    document.addEventListener("touchstart", onStart, { passive: true });
-    document.addEventListener("touchmove", onMove, { passive: false });
-    return () => {
-      document.removeEventListener("touchstart", onStart);
-      document.removeEventListener("touchmove", onMove);
-    };
-  }, [isPublicPath, sidebarOpen]);
-
   // ── General auth gate for authed routes ──────────────────────────────────
   useEffect(() => {
     if (isPublicPath) return;
@@ -608,25 +554,52 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           reliably. Header sticks because nothing scrolls; keyboard handled via
           --kb on <main> below. */}
       <div className="fixed inset-0 flex overflow-hidden">
-        <AppSidebar
-          user={sidebarUser}
-          variant={route.sidebarVariant}
-          hidden={route.sidebarHidden}
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          desktopCollapsed={desktopCollapsed}
-          onToggleDesktop={toggle}
-          compactMode={compactMode}
-          iconChildren={iconChildren}
-        >
-          <Suspense fallback={null}>{route.sidebarContent}</Suspense>
-        </AppSidebar>
-        <main
-          className="relative flex flex-1 min-w-0 flex-col overflow-hidden"
-          style={{ paddingBottom: "var(--kb, 0px)" }}
-        >
-          <Suspense fallback={null}>{route.mainContent}</Suspense>
-        </main>
+        {isMobile ? (
+          <MobileStack level={level}>
+            {level === 0 ? (
+              <AppSidebar
+                user={sidebarUser}
+                variant={route.sidebarVariant}
+                hidden={false}
+                mobileFullScreen
+                desktopCollapsed={false}
+                compactMode={compactMode}
+                iconChildren={iconChildren}
+              >
+                <Suspense fallback={null}>{route.sidebarContent}</Suspense>
+              </AppSidebar>
+            ) : (
+              <main
+                className="relative flex flex-1 min-w-0 flex-col overflow-hidden"
+                style={{ paddingBottom: "var(--kb, 0px)" }}
+              >
+                <Suspense fallback={null}>{route.mainContent}</Suspense>
+              </main>
+            )}
+          </MobileStack>
+        ) : (
+          <>
+            <AppSidebar
+              user={sidebarUser}
+              variant={route.sidebarVariant}
+              hidden={route.sidebarHidden}
+              isOpen={false}
+              onClose={() => {}}
+              desktopCollapsed={desktopCollapsed}
+              onToggleDesktop={toggle}
+              compactMode={compactMode}
+              iconChildren={iconChildren}
+            >
+              <Suspense fallback={null}>{route.sidebarContent}</Suspense>
+            </AppSidebar>
+            <main
+              className="relative flex flex-1 min-w-0 flex-col overflow-hidden"
+              style={{ paddingBottom: "var(--kb, 0px)" }}
+            >
+              <Suspense fallback={null}>{route.mainContent}</Suspense>
+            </main>
+          </>
+        )}
       </div>
     </AppShellContext.Provider>
   );

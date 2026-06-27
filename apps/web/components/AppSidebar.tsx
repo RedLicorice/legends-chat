@@ -44,6 +44,9 @@ interface Props {
   // but the <aside> element stays in the DOM so React identity persists
   // across navigation. Used by AppShell for /settings.
   hidden?: boolean;
+  // When true, render full-width static (no drawer, no scrim, no close X).
+  // Used by AppShell's mobile branch where AppSidebar IS the level-0 pane.
+  mobileFullScreen?: boolean;
 }
 
 const STORAGE_KEY = "sidebar-collapsed";
@@ -60,6 +63,7 @@ export function AppSidebar({
   compactMode: compactModeProp,
   iconChildren,
   hidden = false,
+  mobileFullScreen = false,
 }: Props) {
   const [internalOpen, setInternalOpen] = useState(false);
   const controlledMobile = isOpenProp !== undefined;
@@ -145,7 +149,7 @@ export function AppSidebar({
   return (
     <>
       {/* Uncontrolled mobile hamburger */}
-      {!controlledMobile && !hidden && (
+      {!controlledMobile && !hidden && !mobileFullScreen && (
         <button
           type="button"
           onClick={() => setInternalOpen(true)}
@@ -156,19 +160,23 @@ export function AppSidebar({
         </button>
       )}
 
-      {effectiveIsOpen && (
+      {effectiveIsOpen && !mobileFullScreen && (
         <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={close} />
       )}
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200 overflow-x-hidden",
-        "md:relative md:z-auto",
-        // Mobile: controlled by isOpen (always full width)
-        effectiveIsOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full md:translate-x-0",
-        // Desktop: width depends on collapse mode (also zero when hidden)
-        showMinimalHidden ? "md:w-0 md:border-r-0" : showStrip ? "md:w-12" : "md:w-72",
-        // When hidden, the mobile slide-in panel is also collapsed
-        hidden && "w-0 border-r-0",
+        mobileFullScreen
+          ? "flex h-full w-full shrink-0 flex-col bg-panel overflow-x-hidden"
+          : cn(
+              "fixed inset-y-0 left-0 z-50 flex h-full shrink-0 flex-col border-r border-border bg-panel transition-all duration-200 overflow-x-hidden",
+              "md:relative md:z-auto",
+              // Mobile: controlled by isOpen (always full width)
+              effectiveIsOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full md:translate-x-0",
+              // Desktop: width depends on collapse mode (also zero when hidden)
+              showMinimalHidden ? "md:w-0 md:border-r-0" : showStrip ? "md:w-12" : "md:w-72",
+              // When hidden, the mobile slide-in panel is also collapsed
+              hidden && "w-0 border-r-0",
+            ),
       )}>
         {/* Strip mode: collapsed icon strip — desktop only */}
         {!hidden && showStrip && (
@@ -263,15 +271,17 @@ export function AppSidebar({
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
-            {/* Mobile close */}
-            <button
-              type="button"
-              onClick={close}
-              className="rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
-              aria-label="Close menu"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            {/* Mobile close — hidden when rendered as full-screen root pane */}
+            {!mobileFullScreen && (
+              <button
+                type="button"
+                onClick={close}
+                className="rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition md:hidden"
+                aria-label="Close menu"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
           {/* Middle — scrollable content (topics list or admin nav) */}
