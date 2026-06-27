@@ -11,7 +11,9 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { routeLevel, backTarget } from "@/lib/mobile-nav";
 import { Menu, PanelLeftOpen, Hash } from "lucide-react";
 import { PERMISSIONS } from "@legends/shared";
 import { AppSidebar, AdminNav } from "@/components/AppSidebar";
@@ -64,6 +66,9 @@ interface AppShellContextValue {
   expandDesktopSidebar: () => void;
   desktopCollapsed: boolean;
   compactMode: "minimal" | "strip";
+  isMobile: boolean;
+  level: 0 | 1 | 2;
+  goBack: () => void;
 }
 
 const AppShellContext = createContext<AppShellContextValue | null>(null);
@@ -325,6 +330,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const coldBootHandledRef = useRef(false);
 
   const isPublicPath = isPublic(path);
+  const isMobile = useIsMobile();
+  const searchParams = useSearchParams();
+  const hasThread = !!searchParams?.get("thread");
+  const level = routeLevel(path, hasThread);
+  const goBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) router.back();
+    else router.push(backTarget(path));
+  }, [router, path]);
 
   // ── ChatList context — provider lives above, always available ────────────
   const { me, meStatus, chatList, chatListStatus } = useChatListContext();
@@ -347,8 +360,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       expandDesktopSidebar: expand,
       desktopCollapsed,
       compactMode,
+      isMobile,
+      level,
+      goBack,
     }),
-    [openSidebar, expand, desktopCollapsed, compactMode],
+    [openSidebar, expand, desktopCollapsed, compactMode, isMobile, level, goBack],
   );
 
   // ── Backward-compat: `/dm` → `/c` ────────────────────────────────────────
@@ -362,52 +378,134 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     }
   }, [rawPathname, router]);
 
-  // ── Cold-boot restore: jump to last topic on first `/` visit ─────────────
+  // ── Cold-boot restore: jump to last topic (or most-recent chat) on first
+  //    `/` visit ──────────────────────────────────────────────────────────
+  // Waits for the chat list so the no-remembered-topic case can land on the
+  // most-recent conversation instead of the empty welcome pane — an installed
+  // app cold-opens on content, not a blank panel. Render shows the splash
+  // until chatList is ready anyway, so the slightly later redirect is unseen.
+  // Home stays reachable: the cold-boot flag is set on the first run, so warm
+  // Home clicks within the session never redirect.
   useEffect(() => {
     if (coldBootHandledRef.current) return;
+    if (chatListStatus !== "ready" || !chatList) return;
+    if (isMobile) { coldBootHandledRef.current = true; return; } // mobile lands on list root
     coldBootHandledRef.current = true;
     try {
       if (sessionStorage.getItem(COLD_BOOT_FLAG)) return;
       sessionStorage.setItem(COLD_BOOT_FLAG, "1");
       if (rawPathname !== "/" && rawPathname !== "") return;
       const last = localStorage.getItem(LAST_TOPIC_KEY);
-      if (last) router.replace(`/t/${last}`);
+      if (last) {
+        router.replace(`/t/${last}`);
+        return;
+      }
+      const items = chatList.chatItems;
+      const recent = items.reduce<(typeof items)[number] | null>(
+        (best, it) => (!best || (it.lastAt ?? "") > (best.lastAt ?? "") ? it : best),
+        null,
+      );
+      if (recent) router.replace(recent.href);
     } catch {
       // SessionStorage / localStorage may throw in privacy modes — best-effort.
     }
-  }, [rawPathname, router]);
+  }, [rawPathname, router, chatListStatus, chatList, isMobile]);
 
   // ── Auto-close the mobile sidebar overlay on navigation ──────────────────
   useEffect(() => {
     setSidebarOpen(false);
   }, [rawPathname]);
 
-  // ── Visual viewport tracking (iOS keyboard accommodation) ────────────────
+  // ── On-screen keyboard inset (content only — never the header) ────────────
+  // The shell is `position: fixed; inset: 0` (see container below): it fills the
+  // real viewport (no `100dvh` home-indicator chin), and since <body> is
+  // overflow:hidden there's nothing to scroll, so the header can never be pushed
+  // off-screen — it's rock-solid with zero JS touching it (no flicker).
+  // The only adjustment is lifting the *content's* bottom by the keyboard height
+  // (--kb) so the composer clears the keyboard. iOS reports the keyboard by
+  // shrinking visualViewport while innerHeight stays full; platforms that honour
+  // interactiveWidget=resizes-content shrink innerHeight too, leaving --kb≈0
+  // (the shell already shrank) — correct either way.
   useEffect(() => {
     if (isPublicPath) return;
     const vv = window.visualViewport;
     if (!vv) return;
     const root = document.documentElement;
-    let maxH = vv.height;
-    function update() {
-      maxH = Math.max(maxH, vv!.height);
-      if (maxH - vv!.height > 80) {
-        root.style.setProperty("--vvh", `${vv!.height}px`);
-        root.style.setProperty("--vvy", `${vv!.offsetTop}px`);
-      } else {
-        root.style.removeProperty("--vvh");
-        root.style.removeProperty("--vvy");
-      }
+    let raf = 0;
+    function apply() {
+      raf = 0;
+      const kb = Math.max(0, window.innerHeight - vv!.height - vv!.offsetTop);
+      if (kb > 80) root.style.setProperty("--kb", `${kb}px`);
+      else root.style.removeProperty("--kb");
     }
+    function update() {
+      if (!raf) raf = requestAnimationFrame(apply);
+    }
+    apply();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
     return () => {
+      if (raf) cancelAnimationFrame(raf);
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
-      root.style.removeProperty("--vvh");
-      root.style.removeProperty("--vvy");
+      root.style.removeProperty("--kb");
     };
   }, [isPublicPath]);
+
+  // ── Mobile edge-swipe to open the sidebar drawer ────────────────────────
+  // A left-edge horizontal drag opens the chat drawer — native one-gesture
+  // access with zero permanent chrome. The 24px start zone is intentionally
+  // narrow so it never hijacks horizontal scroll inside code blocks or other
+  // wide content.
+  //
+  // The catch: the same left-edge drag also triggers the browser/iOS
+  // swipe-back gesture. To win it, once we detect horizontal intent from the
+  // edge we *claim* the gesture by calling preventDefault() on the (non-passive)
+  // touchmove — that suppresses swipe-back. We only claim on clear horizontal
+  // motion, so vertical scrolls and taps near the edge are left untouched.
+  useEffect(() => {
+    if (isPublicPath) return;
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    let claimed = false;
+    function onStart(e: TouchEvent) {
+      const t = e.touches[0];
+      if (!t) return;
+      tracking = t.clientX <= 24 && !sidebarOpen;
+      claimed = false;
+      startX = t.clientX;
+      startY = t.clientY;
+    }
+    function onMove(e: TouchEvent) {
+      if (!tracking) return;
+      const t = e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (!claimed) {
+        // Decide intent on the first meaningful movement.
+        if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
+          tracking = false; // vertical scroll — hand it back to the page
+          return;
+        }
+        if (dx > 8) claimed = true; // horizontal from the edge — it's ours
+        else return;
+      }
+      // Claim the gesture so the browser/iOS swipe-back doesn't also fire.
+      if (e.cancelable) e.preventDefault();
+      if (dx > 60 && Math.abs(dy) < 40) {
+        tracking = false;
+        setSidebarOpen(true);
+      }
+    }
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: false });
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+    };
+  }, [isPublicPath, sidebarOpen]);
 
   // ── General auth gate for authed routes ──────────────────────────────────
   useEffect(() => {
@@ -504,10 +602,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   return (
     <AppShellContext.Provider value={contextValue}>
-      <div
-        className="fixed left-0 right-0 flex overflow-hidden"
-        style={{ top: "var(--vvy)", height: "var(--vvh)" }}
-      >
+      {/* Fills the layout viewport. Note: on iOS standalone this stops at the
+          home-indicator safe-area boundary (the residual "chin" below) — that's
+          an OS limitation for fixed elements, not something we can paint over
+          reliably. Header sticks because nothing scrolls; keyboard handled via
+          --kb on <main> below. */}
+      <div className="fixed inset-0 flex overflow-hidden">
         <AppSidebar
           user={sidebarUser}
           variant={route.sidebarVariant}
@@ -521,7 +621,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         >
           <Suspense fallback={null}>{route.sidebarContent}</Suspense>
         </AppSidebar>
-        <main className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
+        <main
+          className="relative flex flex-1 min-w-0 flex-col overflow-hidden"
+          style={{ paddingBottom: "var(--kb, 0px)" }}
+        >
           <Suspense fallback={null}>{route.mainContent}</Suspense>
         </main>
       </div>
