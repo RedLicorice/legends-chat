@@ -4,6 +4,7 @@ import { stripImageMetadata } from "@/lib/upload";
 import { Tooltip } from "@/components/Tooltip";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
@@ -318,7 +319,21 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const [threadFor, setThreadFor] = useState<Message | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const threadId = searchParams?.get("thread") ?? null;
+  const threadFor = useMemo(
+    () => (threadId ? messages.find((m) => String(m.id) === threadId) ?? null : null),
+    [threadId, messages],
+  );
+  const openThread = useCallback(
+    (m: Message) => router.push(`?thread=${m.id}`, { scroll: false }),
+    [router],
+  );
+  const closeThread = useCallback(() => {
+    if (window.history.length > 1) router.back();
+    else router.push(window.location.pathname, { scroll: false });
+  }, [router]);
   const [showSearch, setShowSearch] = useState(false);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [e2eeError, setE2eeError] = useState<string | null>(null);
@@ -2501,7 +2516,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                   {caps.threads && (replyCounts.get(m.id) ?? 0) >= 3 && (
                     <button
                       type="button"
-                      onClick={() => setThreadFor(m)}
+                      onClick={() => openThread(m)}
                       className={cn("mt-1 flex items-center gap-1.5 text-xs text-accent hover:underline", mine && "self-end")}
                     >
                       <MessageSquareText className="h-3 w-3" />
@@ -2547,11 +2562,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           topicId={topic.id}
           currentUserId={currentUser.id}
           isE2ee={isE2ee}
-          onClose={() => setThreadFor(null)}
+          onClose={closeThread}
           onReply={(msgId) => {
             const msg = messages.find((m) => m.id === msgId);
             if (msg) setReplyingTo(msg);
-            setThreadFor(null);
+            closeThread();
           }}
         />
       )}

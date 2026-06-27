@@ -86,7 +86,7 @@ export function ThreadPanel({
   }
 
   return (
-    <div className="flex h-full flex-col border-l border-border bg-panel w-80 shrink-0">
+    <div className="absolute inset-0 z-50 flex flex-col bg-panel md:inset-y-0 md:right-0 md:left-auto md:w-80 md:border-l md:border-border">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <span className="text-sm font-semibold">Thread</span>
         <button type="button" onClick={onClose} className="text-muted hover:text-text">
