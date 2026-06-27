@@ -6,7 +6,7 @@ import { Tooltip } from "@/components/Tooltip";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
+import { ArrowLeft, BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { WS_EVENTS, PERMISSIONS } from "@legends/shared";
@@ -29,6 +29,7 @@ import { useTopicHashtags } from "@/hooks/useTopicHashtags";
 import type { TopicBootstrapHashtag, TopicBootstrapMember } from "@legends/shared";
 import type { ChatSource } from "@/lib/chat-source";
 import type { ChatCrypto } from "@/lib/chat-crypto";
+import { useAppShell } from "@/components/AppShell";
 
 interface Attachment {
   type: "image" | "gif" | "file";
@@ -268,6 +269,7 @@ function Avatar({ name, url, size = 8, online }: { name: string | null; url: str
 }
 
 export function ChatPane({ user: currentUser, mode, source, chatCrypto, highlightMessageId, onMenuOpen, onConnectionChange, showExpandSidebar, onExpandSidebar }: ChatPaneProps) {
+  const { isMobile, goBack } = useAppShell();
   const isTopicMode = mode.kind === "topic";
   const isDmMode = mode.kind === "dm";
   const topic = isTopicMode ? mode.topic : null;
@@ -1616,10 +1618,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         <header className="flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-4 pt-[calc(1rem+var(--sat))] md:px-6">
           <button
             type="button"
-            onClick={onMenuOpen}
+            onClick={isMobile ? goBack : onMenuOpen}
             className="shrink-0 rounded-md p-1 hover:bg-panel2 transition md:hidden"
+            aria-label={isMobile ? "Back" : "Open menu"}
           >
-            <Menu className="h-5 w-5" />
+            {isMobile ? <ArrowLeft className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
           {dmConversation.peer && (
             <Avatar name={dmConversation.peer.displayName} url={dmConversation.peer.avatarUrl} size={9} />
@@ -1774,10 +1777,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
       <header className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-2.5 pt-[calc(0.75rem+var(--sat))] md:px-6">
         <button
           type="button"
-          onClick={onMenuOpen}
+          onClick={isMobile ? goBack : onMenuOpen}
           className="shrink-0 rounded-md p-1 hover:bg-panel2 transition md:hidden"
+          aria-label={isMobile ? "Back" : "Open menu"}
         >
-          <Menu className="h-5 w-5" />
+          {isMobile ? <ArrowLeft className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
         {showExpandSidebar && (
           <button

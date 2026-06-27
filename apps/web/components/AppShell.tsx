@@ -14,7 +14,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { routeLevel, backTarget } from "@/lib/mobile-nav";
-import { Menu, PanelLeftOpen, Hash } from "lucide-react";
+import { ArrowLeft, Menu, PanelLeftOpen, Hash } from "lucide-react";
 import { PERMISSIONS } from "@legends/shared";
 import { AppSidebar, AdminNav } from "@/components/AppSidebar";
 import { MobileStack } from "@/components/MobileStack";
@@ -89,8 +89,17 @@ export function useAppShell(): AppShellContextValue {
  * props needed.
  */
 export function AppShellMobileBar() {
-  const { openSidebar, expandDesktopSidebar, desktopCollapsed, compactMode } =
+  const { openSidebar, expandDesktopSidebar, desktopCollapsed, compactMode, isMobile, level, goBack } =
     useAppShell();
+  if (isMobile && level >= 1) {
+    return (
+      <div className="flex items-center px-2 pt-[var(--sat)]">
+        <button type="button" onClick={goBack} className="rounded-md p-2.5 hover:bg-panel2 transition" aria-label="Back">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+      </div>
+    );
+  }
   const showExpand = desktopCollapsed && compactMode === "minimal";
   if (!showExpand) {
     return (
@@ -336,7 +345,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const hasThread = !!searchParams?.get("thread");
   const level = routeLevel(path, hasThread);
   const goBack = useCallback(() => {
-    if (typeof window !== "undefined" && window.history.length > 1) router.back();
+    if (typeof window === "undefined") { router.push(backTarget(path)); return; }
+    // ponytail: Navigation API canGoBack is false on cold deep-links even when
+    // history.length > 1 (browser's initial about:blank counts). Fallback to
+    // history.length check only when the Navigation API is absent.
+    const nav = (window as Window & { navigation?: { canGoBack?: boolean } }).navigation;
+    if (nav ? nav.canGoBack : window.history.length > 2) router.back();
     else router.push(backTarget(path));
   }, [router, path]);
 
