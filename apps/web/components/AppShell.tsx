@@ -435,27 +435,39 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     setSidebarOpen(false);
   }, [rawPathname]);
 
-  // ── On-screen keyboard inset (content only — never the header) ────────────
-  // The shell is `position: fixed; inset: 0` (see container below): it fills the
-  // real viewport (no `100dvh` home-indicator chin), and since <body> is
-  // overflow:hidden there's nothing to scroll, so the header can never be pushed
-  // off-screen — it's rock-solid with zero JS touching it (no flicker).
-  // The only adjustment is lifting the *content's* bottom by the keyboard height
-  // (--kb) so the composer clears the keyboard. iOS reports the keyboard by
-  // shrinking visualViewport while innerHeight stays full; platforms that honour
-  // interactiveWidget=resizes-content shrink innerHeight too, leaving --kb≈0
-  // (the shell already shrank) — correct either way.
+  // ── On-screen keyboard handling ──────────────────────────────────────────
+  // Two CSS vars, both driven off visualViewport:
+  //   --vvy = visualViewport.offsetTop. iOS scrolls the whole webview up to
+  //     reveal the keyboard, which drags a `position:fixed` shell off the top
+  //     (the header "flows out"). The shell counters with
+  //     `transform: translateY(var(--vvy))` — a GPU-composited shift (no reflow,
+  //     so no flicker) that re-pins it to the visible top.
+  //   --kb = keyboard height (innerHeight − vv.height − offsetTop). Pads the
+  //     bottom of <main> so the composer clears the keyboard.
+  // Both deduped so we only write on real change (avoids churn during the
+  // keyboard's open/close animation).
   useEffect(() => {
     if (isPublicPath) return;
     const vv = window.visualViewport;
     if (!vv) return;
     const root = document.documentElement;
     let raf = 0;
+    let lastVvy = -1;
+    let lastKb = -1;
     function apply() {
       raf = 0;
-      const kb = Math.max(0, window.innerHeight - vv!.height - vv!.offsetTop);
-      if (kb > 80) root.style.setProperty("--kb", `${kb}px`);
-      else root.style.removeProperty("--kb");
+      const vvy = Math.round(vv!.offsetTop);
+      const kb = Math.max(0, Math.round(window.innerHeight - vv!.height - vv!.offsetTop));
+      if (vvy !== lastVvy) {
+        lastVvy = vvy;
+        root.style.setProperty("--vvy", `${vvy}px`);
+      }
+      const kbVal = kb > 80 ? kb : 0;
+      if (kbVal !== lastKb) {
+        lastKb = kbVal;
+        if (kbVal > 0) root.style.setProperty("--kb", `${kbVal}px`);
+        else root.style.removeProperty("--kb");
+      }
     }
     function update() {
       if (!raf) raf = requestAnimationFrame(apply);
@@ -468,6 +480,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
       root.style.removeProperty("--kb");
+      root.style.removeProperty("--vvy");
     };
   }, [isPublicPath]);
 
@@ -571,12 +584,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   return (
     <AppShellContext.Provider value={contextValue}>
-      {/* Fills the layout viewport. Note: on iOS standalone this stops at the
-          home-indicator safe-area boundary (the residual "chin" below) — that's
-          an OS limitation for fixed elements, not something we can paint over
-          reliably. Header sticks because nothing scrolls; keyboard handled via
-          --kb on <main> below. */}
-      <div className="fixed inset-0 flex overflow-hidden">
+      {/* Fills the layout viewport (residual home-indicator "chin" is an iOS
+          standalone limitation). translateY(--vvy) re-pins the shell to the
+          visible top when iOS scrolls the webview for the keyboard (otherwise
+          the header flows off-screen); it's a composited transform, so no
+          reflow/flicker. Keyboard composer clearance is --kb on <main>. */}
+      <div
+        className="fixed inset-0 flex overflow-hidden"
+        style={{ transform: "translateY(var(--vvy, 0px))" }}
+      >
         {isMobile ? (
           <MobileStack level={paneLevel as 0 | 1 | 2}>
             {level === 0 ? (

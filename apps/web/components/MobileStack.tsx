@@ -18,9 +18,11 @@ const variants = {
 
 /**
  * Full-screen drill-down stack for mobile. One pane visible at a time, keyed by
- * `level` so push (level↑) slides in from the right and pop (level↓) slides back
- * out to the right. Keyed by LEVEL not route, so sibling navigations at the same
- * level are a plain content swap (no slide, no remount churn).
+ * `level`. Push (level↑) slides in from the right. Pop (level↓) is INSTANT — the
+ * OS swipe-back already plays its own native page transition, so animating ours
+ * on top produced a visible double-animation. Button Back (router.back) is also
+ * a pop, so it's instant too. Keyed by LEVEL not route, so sibling navigations
+ * at the same level are a plain content swap (no slide, no remount churn).
  */
 export function MobileStack({ level, children }: Props) {
   const prevLevel = useRef(level);
@@ -29,6 +31,8 @@ export function MobileStack({ level, children }: Props) {
     prevLevel.current = level;
   }, [level]);
   const reduce = useReducedMotion();
+  // Animate only on push; pop (incl. swipe-back) and reduced-motion swap instantly.
+  const animateSlide = dir > 0 && !reduce;
 
   return (
     <div className="relative flex-1 min-w-0 overflow-hidden">
@@ -38,10 +42,10 @@ export function MobileStack({ level, children }: Props) {
           custom={dir}
           className="absolute inset-0 flex flex-col"
           variants={variants}
-          initial={reduce ? false : "initial"}
+          initial={animateSlide ? "initial" : false}
           animate="animate"
-          exit={reduce ? { opacity: 0 } : "exit"}
-          transition={{ duration: 0.24, ease: [0.32, 0.72, 0, 1] }}
+          exit={animateSlide ? "exit" : { opacity: 0 }}
+          transition={animateSlide ? { duration: 0.24, ease: [0.32, 0.72, 0, 1] } : { duration: 0 }}
         >
           {children}
         </motion.div>
