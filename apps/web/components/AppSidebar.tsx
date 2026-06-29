@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
-  BookOpen, ChevronDown, Hash,
+  BookOpen, Hash, MoreHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -113,11 +113,9 @@ export function AppSidebar({
   const [profile, setProfile] = useState({ displayName: user.displayName, avatarUrl: user.avatarUrl });
   const [showProfile, setShowProfile] = useState(false);
   const [showModQueue, setShowModQueue] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [showAndroidInstall, setShowAndroidInstall] = useState(false);
-  const [installDismissed, setInstallDismissed] = useState(() =>
-    typeof window !== "undefined" && window.localStorage?.getItem("install-dismissed") === "true"
-  );
 
   const installState = useInstallPrompt();
   // Flag count rides on the per-connect bootstrap + MOD_FLAG_COUNT live
@@ -262,6 +260,73 @@ export function AppSidebar({
                 )}
               </button>
             )}
+            {/* Overflow menu — Home / Admin / Support / Install live here now */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowMenu((v) => !v)}
+                title="More"
+                aria-label="More"
+                className={cn(
+                  "rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition",
+                  showMenu && "bg-panel2 text-text",
+                )}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border border-border bg-panel py-1 shadow-xl">
+                    {variant === "admin" ? (
+                      <Link href="/" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
+                        <Home className="h-4 w-4 text-muted" /> Back to chat
+                      </Link>
+                    ) : (
+                      <>
+                        <Link href="/" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
+                          <Home className="h-4 w-4 text-muted" /> Home
+                        </Link>
+                        {isStaff && (
+                          <Link href="/admin" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
+                            <Shield className="h-4 w-4 text-muted" /> Admin
+                          </Link>
+                        )}
+                      </>
+                    )}
+                    <div className="my-1 border-t border-border" />
+                    <Link href="/docs/manual" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
+                      <BookOpen className="h-4 w-4 text-muted" /> User Manual
+                    </Link>
+                    <Link href="/docs/whitepaper" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
+                      <BookOpen className="h-4 w-4 text-muted" /> Whitepaper
+                    </Link>
+                    {isStaff && (
+                      <Link href="/docs/admin-manual" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
+                        <BookOpen className="h-4 w-4 text-muted" /> Admin Manual
+                      </Link>
+                    )}
+                    {installState.type !== "unavailable" && (
+                      <>
+                        <div className="my-1 border-t border-border" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMenu(false);
+                            if (installState.type === "native") installState.install();
+                            else if (installState.type === "ios") setShowIosInstall(true);
+                            else if (installState.type === "android") setShowAndroidInstall(true);
+                          }}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-panel2"
+                        >
+                          <Download className="h-4 w-4 text-muted" /> Install app
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
             {/* Desktop collapse toggle */}
             <button
               type="button"
@@ -287,62 +352,6 @@ export function AppSidebar({
           {/* Middle — scrollable content (topics list or admin nav) */}
           <div className="flex-1 overflow-y-auto p-2">
             {children}
-          </div>
-
-          {/* Footer */}
-          <div className="border-t border-border p-3 space-y-0.5">
-            {variant === "admin" ? (
-              <Link
-                href="/"
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-              >
-                <Home className="h-4 w-4" /> Back to chat
-              </Link>
-            ) : (
-              <>
-                <Link
-                  href="/"
-                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-                >
-                  <Home className="h-4 w-4" /> Home
-                </Link>
-                {isStaff && (
-                  <Link
-                    href="/admin"
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-                  >
-                    <Shield className="h-4 w-4" /> Admin
-                  </Link>
-                )}
-                <SupportSubmenu isStaff={isStaff} />
-              </>
-            )}
-            {!installDismissed && installState.type !== "unavailable" && (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (installState.type === "native") installState.install();
-                    else if (installState.type === "ios") setShowIosInstall(true);
-                    else if (installState.type === "android") setShowAndroidInstall(true);
-                  }}
-                  className="flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2"
-                >
-                  <Download className="h-4 w-4" /> Install app
-                </button>
-                <button
-                  type="button"
-                  title="Dismiss"
-                  onClick={() => {
-                    localStorage.setItem("install-dismissed", "true");
-                    setInstallDismissed(true);
-                  }}
-                  className="rounded-lg p-1.5 text-muted hover:text-text hover:bg-panel2 transition shrink-0"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
           </div>
         </div>
         )}
@@ -472,38 +481,6 @@ export function AdminNav({ permissions }: { permissions: string[] }) {
         </>
       )}
     </nav>
-  );
-}
-
-function SupportSubmenu({ isStaff }: { isStaff: boolean }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-panel2 transition"
-      >
-        <BookOpen className="h-4 w-4" />
-        <span className="flex-1 text-left">Support</span>
-        <ChevronDown className={cn("h-3.5 w-3.5 text-muted transition-transform", open && "rotate-180")} />
-      </button>
-      {open && (
-        <div className="ml-7 mt-0.5 space-y-0.5 border-l border-border pl-3">
-          <Link href="/docs/manual" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-text transition">
-            User Manual
-          </Link>
-          <Link href="/docs/whitepaper" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-text transition">
-            Whitepaper
-          </Link>
-          {isStaff && (
-            <Link href="/docs/admin-manual" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-text transition">
-              Admin Manual
-            </Link>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
