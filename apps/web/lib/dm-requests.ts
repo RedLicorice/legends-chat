@@ -104,7 +104,7 @@ export async function emitDmRequestNotification(args: {
  */
 export async function publishDmConversationUpdated(args: {
   conversationId: string;
-  state: "pending" | "accepted" | "blocked" | "declined";
+  state: "pending" | "accepted" | "blocked" | "declined" | "deleted";
   userIds: string[];
 }): Promise<void> {
   if (args.userIds.length === 0) return;

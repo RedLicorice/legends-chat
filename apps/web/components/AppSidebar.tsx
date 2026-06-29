@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Shield, AlertTriangle, X, Settings, Download, User, Home, Menu,
   MessageSquare, Users, Bot, Mail, Ban, PanelLeftClose, PanelLeftOpen, Film, ShieldCheck, Palette, BellRing,
-  BookOpen, Hash, MoreHorizontal,
+  BookOpen, Hash, MoreHorizontal, LogOut,
 } from "lucide-react";
 import Link from "next/link";
 import { UserProfileModal } from "@/components/UserProfileModal";
@@ -323,6 +323,23 @@ export function AppSidebar({
                         </button>
                       </>
                     )}
+                    <div className="my-1 border-t border-border" />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setShowMenu(false);
+                        try {
+                          await fetch("/api/auth/logout", { method: "POST" });
+                        } catch {
+                          /* network blip — fall through to the redirect anyway */
+                        }
+                        // Auth boundary: full document load to clear all client state.
+                        window.location.href = "/login";
+                      }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-sm text-danger hover:bg-panel2"
+                    >
+                      <LogOut className="h-4 w-4" /> Logout
+                    </button>
                   </div>
                 </>
               )}

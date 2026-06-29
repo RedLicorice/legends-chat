@@ -828,6 +828,10 @@ export const dmParticipants = pgTable(
     principalType: dmPrincipalType("principal_type").notNull(),
     principalId: text("principal_id").notNull(),
     lastReadMessageId: bigint("last_read_message_id", { mode: "bigint" }),
+    // One-sided "delete for me": when set, the conversation is hidden from this
+    // participant's chat list. A newer message (lastMessageAt > clearedAt)
+    // re-shows it. Null = visible.
+    clearedAt: timestamp("cleared_at", { withTimezone: true }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.conversationId, t.principalType, t.principalId] }),

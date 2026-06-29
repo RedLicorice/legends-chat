@@ -215,7 +215,12 @@ export function ChatListProvider({ children }: { children: React.ReactNode }) {
     socket.on(
       WS_EVENTS.DM_CONVERSATION_UPDATED,
       (u: { conversationId: string; state: string }) => {
-        if (u?.state === "declined") {
+        // "declined" (recipient rejected a pending request) and "deleted"
+        // (Delete Conversation) are both synthetic row-removals — drop the
+        // sidebar row and notify any open ChatPane so it can navigate away.
+        // They differ only in the client event (declined shows a toast; deleted
+        // is silent).
+        if (u?.state === "declined" || u?.state === "deleted") {
           setItems((prev) =>
             prev.filter(
               (it) =>
@@ -225,14 +230,11 @@ export function ChatListProvider({ children }: { children: React.ReactNode }) {
                 ),
             ),
           );
-          // Also surface to any open page (e.g. ChatPane on /c/<id>) so the
-          // sender — who may currently be viewing this conv — can navigate
-          // away and show a toast. The event carries the convId so the
-          // listener can match its current route.
           window.dispatchEvent(
-            new CustomEvent("dm:conversation:declined", {
-              detail: { conversationId: u.conversationId },
-            }),
+            new CustomEvent(
+              u.state === "deleted" ? "dm:conversation:deleted" : "dm:conversation:declined",
+              { detail: { conversationId: u.conversationId } },
+            ),
           );
           return;
         }

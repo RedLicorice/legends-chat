@@ -228,11 +228,14 @@ export async function listConversations(
   options?: { state?: "pending" | "accepted" | "blocked" },
 ): Promise<DmConversationView[]> {
   const myConvs = await db
-    .select({ conversationId: dmParticipants.conversationId })
+    .select({ conversationId: dmParticipants.conversationId, clearedAt: dmParticipants.clearedAt })
     .from(dmParticipants)
     .where(and(eq(dmParticipants.principalType, "user"), eq(dmParticipants.principalId, userId)));
   const ids = myConvs.map((c) => c.conversationId);
   if (ids.length === 0) return [];
+  // One-sided "delete for me": hide a conversation this user cleared, unless a
+  // newer message arrived since (lastMessageAt > clearedAt re-shows it).
+  const clearedByConv = new Map(myConvs.map((c) => [c.conversationId, c.clearedAt]));
 
   // Filter by state at the DB layer when requested — ChatListPane only wants
   // "accepted" rows; the NotificationBell handles pending requests separately.
@@ -256,7 +259,12 @@ export async function listConversations(
   const userById = new Map(userRows.map((u) => [u.id, u]));
   const botById = new Map(botRows.map((b) => [b.id, b]));
 
-  return convs.map((c) => {
+  const visibleConvs = convs.filter((c) => {
+    const cl = clearedByConv.get(c.id);
+    return !cl || (c.lastMessageAt != null && c.lastMessageAt > cl);
+  });
+
+  return visibleConvs.map((c) => {
     const peerPart = parts.find((p) => p.conversationId === c.id && !(p.principalType === "user" && p.principalId === userId));
     let peer: DmConversationView["peer"] = null;
     if (peerPart?.principalType === "user") {

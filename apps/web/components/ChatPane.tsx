@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
+import { ArrowLeft, BarChart2, Check, CheckSquare, Copy, CornerDownLeft, File as FileIcon, FileText, Flag, Image as ImageIcon, ImagePlus, Lock, Menu, MessageSquareText, MoreHorizontal, Pencil, PanelLeftOpen, Paperclip, Search, Send, SmilePlus, Square, Sticker, Trash2, Users, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { WS_EVENTS, PERMISSIONS } from "@legends/shared";
@@ -343,6 +343,25 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     router.push(pathname, { scroll: false });
   }, [router, pathname]);
   const [showSearch, setShowSearch] = useState(false);
+  const [showDmMenu, setShowDmMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteBoth, setDeleteBoth] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const confirmDeleteConversation = useCallback(async () => {
+    if (!isDmMode || !dmConversation) return;
+    setDeleting(true);
+    try {
+      await apiFetch(`/api/dm/${dmConversation.id}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ both: deleteBoth }),
+      });
+    } catch {
+      // Navigate home regardless — a failed delete leaves the conv in place,
+      // which the list will reflect on next load.
+    }
+    router.push("/");
+  }, [isDmMode, dmConversation, deleteBoth, router]);
   const [e2eeSetupNeeded, setE2eeSetupNeeded] = useState(false);
   const [e2eeError, setE2eeError] = useState<string | null>(null);
   // Bug B: surfaces when the previous CryptoStore failed to load (schema
@@ -884,6 +903,19 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     window.addEventListener("dm:conversation:declined", onDeclined);
     return () => window.removeEventListener("dm:conversation:declined", onDeclined);
   }, [isDmMode, dmConversation]);
+
+  // Conversation deleted (by us elsewhere, or the peer chose "delete for both").
+  // Same hop-home as decline, but no toast — it's a deletion, not a rejection.
+  useEffect(() => {
+    if (!isDmMode || !dmConversation) return;
+    const onDeleted = (e: Event) => {
+      const detail = (e as CustomEvent<{ conversationId: string }>).detail;
+      if (!detail || detail.conversationId !== dmConversation.id) return;
+      router.push("/");
+    };
+    window.addEventListener("dm:conversation:deleted", onDeleted);
+    return () => window.removeEventListener("dm:conversation:deleted", onDeleted);
+  }, [isDmMode, dmConversation, router]);
 
   // Scroll to bottom when keyboard opens/closes so latest messages stay visible
   useEffect(() => {
@@ -1860,7 +1892,78 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
             </button>
           </>
         )}
+        {isDmMode && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowDmMenu((v) => !v)}
+              title="More"
+              aria-label="More"
+              className={cn("rounded-lg p-2 transition hover:bg-panel2 text-muted hover:text-text", showDmMenu && "bg-panel2 text-text")}
+            >
+              <MoreHorizontal className="h-5 w-5" />
+            </button>
+            {showDmMenu && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowDmMenu(false)} />
+                <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-panel py-1 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => { setShowDmMenu(false); setDeleteBoth(false); setShowDeleteConfirm(true); }}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-sm text-danger hover:bg-panel2"
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete Conversation
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </header>
+
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 md:items-center"
+          onClick={() => { if (!deleting) setShowDeleteConfirm(false); }}
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-panel p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-semibold">Delete conversation?</h2>
+            <p className="text-sm text-muted">
+              Removes this conversation from your list.{" "}
+              {deleteBoth
+                ? "It will be permanently deleted for both of you."
+                : "The other person keeps their copy; it reappears for you if they message again."}
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={deleteBoth}
+                onChange={(e) => setDeleteBoth(e.target.checked)}
+                className="h-4 w-4 accent-[rgb(var(--ch-danger))]"
+              />
+              Delete for both parties
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="rounded-lg bg-panel2 px-4 py-2 text-sm hover:bg-panel disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void confirmDeleteConversation()}
+                className="rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {hashtagFilter && (
         <div className="flex items-center gap-2 border-b border-border bg-panel2 px-4 py-2 text-sm">
