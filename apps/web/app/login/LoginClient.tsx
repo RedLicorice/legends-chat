@@ -19,6 +19,21 @@ export function LoginClient() {
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [botUsername, setBotUsername] = useState<string | null>(null);
 
+  // If already signed in (e.g. user swiped back to /login after authenticating),
+  // bounce to the app — /login should never be a reachable back-stack screen for
+  // a logged-in user. `replace` so it doesn't add another history entry.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/me")
+      .then((r) => {
+        if (!cancelled && r.ok) router.replace("/");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
   useEffect(() => {
     apiFetch("/api/register-config")
       .then((r) => r.json())
@@ -60,7 +75,7 @@ export function LoginClient() {
         return;
       }
       clearSessionId();
-      router.push("/");
+      router.replace("/");
     } catch {
       setError("Network error. Try again.");
     } finally {
@@ -111,7 +126,7 @@ export function LoginClient() {
           </div>
         ) : tab === "passkey" ? (
           <div className="space-y-3">
-            <PasskeyAuthButton onSuccess={() => { clearSessionId(); router.push("/"); }} />
+            <PasskeyAuthButton onSuccess={() => { clearSessionId(); router.replace("/"); }} />
             <p className="text-center text-xs text-muted">
               Use a registered passkey to sign in instantly.
             </p>
