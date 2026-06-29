@@ -13,6 +13,7 @@ import { LinkContextMenu } from "@/components/LinkContextMenu";
 import { AppShell } from "@/components/AppShell";
 import { PWASplash } from "@/components/PWASplash";
 import { ClientErrorReporter } from "@/components/ClientErrorReporter";
+import { InAppBrowserGate } from "@/components/InAppBrowserGate";
 
 // Strict-SPA root layout: pure, sync, no cookies(), no DB. Dynamic data
 // (theme attributes, branding, external-link config) is resolved on the
@@ -145,6 +146,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: PRE_REACT_BOOT_SCRIPT }} />
       </head>
       <body className="bg-bg text-text">
+        <InAppBrowserGate>
         <SessionBootstrapProvider>
           <PushSetup />
           <SwUpdate />
@@ -163,6 +165,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <LinkContextMenu />
           </ExternalLinkBootstrap>
         </SessionBootstrapProvider>
+        </InAppBrowserGate>
       </body>
     </html>
   );
