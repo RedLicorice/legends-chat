@@ -59,7 +59,7 @@ describe("<AdminBotsForm /> with E2EE sections", () => {
         lastKeysUploadAt: new Date().toISOString(),
       }),
     ];
-    render(<AdminBotsForm bots={bots} topics={[]} assignments={[]} />);
+    render(<AdminBotsForm bots={bots} topics={[]} assignments={[]} total={bots.length} />);
 
     // Bot rows render in a collapsed state. Click each row's expand chevron.
     // Each row has a single icon-only button; tweak via the bot's name container.

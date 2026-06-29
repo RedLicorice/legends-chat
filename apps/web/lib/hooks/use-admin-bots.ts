@@ -21,6 +21,7 @@ export interface AdminBotsPayload {
   }[];
   topics: { id: string; title: string; isE2ee: boolean }[];
   assignments: { botId: string; topicId: string }[];
+  total: number;
 }
 
 export function useAdminBots() {

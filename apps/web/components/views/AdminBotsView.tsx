@@ -17,6 +17,7 @@ export function AdminBotsView() {
             bots={data.bots}
             topics={data.topics}
             assignments={data.assignments}
+            total={data.total}
           />
         </section>
       )}

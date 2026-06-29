@@ -71,10 +71,14 @@ interface ActivityEvent {
 }
 
 const ROLES = ["user", "moderator", "admin"] as const;
+const PAGE_SIZE = 50; // keep in sync with the server's PAGE_SIZE in /api/admin/users
 
 export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -112,21 +116,29 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
   const [loginLinkError, setLoginLinkError] = useState<string | null>(null);
   const [loginLinkCopied, setLoginLinkCopied] = useState(false);
 
-  const search = useCallback((q: string) => {
+  const search = useCallback((q: string, pg: number) => {
     setLoading(true);
-    const url = q.trim() ? `/api/admin/users?q=${encodeURIComponent(q.trim())}` : "/api/admin/users";
-    apiFetch(url)
-      .then((r) => r.json())
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (pg > 1) params.set("page", String(pg));
+    const qs = params.toString();
+    apiFetch(`/api/admin/users${qs ? `?${qs}` : ""}`)
+      .then((r) => {
+        setTotal(Number(r.headers.get("X-Total-Count")) || 0);
+        return r.json();
+      })
       .then((data) => setUsers(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { search(""); }, [search]);
+  // Debounce the search box, reset to page 1 on a new query, then fetch.
   useEffect(() => {
-    const t = setTimeout(() => search(query), 300);
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => clearTimeout(t);
-  }, [query, search]);
+  }, [query]);
+  useEffect(() => { setPage(1); }, [debouncedQuery]);
+  useEffect(() => { search(debouncedQuery, page); }, [search, debouncedQuery, page]);
 
   async function setRole(userId: string, role: string) {
     setSaving(userId);
@@ -622,6 +634,32 @@ export function AdminUsersForm({ currentUserId }: { currentUserId: string }) {
           );
         })}
       </div>
+
+      {total > PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted">
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="rounded-lg border border-border px-3 py-1.5 font-medium hover:bg-panel2 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page * PAGE_SIZE >= total || loading}
+              className="rounded-lg border border-border px-3 py-1.5 font-medium hover:bg-panel2 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* User details modal */}
       {detailsUserId && (

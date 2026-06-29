@@ -1,11 +1,13 @@
-import { asc, desc } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { asc, count, desc, ilike, inArray } from "drizzle-orm";
+import { NextResponse, type NextRequest } from "next/server";
 import { bots, topics, topicBots, botDevices } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth-admin";
 
 export const dynamic = "force-dynamic";
+
+const PAGE_SIZE = 50;
 
 function fingerprintFromIdentityKeys(identityKeys: unknown): string | undefined {
   if (!identityKeys || typeof identityKeys !== "object") return undefined;
@@ -26,11 +28,24 @@ function fingerprintFromIdentityKeys(identityKeys: unknown): string | undefined 
   return ed.slice(0, 32);
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const gate = await requireAdmin(PERMISSIONS.BOTS_MANAGE);
   if (gate instanceof NextResponse) return gate;
 
-  const [botList, topicList, assignments, devicesList] = await Promise.all([
+  const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const where = q ? ilike(bots.name, `%${q}%`) : undefined;
+
+  // Lightweight branch for "select all matching": just the ids for the active
+  // filter, so the client can bulk-act on rows beyond the current page.
+  if (req.nextUrl.searchParams.get("idsOnly")) {
+    const idRows = await db.select({ id: bots.id }).from(bots).where(where);
+    return NextResponse.json({ ids: idRows.map((r) => r.id) });
+  }
+
+  const page = Math.max(1, Number(req.nextUrl.searchParams.get("page")) || 1);
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const [botList, totalRows, topicList] = await Promise.all([
     db
       .select({
         id: bots.id,
@@ -47,21 +62,36 @@ export async function GET() {
         e2eeDeviceId: bots.e2eeDeviceId,
       })
       .from(bots)
-      .orderBy(bots.createdAt),
+      .where(where)
+      .orderBy(bots.createdAt)
+      .limit(PAGE_SIZE)
+      .offset(offset),
+    db.select({ n: count() }).from(bots).where(where),
     db
       .select({ id: topics.id, title: topics.title, isE2ee: topics.isE2ee })
       .from(topics)
       .orderBy(asc(topics.sortOrder), asc(topics.title)),
-    db.select({ botId: topicBots.botId, topicId: topicBots.topicId }).from(topicBots),
-    db
-      .select({
-        botId: botDevices.botId,
-        deviceId: botDevices.deviceId,
-        identityKeys: botDevices.identityKeys,
-        updatedAt: botDevices.updatedAt,
-      })
-      .from(botDevices)
-      .orderBy(desc(botDevices.updatedAt)),
+  ]);
+
+  // Topic assignments + devices only for the bots on this page — the detail
+  // panel can only target a row the admin can see (i.e. in this page).
+  const botIds = botList.map((b) => b.id);
+  const [assignments, devicesList] = await Promise.all([
+    botIds.length
+      ? db.select({ botId: topicBots.botId, topicId: topicBots.topicId }).from(topicBots).where(inArray(topicBots.botId, botIds))
+      : Promise.resolve([] as { botId: string; topicId: string }[]),
+    botIds.length
+      ? db
+          .select({
+            botId: botDevices.botId,
+            deviceId: botDevices.deviceId,
+            identityKeys: botDevices.identityKeys,
+            updatedAt: botDevices.updatedAt,
+          })
+          .from(botDevices)
+          .where(inArray(botDevices.botId, botIds))
+          .orderBy(desc(botDevices.updatedAt))
+      : Promise.resolve([] as { botId: string; deviceId: string; identityKeys: unknown; updatedAt: Date }[]),
   ]);
 
   // Pick the latest device per bot (devicesList ordered desc by updatedAt).
@@ -83,5 +113,10 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ bots: enriched, topics: topicList, assignments });
+  return NextResponse.json({
+    bots: enriched,
+    topics: topicList,
+    assignments,
+    total: totalRows[0]?.n ?? 0,
+  });
 }

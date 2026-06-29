@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, Plus, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -26,18 +26,26 @@ interface Props {
   bots: AdminBotRow[];
   topics: TopicRow[];
   assignments: Assignment[];
+  total: number;
 }
+
+const PAGE_SIZE = 50; // keep in sync with the server's PAGE_SIZE in /api/admin/bots/page-data
 
 export function AdminBotsForm({
   bots: initialBots,
   topics,
   assignments: initialAssignments,
+  total: initialTotal,
 }: Props) {
   const router = useRouter();
   const [bots, setBots] = useState<AdminBotRow[]>(initialBots);
   const [assignments, setAssignments] = useState<Assignment[]>(initialAssignments);
+  const [total, setTotal] = useState(initialTotal);
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [debouncedFilter, setDebouncedFilter] = useState("");
+  const [loading, setLoading] = useState(false);
   const [newBotName, setNewBotName] = useState("");
   const [creating, setCreating] = useState(false);
   const [revealedToken, setRevealedToken] = useState<{ botId: string; token: string } | null>(null);
@@ -48,21 +56,54 @@ export function AdminBotsForm({
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
 
-  const filteredBots = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return bots;
-    return bots.filter((b) => b.name.toLowerCase().includes(q));
-  }, [bots, filter]);
+  // Server-side filter + pagination. `bots` holds only the current page.
+  const load = useCallback(async (q: string, pg: number) => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (pg > 1) params.set("page", String(pg));
+    const qs = params.toString();
+    try {
+      const res = await apiFetch(`/api/admin/bots/page-data${qs ? `?${qs}` : ""}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        bots?: AdminBotRow[];
+        assignments?: Assignment[];
+        total?: number;
+      };
+      if (data.bots) setBots(data.bots);
+      if (data.assignments) setAssignments(data.assignments);
+      if (typeof data.total === "number") setTotal(data.total);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const allFilteredSelected =
-    filteredBots.length > 0 && filteredBots.every((b) => bulkSelected.has(b.id));
-  const someFilteredSelected =
-    filteredBots.some((b) => bulkSelected.has(b.id)) && !allFilteredSelected;
+  // Debounce the filter box, reset to page 1 on a new query, then fetch.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedFilter(filter.trim()), 300);
+    return () => clearTimeout(t);
+  }, [filter]);
+  useEffect(() => { setPage(1); }, [debouncedFilter]);
+  // Skip the first run — props already carry page 1 of the empty filter.
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; return; }
+    void load(debouncedFilter, page);
+  }, [load, debouncedFilter, page]);
+
+  const refetchBots = useCallback(() => load(debouncedFilter, page), [load, debouncedFilter, page]);
+
+  const allPageSelected =
+    bots.length > 0 && bots.every((b) => bulkSelected.has(b.id));
+  const somePageSelected =
+    bots.some((b) => bulkSelected.has(b.id)) && !allPageSelected;
   const selectAllRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (selectAllRef.current) selectAllRef.current.indeterminate = someFilteredSelected;
-  }, [someFilteredSelected]);
+    if (selectAllRef.current) selectAllRef.current.indeterminate = somePageSelected;
+  }, [somePageSelected]);
 
   function toggleSelected(id: string, checked: boolean) {
     setBulkSelected((prev) => {
@@ -76,22 +117,31 @@ export function AdminBotsForm({
   function toggleSelectAll(checked: boolean) {
     setBulkSelected((prev) => {
       const next = new Set(prev);
-      if (checked) for (const b of filteredBots) next.add(b.id);
-      else for (const b of filteredBots) next.delete(b.id);
+      if (checked) for (const b of bots) next.add(b.id);
+      else for (const b of bots) next.delete(b.id);
       return next;
     });
+  }
+
+  // "Select all N matching" — pulls every id for the active filter so bulk
+  // actions can reach rows beyond the current page.
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    try {
+      const params = new URLSearchParams({ idsOnly: "1" });
+      if (debouncedFilter) params.set("q", debouncedFilter);
+      const res = await apiFetch(`/api/admin/bots/page-data?${params}`);
+      if (!res.ok) return;
+      const { ids } = (await res.json()) as { ids: string[] };
+      setBulkSelected(new Set(ids));
+    } finally {
+      setSelectingAll(false);
+    }
   }
 
   function clearBulkSelection() {
     setBulkSelected(new Set());
     setBulkError(null);
-  }
-
-  async function refetchBots() {
-    const res = await apiFetch("/api/admin/bots/page-data");
-    if (!res.ok) return;
-    const data = (await res.json()) as { bots?: AdminBotRow[] };
-    if (data.bots) setBots(data.bots);
   }
 
   async function bulkDelete() {
@@ -121,11 +171,11 @@ export function AdminBotsForm({
         const data = (await res.json()) as { ok: boolean; deleted: number; ids: string[] };
         for (const id of data.ids) deletedAll.add(id);
       }
-      setBots((prev) => prev.filter((b) => !deletedAll.has(b.id)));
-      setAssignments((prev) => prev.filter((a) => !deletedAll.has(a.botId)));
       if (selectedId && deletedAll.has(selectedId)) setSelectedId(null);
       setBulkSelected(new Set());
       setBulkConfirmOpen(false);
+      // Re-pull the current page so counts and rows resync after deletion.
+      await refetchBots();
       router.refresh();
     } catch (e) {
       setBulkError((e as Error).message ?? "Delete failed");
@@ -150,7 +200,10 @@ export function AdminBotsForm({
         setError(data.error ?? "Failed to create bot");
         return;
       }
-      setBots((prev) => [...prev, data.bot]);
+      // Surface the new bot at the top of the current page so the admin can
+      // configure it + copy its token immediately (a later refetch re-sorts).
+      setBots((prev) => [data.bot, ...prev]);
+      setTotal((t) => t + 1);
       setRevealedToken({ botId: data.bot.id, token: data.token });
       setNewBotName("");
       setSelectedId(data.bot.id);
@@ -197,9 +250,9 @@ export function AdminBotsForm({
                   type="checkbox"
                   className="accent-accent"
                   aria-label="Select all bots"
-                  checked={allFilteredSelected}
+                  checked={allPageSelected}
                   onChange={(e) => toggleSelectAll(e.target.checked)}
-                  disabled={filteredBots.length === 0}
+                  disabled={bots.length === 0}
                 />
               </label>
               <span className="text-xs font-medium uppercase tracking-wide text-muted">
@@ -265,6 +318,16 @@ export function AdminBotsForm({
                   Clear
                 </button>
               </div>
+              {allPageSelected && bulkSelected.size < total && (
+                <button
+                  type="button"
+                  onClick={() => void selectAllMatching()}
+                  disabled={selectingAll || bulkBusy}
+                  className="text-left text-xs text-accent underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  {selectingAll ? "Selecting…" : `Select all ${total} matching`}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setBulkConfirmOpen(true)}
@@ -279,14 +342,14 @@ export function AdminBotsForm({
           )}
 
           <div className="flex-1 overflow-y-auto">
-            {filteredBots.length === 0 && (
+            {bots.length === 0 && (
               <p className="p-4 text-xs text-muted">
-                {bots.length === 0
-                  ? "No bots yet. Create one above."
-                  : "No bots match the filter."}
+                {debouncedFilter
+                  ? "No bots match the filter."
+                  : "No bots yet. Create one above."}
               </p>
             )}
-            {filteredBots.map((b) => (
+            {bots.map((b) => (
               <BotMasterRow
                 key={b.id}
                 bot={b}
@@ -297,6 +360,33 @@ export function AdminBotsForm({
               />
             ))}
           </div>
+
+          {/* Pager */}
+          {total > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs">
+              <span className="text-muted">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+              </span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loading}
+                  className="rounded-lg border border-border px-2 py-1 font-medium hover:bg-panel2 disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={page * PAGE_SIZE >= total || loading}
+                  className="rounded-lg border border-border px-2 py-1 font-medium hover:bg-panel2 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Bulk delete confirmation modal */}

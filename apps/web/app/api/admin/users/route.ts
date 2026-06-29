@@ -1,10 +1,12 @@
-import { and, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, count, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { userBans, userMutes, users } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+
+const PAGE_SIZE = 50;
 
 export async function GET(req: NextRequest) {
   const actor = await getCurrentUser();
@@ -13,31 +15,41 @@ export async function GET(req: NextRequest) {
   }
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const page = Math.max(1, Number(req.nextUrl.searchParams.get("page")) || 1);
+  const offset = (page - 1) * PAGE_SIZE;
 
-  const rows = await db
-    .select({
-      id: users.id,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      role: users.role,
-      isAnon: users.isAnon,
-      telegramUsername: users.telegramUsername,
-      email: users.email,
-      createdAt: users.createdAt,
-    })
-    .from(users)
-    .where(
-      q
-        ? or(
-            ilike(users.displayName, `%${q}%`),
-            ilike(users.telegramUsername, `%${q}%`),
-          )
-        : undefined,
-    )
-    .orderBy(users.displayName)
-    .limit(100);
+  const where = q
+    ? or(
+        ilike(users.displayName, `%${q}%`),
+        ilike(users.telegramUsername, `%${q}%`),
+      )
+    : undefined;
 
-  if (rows.length === 0) return NextResponse.json([]);
+  const [rows, totalRows] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        role: users.role,
+        isAnon: users.isAnon,
+        telegramUsername: users.telegramUsername,
+        email: users.email,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(where)
+      .orderBy(users.displayName)
+      .limit(PAGE_SIZE)
+      .offset(offset),
+    db.select({ n: count() }).from(users).where(where),
+  ]);
+
+  // Total row count for the active filter, exposed so the client can paginate.
+  // Body stays a bare array — the user picker in AdminTopicsForm relies on it.
+  const headers = { "X-Total-Count": String(totalRows[0]?.n ?? 0) };
+
+  if (rows.length === 0) return NextResponse.json([], { headers });
 
   const userIds = rows.map((r) => r.id);
   const now = sql`NOW()`;
@@ -64,6 +76,7 @@ export async function GET(req: NextRequest) {
       isMuted: mutedMap.has(r.id),
       muteExpiresAt: mutedMap.get(r.id) ?? null,
     })),
+    { headers },
   );
 }
 
