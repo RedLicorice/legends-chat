@@ -93,7 +93,11 @@ export async function GET(req: NextRequest) {
       .catch((err) => log.warn("redis publish failed", err));
   }
 
-  const secure = process.env.NODE_ENV === "production";
+  // Secure over HTTPS (incl. a Tailscale/proxy-fronted dev server) so iOS
+  // standalone PWAs persist the cookies across relaunches; see lib/auth.ts.
+  const secure =
+    process.env.NODE_ENV === "production" ||
+    req.headers.get("x-forwarded-proto") === "https";
   // Defensive: if the request host doesn't match the configured public origin
   // (e.g. user reached us via localhost while APP_PUBLIC_URL points at LAN IP),
   // redirect to the same origin the user is on so the cookies we set here apply.

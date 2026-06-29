@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import {
   ACCESS_COOKIE,
@@ -115,9 +115,23 @@ export async function issueSession(profile: SessionProfile): Promise<{ accessJwt
   return { accessJwt, refreshJwt };
 }
 
+// Auth cookies must be `Secure` over HTTPS or iOS standalone PWAs (WKWebView /
+// ITP) drop them across relaunches — which forced a fresh passkey login on
+// every reopen. Gate on the actual request protocol, not NODE_ENV, so a dev
+// server fronted by HTTPS (e.g. Tailscale serve) still gets Secure cookies
+// while plain http://localhost dev does not (where Secure cookies wouldn't set).
+async function cookiesSecure(): Promise<boolean> {
+  if (process.env.NODE_ENV === "production") return true;
+  try {
+    return (await headers()).get("x-forwarded-proto") === "https";
+  } catch {
+    return false;
+  }
+}
+
 export async function setAuthCookies(accessJwt: string, refreshJwt: string): Promise<void> {
   const jar = await cookies();
-  const secure = process.env.NODE_ENV === "production";
+  const secure = await cookiesSecure();
   jar.set(ACCESS_COOKIE, accessJwt, {
     httpOnly: true,
     secure,
@@ -204,7 +218,7 @@ export async function refreshAccessCookie(): Promise<boolean> {
     })
     .where(eq(sessions.id, payload.sid));
 
-  const secure = process.env.NODE_ENV === "production";
+  const secure = await cookiesSecure();
   jar.set(ACCESS_COOKIE, accessJwt, {
     httpOnly: true,
     secure,
