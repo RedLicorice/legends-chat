@@ -1,7 +1,7 @@
 // Legends Chat service worker — SPA shell cache + push notifications.
 
 // Bump on every deploy that needs to invalidate cached SPA shells / bundles.
-const CACHE_VERSION = "v28-block-back-login";
+const CACHE_VERSION = "v29-security-into-registration";
 const SHELL_CACHE = `legends-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `legends-static-${CACHE_VERSION}`;
 

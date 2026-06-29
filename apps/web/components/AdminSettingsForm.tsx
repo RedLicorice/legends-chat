@@ -122,6 +122,8 @@ export function AdminSettingsForm({ settings, topics }: Props) {
 
   const registration = useSectionSave([], () => ({
     registration_mode: registrationMode,
+    require_passkey_at_registration: requirePasskey ? "true" : "false",
+    magic_link_login_disabled: magicLinkDisabled ? "true" : "false",
   }));
 
   const welcome = useSectionSave([], () => ({
@@ -280,15 +282,31 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           </select>
           <p className="mt-1 text-xs text-muted">In "Telegram only" and "Open" modes, an invitation code may still be required.</p>
         </Field>
+        <div className="flex items-start gap-2 text-sm">
+          <Toggle
+            checked={requirePasskey}
+            onChange={setRequirePasskey}
+            aria-label="Require passkey at registration"
+          />
+          <span className="mt-2">
+            <span className="font-medium">Require passkey at registration</span>
+            <span className="block text-xs text-muted">New users via Telegram must complete passkey setup before their session is issued.</span>
+          </span>
+        </div>
+        <div className="flex items-start gap-2 text-sm">
+          <Toggle
+            checked={magicLinkDisabled}
+            onChange={setMagicLinkDisabled}
+            aria-label="Passkey-only login"
+          />
+          <span className="mt-2">
+            <span className="font-medium">Passkey-only login</span>
+            <span className="block text-xs text-muted">Bot is funnel only. Existing users with passkeys authenticate inside the app. Users without passkeys are exempt.</span>
+          </span>
+        </div>
         <SaveBar {...registration} onSave={registration.save} />
       </Section>
               <InviteConfigSection />
-              <SecuritySection
-                requirePasskey={requirePasskey}
-                setRequirePasskey={setRequirePasskey}
-                magicLinkDisabled={magicLinkDisabled}
-                setMagicLinkDisabled={setMagicLinkDisabled}
-              />
             </>
           ),
           content: (
@@ -579,48 +597,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function SecuritySection({
-  requirePasskey, setRequirePasskey,
-  magicLinkDisabled, setMagicLinkDisabled,
-}: {
-  requirePasskey: boolean;
-  setRequirePasskey: (v: boolean) => void;
-  magicLinkDisabled: boolean;
-  setMagicLinkDisabled: (v: boolean) => void;
-}) {
-  const { saving, error, saved, save } = useSectionSave(
-    ["require_passkey_at_registration", "magic_link_login_disabled"],
-    () => ({
-      require_passkey_at_registration: requirePasskey ? "true" : "false",
-      magic_link_login_disabled: magicLinkDisabled ? "true" : "false",
-    }),
-  );
-  return (
-    <section className="mt-8 space-y-4">
-      <h2 className="text-lg font-semibold">Security</h2>
-      <div className="flex items-start gap-2 text-sm">
-        <Toggle
-          checked={requirePasskey}
-          onChange={setRequirePasskey}
-          aria-label="Require passkey at registration"
-        />
-        <span className="mt-2">
-          <span className="font-medium">Require passkey at registration</span>
-          <span className="block text-xs text-muted">New users via Telegram must complete passkey setup before their session is issued.</span>
-        </span>
-      </div>
-      <div className="flex items-start gap-2 text-sm">
-        <Toggle
-          checked={magicLinkDisabled}
-          onChange={setMagicLinkDisabled}
-          aria-label="Passkey-only login"
-        />
-        <span className="mt-2">
-          <span className="font-medium">Passkey-only login</span>
-          <span className="block text-xs text-muted">Bot is funnel only. Existing users with passkeys authenticate inside the app. Users without passkeys are exempt.</span>
-        </span>
-      </div>
-      <SaveBar saving={saving} error={error} saved={saved} onSave={save} />
-    </section>
-  );
-}
