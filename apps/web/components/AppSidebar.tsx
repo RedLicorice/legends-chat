@@ -223,44 +223,30 @@ export function AppSidebar({
         <div className={cn("flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden", (showStrip || showMinimalHidden) && "md:hidden")}>
           {/* Header */}
           <div className="flex items-center gap-1 border-b border-border px-3 pb-3 pt-[calc(0.75rem+var(--sat))]">
-            <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-accent">
-              {profile.avatarUrl ? (
-                <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white">
-                  {initials}
-                </div>
-              )}
-            </div>
-            <div className="min-w-0 flex-1 px-2">
-              <div className="truncate text-sm font-medium">{profile.displayName}</div>
-              <div className="text-xs uppercase tracking-wide text-muted">{user.role}</div>
-            </div>
+            {/* Avatar + name open the profile (the old standalone Profile icon
+                moved into the ... menu). */}
             <button
               type="button"
               onClick={() => setShowProfile(true)}
               title="Profile"
-              className="rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 text-left hover:bg-panel2 transition"
             >
-              <User className="h-4 w-4" />
+              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-accent">
+                {profile.avatarUrl ? (
+                  <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white">
+                    {initials}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{profile.displayName}</div>
+                <div className="text-xs uppercase tracking-wide text-muted">{user.role}</div>
+              </div>
             </button>
             <NotificationBell align="left" />
-            {canModQueue && (
-              <button
-                type="button"
-                onClick={() => setShowModQueue(true)}
-                title="Mod Queue"
-                className="relative rounded-lg p-2.5 text-amber-400 hover:bg-panel2 transition"
-              >
-                <AlertTriangle className="h-4 w-4" />
-                {pendingFlags !== null && pendingFlags > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white leading-none">
-                    {pendingFlags}
-                  </span>
-                )}
-              </button>
-            )}
-            {/* Overflow menu — Home / Admin / Support / Install live here now */}
+            {/* Overflow menu — Profile / Mod Queue / Home / Admin / Support / Install / Logout */}
             <div className="relative">
               <button
                 type="button"
@@ -268,16 +254,44 @@ export function AppSidebar({
                 title="More"
                 aria-label="More"
                 className={cn(
-                  "rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition",
+                  "relative rounded-lg p-2.5 text-muted hover:text-text hover:bg-panel2 transition",
                   showMenu && "bg-panel2 text-text",
                 )}
               >
                 <MoreHorizontal className="h-4 w-4" />
+                {canModQueue && pendingFlags !== null && pendingFlags > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white leading-none">
+                    {pendingFlags}
+                  </span>
+                )}
               </button>
               {showMenu && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
                   <div className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border border-border bg-panel py-1 shadow-xl">
+                    <button
+                      type="button"
+                      onClick={() => { setShowMenu(false); setShowProfile(true); }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-panel2"
+                    >
+                      <User className="h-4 w-4 text-muted" /> Profile
+                    </button>
+                    {canModQueue && (
+                      <button
+                        type="button"
+                        onClick={() => { setShowMenu(false); setShowModQueue(true); }}
+                        className="flex w-full items-center gap-3 px-3 py-2 text-sm hover:bg-panel2"
+                      >
+                        <AlertTriangle className="h-4 w-4 text-amber-400" />
+                        <span className="flex-1 text-left">Mod Queue</span>
+                        {pendingFlags !== null && pendingFlags > 0 && (
+                          <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white">
+                            {pendingFlags}
+                          </span>
+                        )}
+                      </button>
+                    )}
+                    <div className="my-1 border-t border-border" />
                     {variant === "admin" ? (
                       <Link href="/" onClick={() => setShowMenu(false)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-panel2">
                         <Home className="h-4 w-4 text-muted" /> Back to chat
