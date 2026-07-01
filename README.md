@@ -31,6 +31,8 @@ channels are server-side encrypted at rest; sensitive channels and
 - 1:1 user↔bot, plaintext or E2EE (admin opts the bot in)
 - Sidebar unifies topics + DMs + bot DMs into one chat list with
   filter chips (All / Topics / DMs / Bots) and a search bar
+- Delete conversation — hide-for-me (re-shows on new message) or
+  delete-for-both
 - DM URL is `/c/<id>`
 
 **Bots**
@@ -54,6 +56,10 @@ channels are server-side encrypted at rest; sensitive channels and
 - Installable on iOS, Android, desktop (Chrome / Edge)
 - Single persistent client shell — cold-launch splash once,
   intra-app navigation never tears chrome or the live socket
+- Mobile full-screen drill-down (list → chat → thread) with Back;
+  multi-pane on tablet/desktop
+- Embedded-webview gate — detects in-app browsers (Telegram, etc.)
+  and prompts to open in a real browser for passkeys + push
 - Service worker caches the app shell; push notifications route
   through your community's own VAPID keys
 
@@ -156,6 +162,10 @@ Three docs ship in this repo and inside the running app:
 Each manual has a mirror under `apps/web/public/docs/` that the
 `/docs/[slug]` route reads — the source-of-truth copy lives in
 `docs/`, and the mirror must stay in sync.
+
+Dated release notes live in `docs/changelogs/`; a post-ready,
+non-technical summary for end users is
+`docs/changelogs/CHANGELOG-USERS-2026-07.md`.
 
 ## Repository layout
 

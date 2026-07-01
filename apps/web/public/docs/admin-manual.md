@@ -36,6 +36,8 @@ or live socket.
 ## Topics (Channels)
 
 `/admin/topics` lists every channel; click one to open the editor.
+Multi-select rows for **bulk delete** (chunked to the 200-id server
+cap).
 
 ### Channel fields
 
@@ -88,9 +90,15 @@ For E2EE topics, only **ready** bots can be added — see Bots.
 
 `/admin/users` is the user directory. Each row shows display name +
 avatar, role, last seen, account creation date, and invite chain.
+The list is **searchable** (by name / @username) and **paginated**
+server-side (50 per page, Prev/Next).
 
 ### Actions
 
+- **New user** — create an empty account (display name + role)
+  without Telegram. Pair with **Generate login link** (per-user, in
+  the detail panel — `POST /api/admin/users/[id]/login-link`) to
+  hand the person a one-time sign-in link for first access.
 - **Change role** — `user`, `moderator`, `admin`, or any custom
   role. Effective immediately.
 - **Per-permission overrides** — `PUT
@@ -160,7 +168,12 @@ overrides.
 
 ## Bots
 
-`/admin/bots` — bot accounts. Requires `bots.manage`.
+`/admin/bots` — bot accounts. Requires `bots.manage`. A
+**master/detail** layout: the searchable, server-**paginated** bot
+list (50/page) on the left, the selected bot's detail on the right.
+Multi-select rows for **bulk delete** — "select all N matching"
+reaches bots beyond the current page; large selections are chunked
+to respect the 200-id server cap.
 
 ### Creating a bot
 
@@ -294,12 +307,13 @@ nothing is sent through a SaaS push relay.
 
 ### 2. Access
 
-- **Registration mode** — `open`, `invite-only`, `closed`, or
-  `telegram_only` (see Invites).
-- **Require passkey at registration** — gate signup on a passkey.
-- **Magic-link login disabled** — turn off Telegram magic-link for
-  existing accounts (Telegram-side signup still works if reg mode
-  allows it).
+- **Registration** — groups the sign-up controls together:
+  - **Registration mode** — `open`, `invite-only`, `closed`, or
+    `telegram_only` (see Invites).
+  - **Require passkey at registration** — gate signup on a passkey.
+  - **Passkey-only login (magic-link disabled)** — turn off
+    Telegram magic-link for existing accounts (Telegram-side signup
+    still works if reg mode allows it).
 - **Invite flow** — require-invite toggle, code prefix, daily
   quota per role.
 - **Welcome flow** — default landing channel, welcome/farewell

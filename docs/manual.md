@@ -47,6 +47,14 @@ After signing in you land at `/`. The app is a **single persistent
 shell** — sidebar, top chrome, and live socket load once and stay
 loaded across chats, settings, and admin.
 
+### Navigating on mobile
+
+On phones the app is a **full-screen drill-down**, not a split view:
+tap a chat to slide from the **list → chat**, and open a thread to
+slide **chat → thread**. Each screen has a **Back** button (and the
+hardware/browser Back works too) to step back up. On tablets and
+desktop the classic multi-pane layout is used instead.
+
 ### Installing as a PWA
 
 - **iOS (Safari)** — Share → **Add to Home Screen**.
@@ -56,6 +64,11 @@ loaded across chats, settings, and admin.
 Installed, the app opens in its own window. Cold-launching shows a
 brand splash once; in-app navigation does not.
 
+If you open the app inside another app's **built-in browser** (a
+link opened from within Telegram, Instagram, etc.), it prompts you
+to **open in your real browser** — passkeys and push notifications
+don't work reliably inside embedded webviews.
+
 ---
 
 ## The Sidebar — Chats, Search, Filters
@@ -63,12 +76,17 @@ brand splash once; in-app navigation does not.
 The left sidebar lists **topic channels, 1:1 DMs with users, and
 DMs with bots** — merged, sorted by most-recent activity. Each row
 shows the last message preview, a relative timestamp, and an
-**unread count** badge. On mobile, tap the hamburger icon to open.
+**unread count** badge. On mobile the list is the root screen of
+the drill-down (see **Navigating on mobile**).
 
 - **Search bar** — filters by name as you type. Topics and DM
   peers (users and bots) both match.
 - **Filter chips** — `All / Topics / DMs / Bots`. Tap a chip to
   jump to the chat list home; **All** returns the full list.
+- **⋯ overflow menu** (top of the list) — **Profile**, **Home**,
+  **Admin** / **Mod Queue** (staff only, with a pending-flag
+  count), **Install**, docs, and **Log out**. Your avatar and name
+  also open your profile.
 - **Sidebar display mode** — **Settings → Appearance**:
   **Minimal** (icons only) or **Strip** (icons + labels).
 
@@ -117,6 +135,16 @@ chat header.
 
 The URL of a DM is `/c/<id>`. Click the peer's avatar in the right
 pane to open their profile.
+
+### Deleting a conversation
+
+The **⋯** menu in a DM/bot chat header has **Delete Conversation**,
+with a **Delete for both parties** option:
+
+- **For me** (default) — hides the conversation from your list; it
+  quietly comes back if the other person sends a new message.
+- **For both parties** — permanently removes the conversation and
+  its messages for everyone. This can't be undone.
 
 ### Verifying your peer (E2EE DMs)
 
@@ -297,8 +325,8 @@ chats.
 
 ## Profile & Settings
 
-Click your **avatar / display name** in the sidebar footer to
-change display name, avatar, banner, and bio.
+Click your **avatar / display name** (or **Profile** in the sidebar
+**⋯** menu) to change display name, avatar, banner, and bio.
 
 Open **Settings** from the sidebar or profile menu. Three tabs:
 

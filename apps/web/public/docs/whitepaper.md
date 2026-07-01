@@ -114,7 +114,10 @@ token** and a longer-lived **refresh token**. The access token carries
 your identity and permissions so most page loads do not need a
 database lookup; revocations are enforced through a fast in-memory
 list. **Refresh tokens are stored hashed** in the database, not in
-plaintext.
+plaintext. Session cookies are `HttpOnly`, `SameSite=Lax`, and
+marked `Secure` whenever the connection is HTTPS (so installed iOS
+PWAs keep their session across relaunches instead of silently
+dropping the cookie).
 
 ---
 
@@ -346,6 +349,9 @@ other members.
 - **Defense in depth** on uploads (client strip + server detect +
   rate limit) and links (client strip + server strip + interstitial
   + referer policy + rel attributes).
+- **Embedded-webview gate**: the app detects in-app browsers
+  (Telegram, Instagram, etc.) and prompts to open in a real browser,
+  where passkeys and push are trustworthy.
 
 ---
 
