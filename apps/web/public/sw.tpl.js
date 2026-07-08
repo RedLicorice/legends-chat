@@ -1,7 +1,7 @@
 // Legends Chat service worker — SPA shell cache + push notifications.
 
 // Manual label — bump only when you intentionally want a named invalidation.
-const CACHE_LABEL = "v36-hdrfade3";
+const CACHE_LABEL = "v37-inputpad";
 // __SW_BUILD__ is stamped into the BYTES by app/sw.js/route.ts, once per build
 // (see NEXT_PUBLIC_SW_BUILD). Because the served script changes every deploy,
 // the browser's SW update check fires and `activate` purges old caches — the

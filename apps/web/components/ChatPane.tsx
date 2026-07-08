@@ -2732,7 +2732,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
               : "You cannot post in this conversation."}
         </div>
       ) : (
-        <div className="border-t border-border bg-panel px-3 pt-2 pb-[max(0.375rem,calc(var(--sab)*0.5))] shrink-0">
+        <div className="border-t border-border bg-panel px-3 pt-2 pb-[calc(2rem+var(--sab))] shrink-0">
           <div className="mx-auto w-full max-w-3xl">
           {caps.threads && replyingTo && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-panel2 px-3 py-1.5">
