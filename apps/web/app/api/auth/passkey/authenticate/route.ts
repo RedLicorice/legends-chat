@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { issueSession, setAuthCookies } from "@/lib/auth";
 import { getRpConfig } from "@/lib/passkey";
+import { clientIp, enforceRateLimit } from "@/lib/rate-limit";
 
 const CHALLENGE_TTL = 300;
 const CHALLENGE_COOKIE = "lc_passkey_chal";
@@ -39,7 +40,9 @@ export async function GET(req: Request) {
   const jar = await cookies();
   jar.set(CHALLENGE_COOKIE, sessionId, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Secure over prod OR any HTTPS request (e.g. Tailscale dev), matching the
+    // main auth cookies — NODE_ENV alone dropped Secure on dev-over-HTTPS.
+    secure: process.env.NODE_ENV === "production" || req.headers.get("x-forwarded-proto") === "https",
     sameSite: "lax",
     path: "/",
     maxAge: CHALLENGE_TTL,
@@ -49,6 +52,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const limited = await enforceRateLimit(`auth:passkey:ip:${clientIp(req)}`, 30, 900);
+  if (limited) return limited;
+
   const { rpID, origin } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
   const body = await req.json() as { response: AuthenticationResponseJSON };
 

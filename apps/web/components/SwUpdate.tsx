@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { SW_URL } from "@/lib/sw";
 
 // Service worker update driver. Sits at the layout level (always mounted).
 //
@@ -53,7 +54,7 @@ export function SwUpdate(): null {
     };
 
     void (async () => {
-      const reg = await navigator.serviceWorker.register("/sw.js");
+      const reg = await navigator.serviceWorker.register(SW_URL);
       if (state.cancelled) return;
       state.reg = reg;
 

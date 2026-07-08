@@ -17,9 +17,11 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 import {
   botToDeviceQueue,
   cryptoSentTxns,
+  userKeyBundles,
   userToDeviceQueue,
 } from "@legends/db/schema";
 import { db } from "@/lib/db";
@@ -51,6 +53,21 @@ export async function PUT(
   const senderDeviceId = req.headers.get(DEVICE_HEADER);
   if (!senderDeviceId) {
     return matrixError("M_UNKNOWN", `missing ${DEVICE_HEADER} header`, 400);
+  }
+
+  // Provenance binding (#16): the sender device id is stored verbatim and later
+  // regex-parsed by /sync to attribute the envelope's sender. Reject any value
+  // that isn't one of the caller's OWN registered devices — otherwise a user
+  // could set the header to `bot:<uuid>` (or any device id) and forge the
+  // apparent origin. Cryptographic identity is still Olm-bound; this closes the
+  // provenance/audit-spoof gap.
+  const [ownDevice] = await db
+    .select({ deviceId: userKeyBundles.deviceId })
+    .from(userKeyBundles)
+    .where(and(eq(userKeyBundles.userId, user.id), eq(userKeyBundles.deviceId, senderDeviceId)))
+    .limit(1);
+  if (!ownDevice) {
+    return matrixError("M_FORBIDDEN", "sender device not registered to caller", 403);
   }
 
   const minute = Math.floor(Date.now() / 60000);

@@ -130,3 +130,27 @@ export function canPrincipal(
   if (actionRoles.length === 0) return true;
   return actionRoles.includes(principalRole);
 }
+
+/**
+ * Whether a principal may VIEW a topic (see it exists + read its content).
+ * Single source of truth for the read gate — mirrors GET /api/topic/[slug]:
+ *  1. admin role → always allowed
+ *  2. viewRoles non-empty and role not included → denied
+ *  3. readRoles non-empty and role not included → denied
+ *  4. otherwise allowed
+ * View/read are role-gated (not per-principal granted), so grants aren't
+ * consulted here — keep this the ONLY place that decision lives so the
+ * messages / members / WS-event callers can't drift apart.
+ */
+export function canViewTopic(
+  principalRole: string,
+  viewRoles: string[] | null | undefined,
+  readRoles: string[] | null | undefined,
+): boolean {
+  if (principalRole === "admin") return true;
+  const v = viewRoles ?? [];
+  if (v.length > 0 && !v.includes(principalRole)) return false;
+  const r = readRoles ?? [];
+  if (r.length > 0 && !r.includes(principalRole)) return false;
+  return true;
+}

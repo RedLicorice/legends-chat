@@ -359,7 +359,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
     content: value ? { type: "doc", content: [] } : undefined,
     editorProps: {
       attributes: {
-        class: "outline-none min-h-[1.5rem] text-sm text-text",
+        // 16px on touch: sub-16px contenteditable triggers iOS auto-zoom-on-
+        // focus (a pan+zoom+settle flash independent of the keyboard pan).
+        // maximum-scale=1 is flaky for contenteditable, so pin the size instead.
+        class: "outline-none min-h-[1.5rem] text-[16px] md:text-sm text-text",
         autocomplete: "off",
         autocorrect: "off",
         autocapitalize: "off",

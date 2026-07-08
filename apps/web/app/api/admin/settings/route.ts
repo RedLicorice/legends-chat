@@ -55,6 +55,7 @@ export async function PATCH(req: Request) {
     "banner_fade_enabled",
     "require_passkey_at_registration",
     "magic_link_login_disabled",
+    "e2ee_admin_disclosure",
     "upload_resize_cap",
     "upload_jpeg_quality",
     "upload_max_size_image_mb",

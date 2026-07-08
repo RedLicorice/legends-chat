@@ -1,5 +1,6 @@
 "use client";
 import { apiFetch } from "@/lib/fetch";
+import { SW_URL } from "@/lib/sw";
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
@@ -31,7 +32,7 @@ export function PushSetup() {
     let cancelled = false;
     (async () => {
       try {
-        const reg = await navigator.serviceWorker.register("/sw.js");
+        const reg = await navigator.serviceWorker.register(SW_URL);
         if (cancelled) return;
         const existing = await reg.pushManager.getSubscription();
         if (existing) return;

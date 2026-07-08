@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { bots, topics, topicBots } from "@legends/db/schema";
 import { db } from "./db";
 import { cacheClient } from "./redis";
+import { safeWebhookFetch } from "./ssrf";
 
 export interface WebhookUpdate {
   update_id: string;
@@ -17,9 +18,10 @@ export interface WebhookUpdate {
   };
 }
 
-let updateCounter = 0;
-function nextUpdateId(): string {
-  return String(++updateCounter);
+// Monotonic across ws instances + restarts via Redis (an in-memory counter
+// collided across the cluster and reset on restart, breaking bot-side dedup).
+async function nextUpdateId(): Promise<string> {
+  return String(await cacheClient.incr("legends:bot:update_id_seq"));
 }
 
 const UPDATE_QUEUE_TTL = 300; // 5 minutes
@@ -40,7 +42,7 @@ async function dispatchUpdate(botId: string, webhookUrl: string | null, update: 
   await Promise.all([
     cacheClient.rpush(queueKey, serialized).then(() => cacheClient.expire(queueKey, UPDATE_QUEUE_TTL)),
     webhookUrl
-      ? fetch(webhookUrl, {
+      ? safeWebhookFetch(webhookUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: serialized,
@@ -69,7 +71,7 @@ export async function deliverMessageToWebhooks(
   if (targets.length === 0) return;
 
   const update: WebhookUpdate = {
-    update_id: nextUpdateId(),
+    update_id: await nextUpdateId(),
     type: "message",
     message: {
       message_id: message.id,
@@ -100,7 +102,7 @@ export async function deliverCallbackQueryToWebhooks(
     .limit(1);
 
   const update: WebhookUpdate = {
-    update_id: nextUpdateId(),
+    update_id: await nextUpdateId(),
     type: "callback_query",
     callback_query: {
       id: callbackQueryId,
@@ -131,7 +133,7 @@ export async function deliverNewMemberToWebhooks(
   if (botList.length === 0) return;
 
   const update: WebhookUpdate = {
-    update_id: nextUpdateId(),
+    update_id: await nextUpdateId(),
     type: "new_member",
     new_member: {
       user_id: userId,

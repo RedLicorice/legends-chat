@@ -23,6 +23,7 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { TopicInfoModal } from "@/components/TopicInfoModal";
 import { EncryptedMessageContent } from "@/components/EncryptedMessageContent";
 import { EncryptedReasonModal, type EncryptedReason } from "@/components/EncryptedReasonModal";
+import { NewDeviceAlertBanner } from "@/components/NewDeviceAlertBanner";
 import type { IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
@@ -112,7 +113,7 @@ interface SidebarTopicUpdate {
 
 export interface ChatPaneTopicMode {
   kind: "topic";
-  topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl?: string | null; bannerUrl?: string | null; description?: string | null };
+  topic: { id: string; slug: string; title: string; isE2ee: boolean; isFeed: boolean; postRoles: string[]; iconUrl?: string | null; bannerUrl?: string | null; description?: string | null; adminReadsE2ee?: boolean };
   mute: { reason: string; expiresAt: string | null } | null;
   giphyEnabled?: boolean;
   communityName?: string | null;
@@ -926,6 +927,9 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
       if (!el) return;
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (distFromBottom < 150) {
+        // rAF defers the scroll until after the browser has resized the layout
+        // (interactive-widget) so scrollHeight is measured against the
+        // keyboard-shrunk viewport.
         requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
       }
     }
@@ -1829,7 +1833,9 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         />
       )}
 
-      <header className="sticky top-0 z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-2.5 pt-[calc(0.75rem+var(--sat))] md:px-6">
+      <NewDeviceAlertBanner />
+
+      <header className="chat-header relative z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-2.5 pt-[calc(0.75rem+var(--sat)+var(--kb-offset,0px))] md:px-6">
         <button
           type="button"
           onClick={isMobile ? goBack : onMenuOpen}
@@ -1867,7 +1873,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
                   ? <Lock className="h-3 w-3 text-accent2" />
                   : <span className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
                 }
-                {connected ? (isE2ee ? "encrypted" : "connected") : "connecting…"}
+                {connected
+                  ? (isE2ee
+                      ? (isTopicMode && topic?.adminReadsE2ee ? "encrypted · admins can read" : "encrypted")
+                      : "connected")
+                  : "connecting…"}
               </p>
             )}
           </div>

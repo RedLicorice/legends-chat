@@ -6,8 +6,12 @@ import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { issueSession, setAuthCookies } from "@/lib/auth";
 import { getSetting } from "@legends/db/system-settings";
+import { clientIp, enforceRateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  const limited = await enforceRateLimit(`auth:tg-login:ip:${clientIp(req)}`, 20, 900);
+  if (limited) return limited;
+
   const magicLinkDisabled = (await getSetting(db, "magic_link_login_disabled")) === "true";
   if (magicLinkDisabled) {
     return NextResponse.json({ error: "Magic link login is disabled." }, { status: 403 });

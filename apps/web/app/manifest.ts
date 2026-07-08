@@ -64,7 +64,15 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     name: name ?? "Legends Chat",
     short_name: name ? name.split(" ")[0] : "Legends",
     description: "Community chat",
-    start_url: "/login",
+    // id + explicit scope are REQUIRED for reliable iOS standalone. Without an
+    // explicit scope, iOS derives it from start_url — and a start_url of
+    // "/login" can be read as scope "/login", so navigating into the shell
+    // (/, /t/*, /settings) falls OUT of scope and iOS shows the Safari chrome.
+    // scope "/" covers the whole app; start_url "/" opens the shell for
+    // logged-in users (and redirects to /login in-scope when signed out).
+    id: "/",
+    scope: "/",
+    start_url: "/",
     display: "standalone",
     orientation: "portrait",
     background_color: "#0b0d12",

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getUserMute } from "@/lib/auth";
 import { getSettingCached } from "@/lib/settings-cache";
 import { psPasskeyCount, psTopicBySlug, psTopicUserGrants } from "@/lib/db-prepared";
-import { canPrincipal, type TopicGrant, type GrantEffect } from "@legends/shared";
+import { canPrincipal, canViewTopic, type TopicGrant, type GrantEffect } from "@legends/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -21,22 +21,18 @@ export async function GET(
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const [topicRows, mute, giphySetting, passkeyRows] = await Promise.all([
+  const [topicRows, mute, giphySetting, adminDisclosureSetting, passkeyRows] = await Promise.all([
     psTopicBySlug.execute({ slug }),
     getUserMute(user.id),
     getSettingCached("giphy_enabled"),
+    getSettingCached("e2ee_admin_disclosure"),
     psPasskeyCount.execute({ userId: user.id }),
   ]);
   const topic = topicRows[0];
   const passkeyCount = passkeyRows[0]?.n ?? 0;
   if (!topic) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const viewRoles = (topic.viewRoles as string[] | null) ?? [];
-  if (viewRoles.length > 0 && user.role !== "admin" && !viewRoles.includes(user.role)) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
-  }
-  const readRoles = (topic.readRoles as string[] | null) ?? [];
-  if (readRoles.length > 0 && user.role !== "admin" && !readRoles.includes(user.role)) {
+  if (!canViewTopic(user.role, topic.viewRoles as string[] | null, topic.readRoles as string[] | null)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
@@ -68,6 +64,10 @@ export async function GET(
       hasPassword: topic.passwordHash != null,
       passwordVersion: topic.passwordVersion,
       passwordReentryDays: topic.passwordReentryDays,
+      // When the admin-disclosure setting is on, E2EE topics tell members that
+      // platform admins are also key recipients (see SECURITY_AUDIT #6). Only
+      // meaningful for E2EE topics.
+      adminReadsE2ee: topic.isE2ee && adminDisclosureSetting === "true",
     },
     mute: mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null,
     hasPasskey: passkeyCount > 0,

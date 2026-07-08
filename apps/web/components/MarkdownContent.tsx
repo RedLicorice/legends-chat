@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 import { useSymbols } from "@/contexts/SymbolsContext";
 import { useHashtagClick } from "@/contexts/HashtagClickContext";
 import { useExternalLink } from "@/contexts/ExternalLinkContext";
@@ -90,11 +91,11 @@ export function MarkdownContent({ content, className }: Props) {
     if (!ref.current) return;
     const preprocessed = preprocessMentions(unescapeTiptapMarkdown(content));
     const html = marked.parse(preprocessed) as string;
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    doc.querySelectorAll("script,style,iframe,object,embed,form").forEach((el) => el.remove());
-    doc.querySelectorAll("[onclick],[onerror],[onload],[onmouseover]").forEach((el) => {
-      ["onclick", "onerror", "onload", "onmouseover"].forEach((attr) => el.removeAttribute(attr));
-    });
+    // Allowlist sanitize. Strips javascript:/data: URIs, event handlers, and
+    // every non-whitelisted tag/attr. `class` + `data-*` survive by default,
+    // which the mention/hashtag/symbol spans rely on.
+    const clean = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    const doc = new DOMParser().parseFromString(clean, "text/html");
     // Force safe link attributes. Strip every signal that could deanonymize
     // the chat origin to the external destination:
     //   rel=noopener     — destination cannot reach back via window.opener

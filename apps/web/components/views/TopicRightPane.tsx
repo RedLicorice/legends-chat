@@ -169,6 +169,7 @@ interface TopicChatPaneHostProps {
     hasPassword: boolean;
     passwordVersion: number;
     passwordReentryDays: number;
+    adminReadsE2ee?: boolean;
   };
   mute: { reason: string; expiresAt: string | null } | null;
   giphyEnabled?: boolean;

@@ -7,8 +7,13 @@ import { redis } from "@/lib/redis";
 import { hashPassword } from "@/lib/password";
 import { issueSession, setAuthCookies } from "@/lib/auth";
 import { getAllSettings, getSetting } from "@legends/db/system-settings";
+import { clientIp, enforceRateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
+  // Account-spam / invite-code brute-force guard: 5 registrations / hour per IP.
+  const ipLimited = await enforceRateLimit(`auth:register:ip:${clientIp(req)}`, 5, 3600);
+  if (ipLimited) return ipLimited;
+
   const body = await req.json() as { displayName: string; email: string; password: string; inviteCode?: string };
 
   // Check registration mode

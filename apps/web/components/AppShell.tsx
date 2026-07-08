@@ -219,7 +219,7 @@ function renderAdminPanel(key: AdminPanelKey | null): React.ReactNode {
 
 function NotFoundPanel() {
   return (
-    <div className="flex h-dvh flex-col items-center justify-center gap-3 bg-bg p-6 text-center text-fg">
+    <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg p-6 text-center text-fg">
       <h1 className="text-xl font-semibold">Page not found</h1>
       <p className="text-sm text-muted">
         We couldn&apos;t find what you were looking for.
@@ -435,54 +435,63 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     setSidebarOpen(false);
   }, [rawPathname]);
 
-  // ── On-screen keyboard handling ──────────────────────────────────────────
-  // Two CSS vars, both driven off visualViewport:
-  //   --vvy = visualViewport.offsetTop. iOS scrolls the whole webview up to
-  //     reveal the keyboard, which drags a `position:fixed` shell off the top
-  //     (the header "flows out"). The shell counters with
-  //     `transform: translateY(var(--vvy))` — a GPU-composited shift (no reflow,
-  //     so no flicker) that re-pins it to the visible top.
-  //   --kb = keyboard height (innerHeight − vv.height − offsetTop). Pads the
-  //     bottom of <main> so the composer clears the keyboard.
-  // Both deduped so we only write on real change (avoids churn during the
-  // keyboard's open/close animation).
+
+  // ── Keyboard: hold the header, masking the reactive lag ───────────────────
+  // iOS pans the whole page up to reveal the focused composer, dragging the
+  // header off the top. We can't stop the pan and offsetTop only arrives a frame
+  // late — so instead of showing the slide, we HIDE it:
+  //   1. touchstart on an editable (keyboard closed) → fade the header out
+  //      (data-kb-anim="hidden"), before the keyboard/pan even begins.
+  //   2. as iOS pans, --kb-offset (= visualViewport.offsetTop) feeds the header's
+  //      top padding so the header lands in the right spot — while invisible.
+  //   3. once the pan settles (no vv event for ~90ms) → fade the header back in
+  //      from just above. The eye only sees a clean fade+slide, never the jitter.
   useEffect(() => {
-    if (isPublicPath) return;
     const vv = window.visualViewport;
     if (!vv) return;
     const root = document.documentElement;
-    let raf = 0;
-    let lastVvy = -1;
-    let lastKb = -1;
-    function apply() {
-      raf = 0;
-      const vvy = Math.round(vv!.offsetTop);
-      const kb = Math.max(0, Math.round(window.innerHeight - vv!.height - vv!.offsetTop));
-      if (vvy !== lastVvy) {
-        lastVvy = vvy;
-        root.style.setProperty("--vvy", `${vvy}px`);
-      }
-      const kbVal = kb > 80 ? kb : 0;
-      if (kbVal !== lastKb) {
-        lastKb = kbVal;
-        if (kbVal > 0) root.style.setProperty("--kb", `${kbVal}px`);
-        else root.style.removeProperty("--kb");
-      }
-    }
-    function update() {
-      if (!raf) raf = requestAnimationFrame(apply);
-    }
-    apply();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      root.style.removeProperty("--kb");
-      root.style.removeProperty("--vvy");
+    let settle: ReturnType<typeof setTimeout> | undefined;
+
+    const isEditable = (t: EventTarget | null): boolean =>
+      !!(t instanceof HTMLElement && t.closest("input, textarea, [contenteditable='true'], .tiptap"));
+
+    const reveal = () => {
+      root.dataset.kbAnim = "reveal"; // fade + slide in (400ms, globals.css)
+      clearTimeout(settle);
+      settle = setTimeout(() => { delete root.dataset.kbAnim; }, 400);
     };
-  }, [isPublicPath]);
+    const onVV = () => {
+      root.style.setProperty("--kb-offset", `${Math.round(vv.offsetTop)}px`);
+      clearTimeout(settle);
+      if (vv.offsetTop > 0) {
+        // still panning — reveal 200ms after it stops moving.
+        settle = setTimeout(reveal, 200);
+      } else {
+        delete root.dataset.kbAnim; // keyboard closed
+      }
+    };
+    const onTouch = (e: Event) => {
+      if (vv.offsetTop === 0 && isEditable(e.target)) {
+        root.dataset.kbAnim = "hidden"; // plain fade out
+        clearTimeout(settle);
+        // fallback: keyboard never opened → restore the header.
+        settle = setTimeout(() => { delete root.dataset.kbAnim; }, 600);
+      }
+    };
+
+    onVV();
+    vv.addEventListener("scroll", onVV);
+    vv.addEventListener("resize", onVV);
+    document.addEventListener("touchstart", onTouch, { capture: true, passive: true });
+    return () => {
+      clearTimeout(settle);
+      vv.removeEventListener("scroll", onVV);
+      vv.removeEventListener("resize", onVV);
+      document.removeEventListener("touchstart", onTouch, { capture: true });
+      root.style.removeProperty("--kb-offset");
+      delete root.dataset.kbAnim;
+    };
+  }, []);
 
   // ── General auth gate for authed routes ──────────────────────────────────
   useEffect(() => {
@@ -584,15 +593,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   return (
     <AppShellContext.Provider value={contextValue}>
-      {/* Fills the layout viewport (residual home-indicator "chin" is an iOS
-          standalone limitation). translateY(--vvy) re-pins the shell to the
-          visible top when iOS scrolls the webview for the keyboard (otherwise
-          the header flows off-screen); it's a composited transform, so no
-          reflow/flicker. Keyboard composer clearance is --kb on <main>. */}
-      <div
-        className="fixed inset-0 flex overflow-hidden"
-        style={{ transform: "translateY(var(--vvy, 0px))" }}
-      >
+      {/* Fixed, fills the viewport (.app-shell in globals.css). No keyboard JS —
+          the on-screen keyboard is left to the browser's native behavior. */}
+      <div className="app-shell flex">
         {isMobile ? (
           <MobileStack level={paneLevel as 0 | 1 | 2}>
             {level === 0 ? (
@@ -608,10 +611,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                 <Suspense fallback={null}>{route.sidebarContent}</Suspense>
               </AppSidebar>
             ) : (
-              <main
-                className="relative flex flex-1 min-w-0 flex-col overflow-hidden"
-                style={{ paddingBottom: "var(--kb, 0px)" }}
-              >
+              <main className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
                 <Suspense fallback={null}>{route.mainContent}</Suspense>
               </main>
             )}
@@ -631,10 +631,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             >
               <Suspense fallback={null}>{route.sidebarContent}</Suspense>
             </AppSidebar>
-            <main
-              className="relative flex flex-1 min-w-0 flex-col overflow-hidden"
-              style={{ paddingBottom: "var(--kb, 0px)" }}
-            >
+            <main className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
               <Suspense fallback={null}>{route.mainContent}</Suspense>
             </main>
           </>

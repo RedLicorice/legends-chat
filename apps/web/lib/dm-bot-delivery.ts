@@ -3,6 +3,7 @@ import { bots, dmConversations, dmParticipants } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
+import { safeWebhookFetch } from "@/lib/ssrf";
 
 const UPDATE_QUEUE_TTL = 300; // mirror apps/ws/src/webhook.ts
 
@@ -64,7 +65,7 @@ async function dispatch(botId: string, webhookUrl: string | null, update: DmUpda
   await Promise.all([
     redis.rpush(queueKey, serialized).then(() => redis.expire(queueKey, UPDATE_QUEUE_TTL)),
     webhookUrl
-      ? fetch(webhookUrl, {
+      ? safeWebhookFetch(webhookUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: serialized,

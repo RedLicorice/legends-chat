@@ -1,8 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { clearAuthCookies } from "@/lib/auth";
+import { clearAuthCookies, revokeCurrentSession } from "@/lib/auth";
 import { publicOriginServer } from "@/lib/public-origin.server";
 
 export async function POST(req: NextRequest) {
+  // Revoke server-side BEFORE clearing cookies (needs the cookie values).
+  await revokeCurrentSession();
   await clearAuthCookies();
   // Stay on the request's actual host so the just-cleared cookies still apply
   // (avoids bouncing localhost users to APP_PUBLIC_URL's LAN IP).

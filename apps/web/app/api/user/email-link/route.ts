@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { users } from "@legends/db/schema";
@@ -5,14 +6,21 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { redis } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  // CSPRNG, uniform over [100000, 999999]. Math.random() is predictable and
+  // must never mint an auth code.
+  return String(randomInt(100000, 1000000));
 }
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  // SMTP-spam guard: 3 verification emails / 15 min per user.
+  const limited = await enforceRateLimit(`email-link:send:${user.id}`, 3, 900);
+  if (limited) return limited;
 
   const body = await req.json() as { email: string };
   const email = body.email?.trim().toLowerCase();

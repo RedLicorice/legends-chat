@@ -135,7 +135,10 @@ export async function processMessageLinks(
         && settings.shlinkHost
         && settings.shlinkApiKey
         && wrapRegex
-        && wrapRegex.test(finalUrl)
+        // Bound the tested input — a catastrophic admin pattern's backtracking
+        // scales with input length; cap it so one long URL can't hang the send
+        // path. ponytail: full ReDoS immunity needs RE2 (a dep) — deferred.
+        && wrapRegex.test(finalUrl.slice(0, 2048))
       ) {
         const tags: string[] = [];
         if (settings.shlinkTagWithUser && senderUserId) tags.push(`user:${senderUserId}`);

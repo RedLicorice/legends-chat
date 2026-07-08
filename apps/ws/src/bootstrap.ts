@@ -19,6 +19,7 @@ import {
   psTopicUserGrants,
   psUserMute,
 } from "./db-prepared";
+import { cacheClient } from "./redis";
 
 // UUIDv4 pattern — used to decide whether the slug-or-id from the client
 // should be probed as a UUID first. Cheap regex check beats catching an
@@ -50,6 +51,17 @@ export async function buildTopicBootstrap(
   const readRoles = (topic.readRoles as string[] | null) ?? [];
   if (readRoles.length > 0 && user.role !== "admin" && !readRoles.includes(user.role)) {
     return { ok: false, error: "not_found" };
+  }
+
+  // Password gate is server-authoritative (#19): a protected topic only yields
+  // its history/live feed to a caller who has proven the password. The proof
+  // (current passwordVersion) is set by POST /api/topics/[id]/verify-password.
+  // Admins bypass, matching the client gate.
+  if (topic.passwordHash != null && user.role !== "admin") {
+    const proof = await cacheClient.get(`legends:topic-pw:${user.sub}:${topic.id}`);
+    if (proof !== String(topic.passwordVersion)) {
+      return { ok: false, error: "forbidden" };
+    }
   }
 
   const [muteRows, passkeyRows, grantRows, memberRows, hashtagRows, giphySetting] = await Promise.all([

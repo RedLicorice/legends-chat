@@ -2,7 +2,7 @@ import type { Server, Socket, DefaultEventsMap } from "socket.io";
 import { eq } from "drizzle-orm";
 import { topics } from "@legends/db/schema";
 import { getAllSettings } from "@legends/db/system-settings";
-import { WS_EVENTS } from "@legends/shared";
+import { WS_EVENTS, canViewTopic } from "@legends/shared";
 import type { AccessTokenPayload } from "@legends/shared";
 import { db } from "./db";
 import { cacheClient } from "./redis";
@@ -35,6 +35,19 @@ async function getIceServers(): Promise<IceServer[]> {
 async function getTopicP2pConfig(topicId: string): Promise<{ isE2ee: boolean; p2pFallbackE2ee: boolean; p2pMaxParticipants: number | null } | null> {
   const [t] = await db.select({ isE2ee: topics.isE2ee, p2pFallbackE2ee: topics.p2pFallbackE2ee, p2pMaxParticipants: topics.p2pMaxParticipants }).from(topics).where(eq(topics.id, topicId)).limit(1);
   return t ?? null;
+}
+
+// Same view gate as the REST routes / TOPIC_JOIN. Without it, any authed socket
+// could P2P_JOIN a private topic — harvesting TURN credentials and joining the
+// call. Returns false for missing topics too (fail closed).
+async function topicViewable(userRole: string, topicId: string): Promise<boolean> {
+  const [t] = await db
+    .select({ viewRoles: topics.viewRoles, readRoles: topics.readRoles })
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .limit(1);
+  if (!t) return false;
+  return canViewTopic(userRole, t.viewRoles as string[] | null, t.readRoles as string[] | null);
 }
 
 async function getActiveCount(topicId: string): Promise<number> {
@@ -110,10 +123,13 @@ const socketTopics = new Map<string, Set<string>>();
 
 export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
   const userId = socket.data.user.sub;
+  const userRole = socket.data.user.role;
   socketTopics.set(socket.id, new Set());
 
   socket.on(WS_EVENTS.P2P_JOIN, async ({ topicId }: { topicId: string }) => {
     try {
+      // Authorization gate — reject before touching ICE/TURN creds or presence.
+      if (!(await topicViewable(userRole, topicId))) return;
       socketTopics.get(socket.id)?.add(topicId);
       const s = await getAllSettings(db);
       const globalMax = parseInt(s.p2p_max_participants ?? "5", 10);
@@ -148,19 +164,35 @@ export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
     }
   });
 
-  socket.on(WS_EVENTS.P2P_OFFER, ({ topicId: _t, toUserId, offer }: { topicId: string; toUserId: string; offer: RTCSessionDescriptionInit }) => {
+  // Relay only between two peers that are BOTH active in the topic. Active
+  // membership implies each passed the P2P_JOIN view gate, so this blocks
+  // signaling into topics the sender can't access and relaying to arbitrary
+  // user ids (offer/ICE spam).
+  async function relayAllowed(topicId: string, toUserId: string): Promise<boolean> {
+    const peers = await getActivePeers(topicId);
+    return peers.includes(userId) && peers.includes(toUserId);
+  }
+
+  socket.on(WS_EVENTS.P2P_OFFER, async ({ topicId, toUserId, offer }: { topicId: string; toUserId: string; offer: RTCSessionDescriptionInit }) => {
+    if (!(await relayAllowed(topicId, toUserId))) return;
     io.to(`user:${toUserId}`).emit(WS_EVENTS.P2P_OFFER, { fromUserId: userId, offer });
   });
 
-  socket.on(WS_EVENTS.P2P_ANSWER, ({ topicId: _t, toUserId, answer }: { topicId: string; toUserId: string; answer: RTCSessionDescriptionInit }) => {
+  socket.on(WS_EVENTS.P2P_ANSWER, async ({ topicId, toUserId, answer }: { topicId: string; toUserId: string; answer: RTCSessionDescriptionInit }) => {
+    if (!(await relayAllowed(topicId, toUserId))) return;
     io.to(`user:${toUserId}`).emit(WS_EVENTS.P2P_ANSWER, { fromUserId: userId, answer });
   });
 
-  socket.on(WS_EVENTS.P2P_ICE, ({ topicId: _t, toUserId, candidate }: { topicId: string; toUserId: string; candidate: RTCIceCandidateInit }) => {
+  socket.on(WS_EVENTS.P2P_ICE, async ({ topicId, toUserId, candidate }: { topicId: string; toUserId: string; candidate: RTCIceCandidateInit }) => {
+    if (!(await relayAllowed(topicId, toUserId))) return;
     io.to(`user:${toUserId}`).emit(WS_EVENTS.P2P_ICE, { fromUserId: userId, candidate });
   });
 
   socket.on(WS_EVENTS.P2P_HEARTBEAT, async ({ topicId }: { topicId: string }) => {
+    // Only refresh presence for a peer already admitted — a heartbeat must not
+    // insert an un-joined (ungated) user into the active set.
+    const isActive = await cacheClient.hexists(`p2p:active:${topicId}`, userId).catch(() => 0);
+    if (!isActive) return;
     await cacheClient.hset(`p2p:active:${topicId}`, userId, Date.now().toString()).catch(() => {});
   });
 

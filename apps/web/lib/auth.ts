@@ -24,17 +24,21 @@ import {
 } from "./db-prepared";
 
 // `next build` page-data collection imports this module; the secrets aren't
-// required at build time (no token is verified during collection). Fall back
-// to a sentinel string. At runtime, a missing real secret means token sign
-// + verify both use the sentinel — which is the correct failure mode if the
-// env var is genuinely missing (no token will ever validate against a real
-// session).
-const accessSecret = new TextEncoder().encode(
-  process.env.JWT_ACCESS_SECRET ?? "build-placeholder-access",
-);
-const refreshSecret = new TextEncoder().encode(
-  process.env.JWT_REFRESH_SECRET ?? "build-placeholder-refresh",
-);
+// required at build time (no token is verified during collection), so we allow
+// a sentinel ONLY during the build phase. At runtime a missing secret throws on
+// boot — fail closed. A public sentinel used to sign+verify would let anyone
+// forge an admin token, so it must never be reachable when serving requests.
+function requireSecret(name: "JWT_ACCESS_SECRET" | "JWT_REFRESH_SECRET"): Uint8Array {
+  const v = process.env[name];
+  if (v) return new TextEncoder().encode(v);
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return new TextEncoder().encode(`build-placeholder-${name}`);
+  }
+  throw new Error(`${name} is not set — refusing to start (would forge auth tokens)`);
+}
+
+const accessSecret = requireSecret("JWT_ACCESS_SECRET");
+const refreshSecret = requireSecret("JWT_REFRESH_SECRET");
 
 const ACCESS_TTL = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 900);
 // 24h: the window during which the app silently refreshes before asking
@@ -152,6 +156,37 @@ export async function clearAuthCookies(): Promise<void> {
   const jar = await cookies();
   jar.delete(ACCESS_COOKIE);
   jar.delete(REFRESH_COOKIE);
+}
+
+// Server-side logout: blocklist the current access jti until it expires and
+// revoke the session row so the refresh token dies immediately. Without this,
+// a captured refresh token stays valid its full TTL after "logout" (#13).
+// Best-effort per token — a malformed cookie is simply skipped.
+export async function revokeCurrentSession(): Promise<void> {
+  const jar = await cookies();
+  const access = jar.get(ACCESS_COOKIE)?.value;
+  const refresh = jar.get(REFRESH_COOKIE)?.value;
+
+  if (access) {
+    try {
+      const { payload } = await jwtVerify(access, accessSecret, { algorithms: ["HS256"] });
+      const p = accessTokenPayloadSchema.parse(payload);
+      const ttl = payload.exp ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000)) : ACCESS_TTL;
+      await redis.set(REDIS_KEYS.REVOKED_JTI(p.jti), "1", "EX", ttl);
+    } catch {
+      // invalid/expired access token — nothing to blocklist
+    }
+  }
+
+  if (refresh) {
+    try {
+      const { payload } = await jwtVerify(refresh, refreshSecret, { algorithms: ["HS256"] });
+      const p = refreshTokenPayloadSchema.parse(payload);
+      await db.update(sessions).set({ revokedAt: new Date() }).where(eq(sessions.id, p.sid));
+    } catch {
+      // invalid/expired refresh token — session already unusable
+    }
+  }
 }
 
 // Refresh JWT itself is not rotated — its expiry is the hard 24h limit after

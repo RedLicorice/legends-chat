@@ -7,11 +7,15 @@ import { redis } from "@/lib/redis";
 import { getAllSettings, getSetting } from "@legends/db/system-settings";
 import { generateRegistrationOptions } from "@simplewebauthn/server";
 import { getRpConfig } from "@/lib/passkey";
+import { clientIp, enforceRateLimit } from "@/lib/rate-limit";
 
 const CHALLENGE_TTL = 300;
 const log = createLogger("api:telegram-register");
 
 export async function POST(req: NextRequest) {
+  const limited = await enforceRateLimit(`auth:tg-register:ip:${clientIp(req)}`, 20, 900);
+  if (limited) return limited;
+
   const body = await req.json() as { token: string; displayName: string };
   const token = body.token?.trim();
   const displayName = body.displayName?.trim();

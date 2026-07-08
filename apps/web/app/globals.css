@@ -65,13 +65,38 @@ body {
   -webkit-font-smoothing: antialiased;
   touch-action: pan-x pan-y;
   overscroll-behavior: none;
-  /* dvh: adapts to visible viewport on mobile (excludes browser chrome) */
   height: 100dvh;
   overflow: hidden;
   max-width: 100vw;
   /* Disable selection on UI shell by default */
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* App shell — fills the viewport. inset:0 reaches the physical bottom edge with
+   viewport-fit=cover (100dvh does not on iOS standalone → the "chin"). */
+.app-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Chat header fade/slide (AppShell keyboard effect). While the keyboard opens
+   we plain-fade the header OUT so its 1-frame reposition lag isn't visible; once
+   the pan settles we fade it back IN while sliding down from above. */
+.chat-header {
+  transition: opacity 400ms ease;
+}
+:root[data-kb-anim="hidden"] .chat-header {
+  opacity: 0; /* just fade out — no slide on the way out */
+  pointer-events: none;
+}
+:root[data-kb-anim="reveal"] .chat-header {
+  animation: chat-header-reveal 400ms ease both;
+}
+@keyframes chat-header-reveal {
+  from { opacity: 0; transform: translateY(-18px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 * {

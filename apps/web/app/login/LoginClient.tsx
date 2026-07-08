@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { PasskeyAuthButton } from "@/components/PasskeyAuthButton";
+import { InstallButton } from "@/components/InstallButton";
 
 export function LoginClient() {
   const router = useRouter();
@@ -18,6 +19,8 @@ export function LoginClient() {
   const [loading, setLoading] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [botUsername, setBotUsername] = useState<string | null>(null);
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
 
   // If already signed in (e.g. user swiped back to /login after authenticating),
   // bounce to the app — /login should never be a reachable back-stack screen for
@@ -67,10 +70,16 @@ export function LoginClient() {
       const res = await apiFetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+          totpCode: totpCode.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
+        // Server signals a confirmed-TOTP account needs its 6-digit code.
+        if (data.totpRequired) setTotpRequired(true);
         setError(data.error ?? "Login failed.");
         return;
       }
@@ -155,6 +164,21 @@ export function LoginClient() {
                 className="w-full rounded-xl border border-border bg-panel px-4 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted"
               />
             </div>
+            {totpRequired && (
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Authenticator code</label>
+                <input
+                  required
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="123456"
+                  className="w-full rounded-xl border border-border bg-panel px-4 py-2.5 text-sm tracking-widest outline-none focus:border-accent placeholder:text-muted"
+                />
+              </div>
+            )}
             {error && <p className="text-sm text-danger">{error}</p>}
             <button
               type="submit"
@@ -173,6 +197,11 @@ export function LoginClient() {
             <Link href="/register" className="text-accent hover:underline">Create one</Link>
           </p>
         )}
+        {/* Install renders null when already standalone / unsupported. Lets a
+            visitor install the app first, then log in or register from it. */}
+        <div className="mt-6">
+          <InstallButton />
+        </div>
         <p className="mt-6 text-center text-xs text-muted/60">
           <Link href="/docs/whitepaper" className="hover:text-muted underline underline-offset-2">
             Privacy &amp; Security Whitepaper

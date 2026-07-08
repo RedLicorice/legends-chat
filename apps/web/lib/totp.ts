@@ -63,11 +63,14 @@ export function totpUri(secret: Buffer, account: string, issuer: string): string
 
 function getTotpKey(): Buffer {
   const hex = process.env.TOTP_ENCRYPTION_KEY;
-  if (!hex || hex.length !== 64) {
-    // dev fallback — fixed key, not suitable for production
+  if (hex && hex.length === 64) return Buffer.from(hex, "hex");
+  // A missing/short key must fail closed at runtime — an all-zero key means
+  // anyone with DB read can decrypt every TOTP secret (#14). Only the build
+  // phase (no secrets decrypted) is allowed a placeholder.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
     return Buffer.from("0".repeat(64), "hex");
   }
-  return Buffer.from(hex, "hex");
+  throw new Error("TOTP_ENCRYPTION_KEY missing or not 64 hex chars — refusing to (de)crypt TOTP secrets");
 }
 
 export function encryptTotpSecret(secret: Buffer): string {

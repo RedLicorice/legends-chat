@@ -18,6 +18,25 @@ const FILE_DIR = join(UPLOAD_DIR, "files");
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
+// Canonical extension per allowed image MIME. The stored extension is derived
+// from the (server-validated) MIME — NEVER from the user filename — so an
+// attacker can't get a `.html`/`.svg` file served inline from our origin.
+const MIME_EXT: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+};
+
+// For the general `files` bucket (arbitrary attachments) we keep a plausible
+// extension for the download, but only alphanumerics ≤12 chars — anything else
+// becomes `.bin`. The real neutralizer for this bucket is nginx forcing
+// `Content-Disposition: attachment` + `nosniff` so nothing ever executes inline.
+function sanitizedExt(filename: string): string {
+  const e = extname(filename).toLowerCase();
+  return /^\.[a-z0-9]{1,12}$/.test(e) ? e : ".bin";
+}
+
 function parseInt10(v: string | undefined, fallback: number): number {
   if (!v) return fallback;
   const n = parseInt(v, 10);
@@ -102,7 +121,9 @@ export async function POST(req: Request) {
     }
   }
 
-  const ext = extname(file.name) || ".bin";
+  // Image buckets (avatars/gifs/uploads) have a validated MIME → canonical ext.
+  // The files bucket keeps a sanitized ext and is download-forced by nginx.
+  const ext = bucket === "files" ? sanitizedExt(file.name) : (MIME_EXT[file.type] ?? ".bin");
   const name = `${randomUUID()}${ext}`;
 
   let dir: string;

@@ -99,10 +99,13 @@ import {
   toggleReaction,
   getTopicById,
   getTopicMemberUserIds,
+  userCanViewTopic,
+  getPollTopicId,
 } from "./messages";
 import { deliverCallbackQueryToWebhooks, deliverMessageToWebhooks, deliverNewMemberToWebhooks } from "./webhook";
 import { dispatchMessageNotifications } from "./notifications";
 import { registerP2PHandlers } from "./p2p-signaling";
+import { isRateLimited } from "./rate-limit";
 import { randomUUID } from "node:crypto";
 
 interface SocketData {
@@ -118,7 +121,8 @@ const httpServer = createServer((_req, res) => {
 const allowedOrigins = [
   process.env.WEB_URL,
   process.env.APP_PUBLIC_URL,
-  "http://localhost:3000",
+  // Dev-only convenience origin — never trust localhost in production.
+  process.env.NODE_ENV !== "production" ? "http://localhost:3000" : null,
 ].filter(Boolean) as string[];
 
 const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>(httpServer, {
@@ -231,6 +235,13 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.MESSAGE_SEND, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      // Flood guard FIRST — shed spam before any DB work (mute lookup, topic
+      // fetch, grant query, insert). 30 messages / 10s per user ≈ 3/s sustained,
+      // generous for humans, fatal to a flood loop.
+      if (await isRateLimited(`ws:send:${user.sub}`, 30, 10)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" });
+        return;
+      }
       const parsed = sendMessageSchema.parse(raw);
       const muted = await isUserMuted(user.sub);
       if (muted) {
@@ -357,6 +368,7 @@ io.on("connection", async (socket: AuthedSocket) => {
   socket.on(WS_EVENTS.TOPIC_READ, async (raw: unknown) => {
     try {
       const parsed = topicReadSchema.parse(raw);
+      if (!(await userCanViewTopic(user.role, parsed.topicId))) return; // #18 authz
       await setLastReadMessage(user.sub, parsed.topicId, parsed.lastReadMessageId);
     } catch (err) {
       console.error("topic:read failed", err);
@@ -365,6 +377,9 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.POLL_CREATE, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      if (await isRateLimited(`ws:poll-create:${user.sub}`, 10, 60)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       if (user.role === "user") {
         ack?.({ ok: false, error: "Insufficient permissions" });
         return;
@@ -389,7 +404,14 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.POLL_VOTE, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      if (await isRateLimited(`ws:poll-vote:${user.sub}`, 30, 10)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       const parsed = pollVoteSchema.parse(raw);
+      const voteTopicId = await getPollTopicId(parsed.pollId); // #18 authz
+      if (!voteTopicId || !(await userCanViewTopic(user.role, voteTopicId))) {
+        ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
       const result = await castPollVote({ pollId: parsed.pollId, userId: user.sub, optionIds: parsed.optionIds });
       if (!result.ok) { ack?.({ ok: false, error: result.error }); return; }
       if (result.pollData?.topicId) {
@@ -427,6 +449,9 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.REACTION_TOGGLE, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      if (await isRateLimited(`ws:react:${user.sub}`, 60, 10)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       const parsed = reactionToggleSchema.parse(raw);
       const muted = await isUserMuted(user.sub);
       if (muted) {
@@ -436,6 +461,10 @@ io.on("connection", async (socket: AuthedSocket) => {
       const topicId = await getMessageTopicId(parsed.messageId);
       if (!topicId) {
         ack?.({ ok: false, error: "message not found" });
+        return;
+      }
+      if (!(await userCanViewTopic(user.role, topicId))) { // #18 authz
+        ack?.({ ok: false, error: "FORBIDDEN" });
         return;
       }
       const result = await toggleReaction({
@@ -457,6 +486,9 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.MESSAGE_EDIT_REQ, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      if (await isRateLimited(`ws:edit:${user.sub}`, 20, 10)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       const parsed = messageEditSchema.parse(raw);
       const owner = await getMessageOwner(parsed.messageId);
       if (!owner || owner.topicId !== parsed.topicId) {
@@ -531,6 +563,9 @@ io.on("connection", async (socket: AuthedSocket) => {
       if (!botId || !messageId || !callbackData) { ack?.({ ok: false, error: "invalid payload" }); return; }
       const topicId = await getMessageTopicId(messageId);
       if (!topicId) { ack?.({ ok: false, error: "message not found" }); return; }
+      if (!(await userCanViewTopic(user.role, topicId))) { // #18 authz
+        ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
       const callbackQueryId = randomUUID();
       ack?.({ ok: true, callbackQueryId });
       deliverCallbackQueryToWebhooks(topicId, botId, callbackQueryId, messageId, user.sub, null, callbackData)

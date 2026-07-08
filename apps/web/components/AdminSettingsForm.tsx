@@ -75,6 +75,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [registrationMode, setRegistrationMode] = useState<string>(settings.registration_mode ?? "telegram_only");
   const [requirePasskey, setRequirePasskey] = useState(settings.require_passkey_at_registration === "true");
   const [magicLinkDisabled, setMagicLinkDisabled] = useState(settings.magic_link_login_disabled === "true");
+  const [e2eeAdminDisclosure, setE2eeAdminDisclosure] = useState(settings.e2ee_admin_disclosure === "true");
   const [defaultTopicId, setDefaultTopicId] = useState(settings.default_topic_id ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcome_message ?? "Welcome, {nickname}!");
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
@@ -124,6 +125,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
     registration_mode: registrationMode,
     require_passkey_at_registration: requirePasskey ? "true" : "false",
     magic_link_login_disabled: magicLinkDisabled ? "true" : "false",
+    e2ee_admin_disclosure: e2eeAdminDisclosure ? "true" : "false",
   }));
 
   const welcome = useSectionSave([], () => ({
@@ -302,6 +304,17 @@ export function AdminSettingsForm({ settings, topics }: Props) {
           <span className="mt-2">
             <span className="font-medium">Passkey-only login</span>
             <span className="block text-xs text-muted">Bot is funnel only. Existing users with passkeys authenticate inside the app. Users without passkeys are exempt.</span>
+          </span>
+        </div>
+        <div className="flex items-start gap-2 text-sm">
+          <Toggle
+            checked={e2eeAdminDisclosure}
+            onChange={setE2eeAdminDisclosure}
+            aria-label="Disclose admin read access on encrypted topics"
+          />
+          <span className="mt-2">
+            <span className="font-medium">Disclose admin access on encrypted topics</span>
+            <span className="block text-xs text-muted">Admins are recipients of every end-to-end encrypted topic. Enable this to show members a notice that admins can read encrypted messages, so the trust model isn't silent.</span>
           </span>
         </div>
         <SaveBar {...registration} onSave={registration.save} />

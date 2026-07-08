@@ -12,7 +12,7 @@
     "@legends/crypto": "workspace:*",
     "@legends/db": "workspace:*",
     "@legends/shared": "workspace:*",
-    "drizzle-orm": "^0.36.4",
+    "drizzle-orm": "^0.45.2",
     "grammy": "^1.32.0",
     "ioredis": "^5.4.1",
     "postgres": "^3.4.5"

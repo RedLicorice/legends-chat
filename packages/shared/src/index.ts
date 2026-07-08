@@ -8,6 +8,7 @@ export * from "./log";
 export * from "./link-processor";
 export * from "./shlink-client";
 export * from "./bootstrap";
+export * from "./ssrf";
 
 // Bot E2EE error codes — returned by /api/dm/open, /api/bot/v1/crypto/*, and
 // /api/admin/topics/[id]/bots so the frontend can branch on stable identifiers

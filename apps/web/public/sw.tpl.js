@@ -1,7 +1,14 @@
 // Legends Chat service worker — SPA shell cache + push notifications.
 
-// Bump on every deploy that needs to invalidate cached SPA shells / bundles.
-const CACHE_VERSION = "v30-admin-pagination";
+// Manual label — bump only when you intentionally want a named invalidation.
+const CACHE_LABEL = "v36-hdrfade3";
+// __SW_BUILD__ is stamped into the BYTES by app/sw.js/route.ts, once per build
+// (see NEXT_PUBLIC_SW_BUILD). Because the served script changes every deploy,
+// the browser's SW update check fires and `activate` purges old caches — the
+// PWA can never get stuck serving stale chunks. If the raw template is ever
+// fetched unstamped, we fall back to the label alone.
+const SW_BUILD = "__SW_BUILD__";
+const CACHE_VERSION = SW_BUILD.startsWith("__") ? CACHE_LABEL : `${CACHE_LABEL}-${SW_BUILD}`;
 const SHELL_CACHE = `legends-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `legends-static-${CACHE_VERSION}`;
 

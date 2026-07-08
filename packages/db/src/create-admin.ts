@@ -49,7 +49,7 @@ if (existing) {
 } else {
   await sql`
     INSERT INTO users (email, password_hash, display_name, role)
-    VALUES (${email.toLowerCase()}, ${passwordHash}, ${email.split("@")[0]}, 'admin')
+    VALUES (${email.toLowerCase()}, ${passwordHash}, ${email.split("@")[0] ?? email}, 'admin')
   `;
 }
 

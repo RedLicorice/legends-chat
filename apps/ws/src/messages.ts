@@ -21,7 +21,7 @@ import {
   unwrapKey,
   wrapKey,
 } from "@legends/crypto";
-import { REDIS_CHANNELS } from "@legends/shared";
+import { REDIS_CHANNELS, canViewTopic } from "@legends/shared";
 import { db } from "./db";
 import { pubClient } from "./redis";
 
@@ -581,6 +581,30 @@ export async function listTopics() {
 export async function getTopicById(topicId: string) {
   const [row] = await db.select().from(topics).where(eq(topics.id, topicId)).limit(1);
   return row ?? null;
+}
+
+// Shared view gate for per-event WS authz (#18). Resolves the topic's role
+// gates and applies canViewTopic — mirrors the REST routes so socket events
+// on message/poll ids in a topic the caller can't see are rejected.
+export async function userCanViewTopic(userRole: string, topicId: string): Promise<boolean> {
+  const [t] = await db
+    .select({ viewRoles: topics.viewRoles, readRoles: topics.readRoles })
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .limit(1);
+  if (!t) return false;
+  return canViewTopic(userRole, t.viewRoles as string[] | null, t.readRoles as string[] | null);
+}
+
+// Topic id backing a poll (for the POLL_VOTE gate) — poll → message → topic.
+export async function getPollTopicId(pollId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ topicId: messages.topicId })
+    .from(polls)
+    .innerJoin(messages, eq(polls.messageId, messages.id))
+    .where(eq(polls.id, pollId))
+    .limit(1);
+  return row?.topicId ?? null;
 }
 
 export async function getTopicMemberUserIds(topicId: string): Promise<string[]> {

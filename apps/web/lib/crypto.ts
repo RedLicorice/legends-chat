@@ -841,7 +841,8 @@ export async function pollSync(): Promise<{ newToDeviceCount: number }> {
   const body = (await res.json()) as SyncResponse;
 
   const events = body.to_device?.events ?? [];
-  const changed = (body.device_lists?.changed ?? []).map((u) => new UserId(u));
+  const rawChanged = body.device_lists?.changed ?? [];
+  const changed = rawChanged.map((u) => new UserId(u));
   const left = (body.device_lists?.left ?? []).map((u) => new UserId(u));
   const deviceLists = new DeviceLists(changed, left);
 
@@ -862,11 +863,72 @@ export async function pollSync(): Promise<{ newToDeviceCount: number }> {
   // Persist the new cursor regardless of how many events we got.
   await metaPut(cursorKey, body.next_batch);
 
+  // #7 interim hardening (Tier A): loudly flag when a tracked user's device
+  // list GAINS a device. With no cross-signing, a compromised server can inject
+  // a rogue device to become a silent Megolm recipient — this makes the event
+  // visible. Detection only (never withholds keys), so it can't break legit
+  // decryption. First sighting of a user establishes a silent TOFU baseline.
+  await checkForNewDevices(rawChanged).catch(() => {});
+
   // Drain follow-up requests (e.g. queued KeysQuery for changed devices,
   // KeysUpload to top up OTKs).
   await pumpOutgoing();
 
   return { newToDeviceCount: processed.length };
+}
+
+// ── New-device detection (#7 Tier A) ─────────────────────────────────────────
+
+export interface NewDeviceAlertDetail {
+  userMatrixId: string;
+  /** ed25519 keys (base64) of devices newly seen for this user. */
+  newDeviceKeys: string[];
+  /** True when the affected account is the local user's own. */
+  isSelf: boolean;
+}
+
+// Current non-deleted device identities (ed25519 base64) for a user. ed25519 is
+// the stable cryptographic identity — a rogue device is a new key here.
+async function currentDeviceKeys(machine: OlmMachineT, userMatrixId: string): Promise<string[]> {
+  const devices = await machine.getUserDevices(new UserId(userMatrixId), null);
+  const keys: string[] = [];
+  for (const dev of devices.devices()) {
+    if (dev.isDeleted()) continue;
+    const ed = dev.ed25519Key;
+    if (ed) keys.push(ed.toBase64());
+  }
+  return keys.sort();
+}
+
+// For each user whose device list changed, compare against the locally-pinned
+// baseline and dispatch `e2ee:new-device` when a device is ADDED. First sight
+// of a user pins silently (expected first contact); only later additions alert.
+async function checkForNewDevices(changedUserMatrixIds: string[]): Promise<void> {
+  if (changedUserMatrixIds.length === 0) return;
+  const machine = await getMachine();
+  const selfId = cachedSession?.userId;
+  for (const uid of changedUserMatrixIds) {
+    let current: string[];
+    try {
+      current = await currentDeviceKeys(machine, uid);
+    } catch {
+      continue;
+    }
+    const key = `known_devices:${uid}`;
+    const prev = await metaGet<string[]>(key);
+    // Always update the baseline (covers additions + removals) so each new
+    // device alerts exactly once.
+    await metaPut(key, current);
+    if (prev === undefined) continue; // first sighting → silent TOFU baseline
+    const added = current.filter((k) => !prev.includes(k));
+    if (added.length > 0 && typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent<NewDeviceAlertDetail>("e2ee:new-device", {
+          detail: { userMatrixId: uid, newDeviceKeys: added, isSelf: uid === selfId },
+        }),
+      );
+    }
+  }
 }
 
 // ── Fingerprints ──────────────────────────────────────────────────────────────

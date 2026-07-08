@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getBotFromRequest } from "@/lib/bot-auth";
 import { parsePrincipalFromMatrixId, claimOneTimeKey } from "@/lib/crypto-principal";
 import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   one_time_keys: z.record(
@@ -27,6 +28,13 @@ export async function POST(req: Request) {
       { status: 401 },
     );
   }
+
+  // OTK-exhaustion mitigation (#17): cap claim throughput per caller so a single
+  // bot can't rapidly drain another principal's one-time-key pool. NOTE: this
+  // only slows the drain — the full fix is a bot fallback key (needs a
+  // botDevices.fallback_key_json migration + bot-SDK upload). Tracked as open.
+  const limited = await enforceRateLimit(`crypto:claim:bot:${bot.id}`, 60, 60);
+  if (limited) return limited;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

@@ -38,6 +38,7 @@ export type SystemSettingKey =
   | "banner_fade_enabled"
   | "require_passkey_at_registration" // "true" | "false"
   | "magic_link_login_disabled" // "true" | "false"
+  | "e2ee_admin_disclosure" // "true" | "false" — show "admins can read" on E2EE topics
   // link processing
   | "shlink_enabled"
   | "shlink_host"

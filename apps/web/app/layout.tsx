@@ -41,6 +41,13 @@ export const metadata: Metadata = {
     title: "Legends Chat",
     statusBarStyle: "black-translucent",
   },
+  // Next 15.5 emits the renamed `mobile-web-app-capable` for appleWebApp.capable,
+  // but iOS Add-to-Home-Screen standalone still keys off the legacy
+  // `apple-mobile-web-app-capable`. Without it the PWA reopens in Safari (chrome
+  // visible) instead of standalone. Emit both for full compatibility.
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export const viewport: Viewport = {

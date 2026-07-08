@@ -16,6 +16,7 @@ import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getBotFromRequest } from "@/lib/bot-auth";
 import { insertDmMessage } from "@/lib/dm";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface InlineKeyboardButton { text: string; callbackData: string }
 
@@ -45,6 +46,11 @@ async function currentDataKey(): Promise<{ id: string; data: Uint8Array }> {
 export async function POST(req: Request) {
   const bot = await getBotFromRequest(req);
   if (!bot) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+
+  // Amplification guard (#20): each bot send fans out to sidebar/push/webhook
+  // deliveries. 30 sends / 10s per bot ≈ 3/s sustained.
+  const limited = await enforceRateLimit(`bot:send:${bot.id}`, 30, 10);
+  if (limited) return NextResponse.json({ ok: false, error: "rate limit exceeded" }, { status: 429 });
 
   const body = await req.json() as {
     topicId?: string;
