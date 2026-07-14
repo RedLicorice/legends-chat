@@ -170,6 +170,7 @@ type AdminPanelKey =
   | "users";
 
 const ADMIN_PANELS: ReadonlySet<AdminPanelKey> = new Set([
+  "overview",
   "bans",
   "bots",
   "gifs",
