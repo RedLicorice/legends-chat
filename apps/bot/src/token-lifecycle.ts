@@ -1,7 +1,9 @@
 import type { Api } from "grammy";
-import { REDIS_CHANNELS } from "@legends/shared";
+import { REDIS_CHANNELS, createLogger } from "@legends/shared";
 import { isTokenConsumed, listPendingTokensWithTelegramRefs } from "./login";
 import { subClient } from "./redis";
+
+const log = createLogger("bot:lifecycle");
 
 const DELETE_AFTER_MS = 3 * 60 * 1000;
 
@@ -18,13 +20,13 @@ async function editAndScheduleDelete(
     });
   } catch (err) {
     // Message might already be gone (user deleted, too old, etc.) — non-fatal.
-    console.warn("[lifecycle] editMessageText failed", (err as Error).message);
+    log.warn("editMessageText failed", err);
     return;
   }
   setTimeout(() => {
     api
       .deleteMessage(Number(chatId), messageId)
-      .catch((err) => console.warn("[lifecycle] deleteMessage failed", (err as Error).message));
+      .catch((err) => log.warn("deleteMessage failed", err));
   }, DELETE_AFTER_MS);
 }
 
@@ -47,7 +49,7 @@ export function scheduleExpiryCheck(
       if (await isTokenConsumed(tokenId)) return;
       await editAndScheduleDelete(api, chatId, messageId, "⌛ <b>Token expired.</b>");
     } catch (err) {
-      console.warn("[lifecycle] expiry check failed", (err as Error).message);
+      log.warn("expiry check failed", err);
     }
   }, msUntilExpiry);
 }
@@ -63,7 +65,7 @@ export async function rescheduleOnStartup(api: Api): Promise<void> {
     scheduleExpiryCheck(api, p.id, p.chatId, p.messageId, p.expiresAt);
   }
   if (pending.length > 0) {
-    console.log(`[lifecycle] rescheduled ${pending.length} pending token expiries`);
+    log.info("rescheduled pending token expiries", { count: pending.length });
   }
 }
 
@@ -74,7 +76,7 @@ export async function rescheduleOnStartup(api: Api): Promise<void> {
  */
 export function subscribeToConsumption(api: Api): void {
   subClient.subscribe(REDIS_CHANNELS.LOGIN_TOKEN_CONSUMED, (err) => {
-    if (err) console.error("[lifecycle] redis subscribe failed", err);
+    if (err) log.error("redis subscribe failed", err);
   });
   subClient.on("message", (channel, payload) => {
     if (channel !== REDIS_CHANNELS.LOGIN_TOKEN_CONSUMED) return;
@@ -87,7 +89,7 @@ export function subscribeToConsumption(api: Api): void {
       const chatId = BigInt(parsed.chatId);
       void editAndScheduleDelete(api, chatId, parsed.messageId, "✅ <b>Token used!</b>");
     } catch (err) {
-      console.warn("[lifecycle] pubsub parse failed", (err as Error).message);
+      log.warn("pubsub parse failed", err);
     }
   });
 }

@@ -1,9 +1,11 @@
 import { and, eq, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
 import type { Server } from "socket.io";
 import { messages, polls, topics } from "@legends/db/schema";
-import { WS_EVENTS } from "@legends/shared";
+import { WS_EVENTS, createLogger } from "@legends/shared";
 import { db } from "./db";
 import { runAsLeader } from "./leader-lock";
+
+const log = createLogger("autodelete");
 
 const TICK_MS = 60_000;
 const LOCK_TTL_MS = TICK_MS * 3;
@@ -28,7 +30,7 @@ async function purgeAgeMode(io: Server): Promise<void> {
       .where(inArray(messages.id, deleteIds))
       .returning({ id: messages.id });
     if (deleted.length > 0) {
-      console.log(`[autodelete] age: removed ${deleted.length} messages from topic ${t.slug}`);
+      log.info("age: removed messages", { count: deleted.length, topic: t.slug });
       for (const d of deleted) {
         io.to(`topic:${t.id}`).emit(WS_EVENTS.MESSAGE_DELETE, { id: d.id.toString(), topicId: t.id });
       }
@@ -71,6 +73,6 @@ export function startAutoDelete(io: Server): () => void {
     label: "autodelete",
     tick: () => purgeAgeMode(io),
   });
-  console.log("[autodelete] leader-elected worker started");
+  log.info("leader-elected worker started");
   return cancel;
 }

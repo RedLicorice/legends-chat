@@ -3,6 +3,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getAllSettings } from "@legends/db/system-settings";
 import { processMessageLinks, type LinkProcessorSettings } from "@/lib/link-processor";
+import { createLogger } from "@legends/shared";
+
+const log = createLogger("links");
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -32,7 +35,7 @@ export async function POST(req: Request) {
     const processed = await processMessageLinks(text, cfg, user.id);
     return NextResponse.json({ text: processed });
   } catch (err) {
-    console.error("[links/process] failed", err);
+    log.error("failed", err);
     // Never break the send flow — return the original text.
     return NextResponse.json({ text });
   }

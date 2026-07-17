@@ -48,7 +48,7 @@ async function maybeProcessLinks(text: string, senderUserId: string | null): Pro
     if (!cfg.stripTracking && !cfg.shlinkEnabled) return text;
     return await processMessageLinks(text, cfg, senderUserId);
   } catch (e) {
-    console.error("[link-processor] failed", e);
+    log.error("link-processor failed", e);
     return text;
   }
 }
@@ -56,6 +56,7 @@ import {
   PERMISSIONS,
   REDIS_CHANNELS,
   WS_EVENTS,
+  createLogger,
   createPollSchema,
   messageDeleteSchema,
   messageEditSchema,
@@ -107,6 +108,8 @@ import { dispatchMessageNotifications } from "./notifications";
 import { registerP2PHandlers } from "./p2p-signaling";
 import { isRateLimited } from "./rate-limit";
 import { randomUUID } from "node:crypto";
+
+const log = createLogger("ws");
 
 interface SocketData {
   user: AccessTokenPayload;
@@ -189,7 +192,7 @@ io.on("connection", async (socket: AuthedSocket) => {
   // REST round trips on every page open. Live deltas keep these fresh.
   buildSessionBootstrap(user)
     .then((payload) => { socket.emit(WS_EVENTS.SESSION_BOOTSTRAP, payload); })
-    .catch((err) => { console.error("[session-bootstrap] failed", err); });
+    .catch((err) => { log.error("session-bootstrap failed", err); });
 
   socket.on("disconnect", async () => {
     if (!optOut) {
@@ -326,7 +329,7 @@ io.on("connection", async (socket: AuthedSocket) => {
         for (const memberId of memberIds) {
           io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
         }
-      }).catch((e) => console.error("[sidebar] broadcast failed", e));
+      }).catch((e) => log.error("sidebar broadcast failed", e));
       if (validHashtags.length > 0) {
         io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.HASHTAG_CLOUD_UPDATE, {
           topicId: parsed.topicId,
@@ -342,10 +345,10 @@ io.on("connection", async (socket: AuthedSocket) => {
         senderName: msg.senderDisplayName ?? "Unknown",
         text: plainPreview,
         replyToMessageId: parsed.content.replyToMessageId ?? null,
-      }).catch((e) => console.error("[notifications] dispatch failed", e));
+      }).catch((e) => log.error("notifications dispatch failed", e));
       if (!isE2ee) {
         deliverMessageToWebhooks(parsed.topicId, topic?.title ?? "", msg).catch((e) =>
-          console.error("[webhook] delivery failed", e),
+          log.error("webhook delivery failed", e),
         );
       }
       notifyTopicMembers({
@@ -353,11 +356,11 @@ io.on("connection", async (socket: AuthedSocket) => {
         senderUserId: user.sub,
         preview: plainPreview,
         messageId: msg.id,
-      }).catch((e) => console.error("[push] notify failed", e));
+      }).catch((e) => log.error("push notify failed", e));
       const cfg = await getTopicAutoDelete(parsed.topicId);
       if (cfg?.mode === "count" && cfg.max) {
         purgeCountModeForTopic(io, parsed.topicId, cfg.max).catch((e) =>
-          console.error("[autodelete] count purge failed", e),
+          log.error("autodelete count purge failed", e),
         );
       }
     } catch (err) {
@@ -371,7 +374,7 @@ io.on("connection", async (socket: AuthedSocket) => {
       if (!(await userCanViewTopic(user.role, parsed.topicId))) return; // #18 authz
       await setLastReadMessage(user.sub, parsed.topicId, parsed.lastReadMessageId);
     } catch (err) {
-      console.error("topic:read failed", err);
+      log.error("topic:read failed", err);
     }
   });
 
@@ -569,7 +572,7 @@ io.on("connection", async (socket: AuthedSocket) => {
       const callbackQueryId = randomUUID();
       ack?.({ ok: true, callbackQueryId });
       deliverCallbackQueryToWebhooks(topicId, botId, callbackQueryId, messageId, user.sub, null, callbackData)
-        .catch((e) => console.error("[webhook] callback delivery failed", e));
+        .catch((e) => log.error("webhook callback delivery failed", e));
     } catch (err) {
       ack?.({ ok: false, error: (err as Error).message });
     }
@@ -590,7 +593,7 @@ subClient.subscribe(
   REDIS_CHANNELS.DM_CONVERSATION_UPDATED,
   REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED,
   REDIS_CHANNELS.MOD_FLAG_COUNT,
-  (err) => { if (err) console.error("redis subscribe failed", err); },
+  (err) => { if (err) log.error("redis subscribe failed", err); },
 );
 
 subClient.on("message", (channel, message) => {
@@ -615,7 +618,7 @@ subClient.on("message", (channel, message) => {
         for (const memberId of memberIds) {
           io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
         }
-      }).catch((e) => console.error("[sidebar] bot broadcast failed", e));
+      }).catch((e) => log.error("sidebar bot broadcast failed", e));
     } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_EDIT) {
       const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: unknown };
       io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_EDIT, msg);
@@ -627,7 +630,7 @@ subClient.on("message", (channel, message) => {
         userId: string; displayName: string; username: string | null; topicId: string;
       };
       deliverNewMemberToWebhooks(userId, displayName, username, topicId)
-        .catch((e) => console.error("[webhook] new_member delivery failed", e));
+        .catch((e) => log.error("webhook new_member delivery failed", e));
     } else if (channel === REDIS_CHANNELS.NOTIFICATION_BROADCAST) {
       const { notifs } = JSON.parse(message) as {
         notifs: Array<{ id: string; userId: string; type: string; payload: unknown; createdAt: string }>;
@@ -700,7 +703,7 @@ subClient.on("message", (channel, message) => {
       io.to(MOD_ROOM).emit(WS_EVENTS.MOD_FLAG_COUNT, { count });
     }
   } catch (e) {
-    console.error("pubsub parse failed", e);
+    log.error("pubsub parse failed", e);
   }
 });
 
@@ -714,10 +717,10 @@ async function purgeExpiredAnonUsers() {
       .where(and(eq(users.isAnon, true), lt(users.anonExpiresAt, new Date())))
       .returning({ id: users.id });
     if (deleted.length > 0) {
-      console.log(`[anon-cleanup] purged ${deleted.length} expired anon user(s)`);
+      log.info("anon-cleanup purged expired anon users", { count: deleted.length });
     }
   } catch (err) {
-    console.error("[anon-cleanup] failed", err);
+    log.error("anon-cleanup failed", err);
   }
 }
 
@@ -739,5 +742,5 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
 
 const port = Number(process.env.WS_PORT ?? 3001);
 httpServer.listen(port, () => {
-  console.log(`legends-chat ws listening on :${port}`);
+  log.info("listening", { port });
 });

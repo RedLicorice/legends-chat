@@ -2,10 +2,12 @@ import type { Server, Socket, DefaultEventsMap } from "socket.io";
 import { eq } from "drizzle-orm";
 import { topics } from "@legends/db/schema";
 import { getAllSettings } from "@legends/db/system-settings";
-import { WS_EVENTS, canViewTopic } from "@legends/shared";
+import { WS_EVENTS, canViewTopic, createLogger } from "@legends/shared";
 import type { AccessTokenPayload } from "@legends/shared";
 import { db } from "./db";
 import { cacheClient } from "./redis";
+
+const log = createLogger("p2p");
 
 interface IceServer {
   urls: string | string[];
@@ -160,7 +162,7 @@ export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
         io.to(`user:${peerId}`).emit(WS_EVENTS.P2P_PEER_JOINED, { userId });
       }
     } catch (e) {
-      console.error("[p2p:join]", e);
+      log.error("join failed", e);
     }
   });
 
@@ -198,7 +200,7 @@ export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
 
   socket.on(WS_EVENTS.P2P_LEAVE, async ({ topicId }: { topicId: string }) => {
     socketTopics.get(socket.id)?.delete(topicId);
-    await handleLeave(io, topicId, userId).catch((e) => console.error("[p2p:leave]", e));
+    await handleLeave(io, topicId, userId).catch((e) => log.error("leave failed", e));
   });
 
   socket.on("disconnect", async () => {

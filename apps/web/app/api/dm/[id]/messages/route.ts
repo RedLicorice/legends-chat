@@ -1,13 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { REDIS_CHANNELS } from "@legends/shared";
+import { REDIS_CHANNELS, createLogger } from "@legends/shared";
 import { dmConversations } from "@legends/db/schema";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { assertParticipant, listMessages, insertDmMessage, recipientUserIds, isBlockedBetween } from "@/lib/dm";
 import { deliverDmToBots } from "@/lib/dm-bot-delivery";
+
+const log = createLogger("dm:messages");
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -107,7 +109,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ciphertext: parsed.data.ciphertext ?? null,
     replyToMessageId: parsed.data.replyToMessageId ?? null,
     createdAt: msg.createdAt,
-  }).catch((e) => console.error("[dm-bot-delivery] failed", e));
+  }).catch((e) => log.error("dm-bot-delivery failed", e));
 
   return NextResponse.json({ message: msg }, { status: 201 });
 }

@@ -18,6 +18,9 @@
 
 import { userDeviceChangeLog } from "@legends/db/schema";
 import { db } from "@/lib/db";
+import { createLogger } from "@legends/shared";
+
+const log = createLogger("device-change-log");
 
 export type DeviceChangeReason =
   | "keys_upload"
@@ -42,6 +45,6 @@ export async function logDeviceChange(
     // Best-effort. A log miss only means the affected user's peers may take
     // longer to notice the change on the next /sync — they'll still catch
     // up via the SDK's own retry / lazy fetch paths.
-    console.error("[device-change-log] insert failed", { userId, reason, err });
+    log.error("insert failed", { userId, reason, err });
   }
 }

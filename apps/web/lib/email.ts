@@ -1,9 +1,15 @@
 import nodemailer from "nodemailer";
+import { createLogger } from "@legends/shared";
+
+const log = createLogger("email");
 
 export async function sendEmail(to: string, subject: string, html: string): Promise<void> {
   if (!process.env.SMTP_HOST) {
-    console.log(`[email] To: ${to} | Subject: ${subject}`);
-    console.log(`[email] Body: ${html.replace(/<[^>]+>/g, "")}`);
+    log.info("email (dev, SMTP not configured — not sent)", {
+      to,
+      subject,
+      body: html.replace(/<[^>]+>/g, ""),
+    });
     return;
   }
   const transport = nodemailer.createTransport({

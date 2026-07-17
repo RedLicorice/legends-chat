@@ -21,9 +21,11 @@ import {
   unwrapKey,
   wrapKey,
 } from "@legends/crypto";
-import { REDIS_CHANNELS, canViewTopic } from "@legends/shared";
+import { REDIS_CHANNELS, canViewTopic, createLogger } from "@legends/shared";
 import { db } from "./db";
 import { pubClient } from "./redis";
+
+const log = createLogger("ws:messages");
 
 let cachedKey: { id: string; data: Uint8Array } | null = null;
 
@@ -538,7 +540,7 @@ async function publishTopicMembersUpdated(args: {
       }),
     );
   } catch (err) {
-    console.error("[topic-members] publish failed", { topicId: args.topicId, err });
+    log.error("topic-members publish failed", { topicId: args.topicId, err });
   }
 }
 
@@ -558,7 +560,7 @@ export async function ensureTopicMembership(userId: string, topicId: string): Pr
     try {
       await db.insert(userDeviceChangeLog).values({ userId, reason: "topic_join" });
     } catch (err) {
-      console.error("[device-change-log] topic_join insert failed", { userId, topicId, err });
+      log.error("device-change-log topic_join insert failed", { userId, topicId, err });
     }
     // Live key-rotation signal — only on the actual join, not the re-open
     // path. Subscribers in apps/ws/src/index.ts forward to topic:<id> so every

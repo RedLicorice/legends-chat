@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { createLogger } from "@legends/shared";
+
+const log = createLogger("client-error");
 
 // Minimal client-error sink. The browser posts uncaught errors / React render
 // failures here; we log them server-side so they show up in normal app logs
@@ -49,7 +52,6 @@ export async function POST(req: Request) {
       typeof b.componentStack === "string" ? b.componentStack.slice(0, 6000) : "",
     userAgent: req.headers.get("user-agent")?.slice(0, 300) ?? "",
   };
-  // Single tagged line so it's greppable in logs.
-  console.error("[client-error]", JSON.stringify(line));
+  log.error("client error report", line);
   return NextResponse.json({ ok: true });
 }

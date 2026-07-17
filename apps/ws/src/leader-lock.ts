@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { createLogger } from "@legends/shared";
 import { cacheClient } from "./redis";
+
+const log = createLogger("leader-lock");
 
 const PROCESS_INSTANCE_ID = randomUUID();
 
@@ -55,7 +58,7 @@ export function runAsLeader(opts: LeaderLockOpts): () => void {
       if (!isLeader) return;
       await opts.tick();
     } catch (err) {
-      console.error(`[leader-lock:${label}] tick failed`, err);
+      log.error("tick failed", { label, err });
     } finally {
       tickInFlight = false;
     }
@@ -74,6 +77,6 @@ export function runAsLeader(opts: LeaderLockOpts): () => void {
     // leader picks it up after lockTtlMs.
     cacheClient
       .eval(RELEASE_LUA, 1, opts.key, PROCESS_INSTANCE_ID)
-      .catch((err) => console.error(`[leader-lock:${label}] release failed`, err));
+      .catch((err) => log.error("release failed", { label, err }));
   };
 }

@@ -1,7 +1,10 @@
 import webpush from "web-push";
 import { and, eq, ne } from "drizzle-orm";
 import { pushSubscriptions, topicMembers, topics, users } from "@legends/db/schema";
+import { createLogger } from "@legends/shared";
 import { db } from "./db";
+
+const log = createLogger("ws:push");
 
 const publicKey = process.env.VAPID_PUBLIC_KEY;
 const privateKey = process.env.VAPID_PRIVATE_KEY;
@@ -85,7 +88,7 @@ export async function notifyTopicMembers(args: NotifyArgs): Promise<void> {
         if (status === 404 || status === 410) {
           await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, s.id));
         } else {
-          console.error("[push] sendNotification failed", err);
+          log.error("sendNotification failed", err);
         }
       }
     }),
