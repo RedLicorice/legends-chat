@@ -17,7 +17,6 @@ export default function RegisterPage() {
   // Invite step state
   const [inviteCode, setInviteCode] = useState("");
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteLoading, setInviteLoading] = useState(false);
 
   // Locked-in code (after passing invite step)
   const [lockedCode, setLockedCode] = useState<string | null>(null);
@@ -45,7 +44,12 @@ export default function RegisterPage() {
       });
   }, []);
 
-  async function onCheckInvite(e: FormEvent) {
+  // The code is carried to the form and validated exactly once, by
+  // POST /api/auth/register, which claims it atomically. There is deliberately
+  // no "check this code" endpoint any more: a public, unthrottled yes/no on an
+  // arbitrary code is a free brute-force oracle. If the code turns out to be
+  // bad, the form step surfaces the server's error and "← Back" returns here.
+  function onCheckInvite(e: FormEvent) {
     e.preventDefault();
     setInviteError(null);
     const code = inviteCode.trim().toUpperCase();
@@ -53,21 +57,8 @@ export default function RegisterPage() {
       setInviteError("Please enter an invite code.");
       return;
     }
-    setInviteLoading(true);
-    try {
-      const res = await apiFetch(`/api/invite-check?code=${encodeURIComponent(code)}`);
-      const data = await res.json() as { valid: boolean; error?: string };
-      if (!data.valid) {
-        setInviteError(data.error ?? "Invalid or expired invite code.");
-        return;
-      }
-      setLockedCode(code);
-      setStep("form");
-    } catch {
-      setInviteError("Network error. Try again.");
-    } finally {
-      setInviteLoading(false);
-    }
+    setLockedCode(code);
+    setStep("form");
   }
 
   function onClearLockedCode() {
@@ -146,7 +137,7 @@ export default function RegisterPage() {
                 required
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value)}
-                placeholder="LGND#XXXXXX"
+                placeholder="LGND#XXXXXXXXXXXX"
                 autoFocus
                 className="w-full rounded-xl border border-border bg-panel px-4 py-2.5 text-sm outline-none focus:border-accent placeholder:text-muted font-mono"
               />
@@ -156,10 +147,9 @@ export default function RegisterPage() {
 
             <button
               type="submit"
-              disabled={inviteLoading}
               className="w-full rounded-xl bg-accent py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
-              {inviteLoading ? "Checking…" : "Check code"}
+              Continue
             </button>
           </form>
         </div>

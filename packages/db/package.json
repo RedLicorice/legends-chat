@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
+    "./invites": "./src/invites.ts",
     "./system-settings": "./src/system-settings.ts",
     "./system-messages": "./src/system-messages.ts",
     "./dm-key": "./src/dm-key.ts"

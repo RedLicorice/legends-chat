@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { authLoginTokens, inviteCodes, users } from "@legends/db/schema";
+import { redeemableInvitePredicate } from "@legends/db/invites";
 import { createLogger, REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
@@ -56,17 +57,7 @@ export async function POST(req: NextRequest) {
       const claimed = await tx
         .update(inviteCodes)
         .set({ usesCount: sql`${inviteCodes.usesCount} + 1` })
-        .where(
-          and(
-            eq(inviteCodes.code, row.inviteCode),
-            or(isNull(inviteCodes.expiresAt), gt(inviteCodes.expiresAt, now)),
-            or(
-              isNull(inviteCodes.maxUses),
-              sql`${inviteCodes.usesCount} < ${inviteCodes.maxUses}`,
-            ),
-            or(eq(inviteCodes.role, "user"), eq(inviteCodes.usesCount, 0)),
-          ),
-        )
+        .where(redeemableInvitePredicate(row.inviteCode, now))
         .returning({ id: inviteCodes.id, role: inviteCodes.role, createdByUserId: inviteCodes.createdByUserId });
       if (claimed.length === 0) {
         tx.rollback();
