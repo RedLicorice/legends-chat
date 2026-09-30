@@ -23,7 +23,7 @@ import {
 } from "@legends/crypto";
 import { REDIS_CHANNELS, canViewTopic, createLogger } from "@legends/shared";
 import { db } from "./db";
-import { pubClient } from "./redis";
+import { cacheClient, pubClient } from "./redis";
 
 const log = createLogger("ws:messages");
 
@@ -598,6 +598,73 @@ export async function userCanViewTopic(userRole: string, topicId: string): Promi
   return canViewTopic(userRole, t.viewRoles as string[] | null, t.readRoles as string[] | null);
 }
 
+/**
+ * The FULL per-event topic gate (#rt-2): role view/read gates *and* the
+ * server-authoritative password proof, i.e. exactly what buildTopicBootstrap
+ * enforces before a socket is allowed to join `topic:<id>`.
+ *
+ * Every handler that accepts a raw topic / message / poll id from the client
+ * must call this, otherwise the room membership it was supposed to imply is
+ * bypassed. `userCanViewTopic` above is the role-only half and is kept for
+ * recipient filtering, where there is no caller whose password proof to read.
+ */
+export async function userCanAccessTopic(
+  userId: string,
+  userRole: string,
+  topicId: string,
+): Promise<boolean> {
+  const [t] = await db
+    .select({
+      viewRoles: topics.viewRoles,
+      readRoles: topics.readRoles,
+      passwordHash: topics.passwordHash,
+      passwordVersion: topics.passwordVersion,
+    })
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .limit(1);
+  if (!t) return false;
+  if (!canViewTopic(userRole, t.viewRoles as string[] | null, t.readRoles as string[] | null)) return false;
+  // Admins bypass, matching buildTopicBootstrap and the client gate.
+  if (t.passwordHash != null && userRole !== "admin") {
+    const proof = await cacheClient.get(`legends:topic-pw:${userId}:${topicId}`);
+    if (proof !== String(t.passwordVersion)) return false;
+  }
+  return true;
+}
+
+/**
+ * Narrows a fan-out recipient list to users who can still VIEW the topic
+ * (#rt-5). topic_members rows are written on first join and never removed on a
+ * demotion or when a topic later becomes restricted, so the raw member list
+ * leaks message previews (and the topic's title/slug) to people who can no
+ * longer open it.
+ */
+export async function filterUsersWhoCanViewTopic(
+  topicId: string,
+  userIds: string[],
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const [t] = await db
+    .select({ viewRoles: topics.viewRoles, readRoles: topics.readRoles })
+    .from(topics)
+    .where(eq(topics.id, topicId))
+    .limit(1);
+  if (!t) return [];
+  const viewRoles = t.viewRoles as string[] | null;
+  const readRoles = t.readRoles as string[] | null;
+  // Unrestricted topic — every role passes, so skip the extra round trip.
+  if ((viewRoles?.length ?? 0) === 0 && (readRoles?.length ?? 0) === 0) return userIds;
+  const rows = await db
+    .select({ id: users.id, role: users.role })
+    .from(users)
+    .where(inArray(users.id, userIds));
+  const allowed = new Set(
+    rows.filter((u) => canViewTopic(u.role, viewRoles, readRoles)).map((u) => u.id),
+  );
+  return userIds.filter((id) => allowed.has(id));
+}
+
 // Topic id backing a poll (for the POLL_VOTE gate) — poll → message → topic.
 export async function getPollTopicId(pollId: string): Promise<string | null> {
   const [row] = await db
@@ -679,6 +746,28 @@ export async function getMessageTopicId(messageId: string): Promise<string | nul
     .where(eq(messages.id, BigInt(messageId)))
     .limit(1);
   return rows[0]?.topicId ?? null;
+}
+
+/**
+ * #rt-7: whether `callbackData` matches a button on the inline keyboard really
+ * stored on this message. BOT_KEYBOARD_CALLBACK takes callbackData straight
+ * from the client, so without this check a user can synthesize arbitrary
+ * callback payloads into a bot's command handling.
+ */
+export async function messageKeyboardHasCallback(
+  messageId: string,
+  callbackData: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ inlineKeyboard: messages.inlineKeyboard })
+    .from(messages)
+    .where(and(eq(messages.id, BigInt(messageId)), isNull(messages.deletedAt)))
+    .limit(1);
+  const keyboard = row?.inlineKeyboard;
+  if (!Array.isArray(keyboard)) return false;
+  return keyboard.some(
+    (buttonRow) => Array.isArray(buttonRow) && buttonRow.some((b) => b?.callbackData === callbackData),
+  );
 }
 
 export async function getMessageOwner(messageId: string): Promise<{ topicId: string; senderUserId: string | null } | null> {

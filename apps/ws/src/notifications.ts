@@ -3,6 +3,7 @@ import { type Server } from "socket.io";
 import { messages, notifications, roles, topicMembers, users } from "@legends/db/schema";
 import { WS_EVENTS } from "@legends/shared";
 import { db } from "./db";
+import { filterUsersWhoCanViewTopic } from "./messages";
 
 export async function dispatchMessageNotifications(
   io: Server,
@@ -114,7 +115,20 @@ export async function dispatchMessageNotifications(
 
   if (inserts.length === 0) return;
 
-  for (const notif of inserts) {
+  // #rt-5: none of the buckets above applies a topic access check. @role in
+  // particular resolves to EVERY account holding the role, with no membership
+  // or view check at all — so "@moderator <sensitive>" in a restricted topic
+  // mailed a 100-char excerpt, plus that private topic's title and slug, to
+  // moderator accounts that cannot even open it. @everyone and the reply
+  // notification have the same stale-membership problem. Filter the whole
+  // recipient set once, before anything is stored or emitted.
+  const canView = new Set(
+    await filterUsersWhoCanViewTopic(args.topicId, inserts.map((i) => i.userId)),
+  );
+  const recipients = inserts.filter((i) => canView.has(i.userId));
+  if (recipients.length === 0) return;
+
+  for (const notif of recipients) {
     const [inserted] = await db
       .insert(notifications)
       .values(notif)

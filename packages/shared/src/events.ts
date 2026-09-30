@@ -64,6 +64,10 @@ export const REDIS_CHANNELS = {
   USER_MUTED: "legends:user:muted",
   USER_UNMUTED: "legends:user:unmuted",
   USER_UNBANNED: "legends:user:unbanned",
+  // Published by apps/web revokeCurrentSession() on logout. A socket is
+  // authenticated once at handshake, so without this a logged-out tab keeps a
+  // live, fully-authorized connection until its access token expires (#rt-1).
+  SESSION_REVOKED: "legends:session:revoked",
   LOGIN_TOKEN_CONSUMED: "legends:login:token:consumed",
   BOT_MESSAGE_NEW: "legends:bot:message:new",
   BOT_MESSAGE_EDIT: "legends:bot:message:edit",

@@ -1,10 +1,17 @@
 import webpush from "web-push";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { pushSubscriptions, topicMembers, topics, users } from "@legends/db/schema";
 import { createLogger } from "@legends/shared";
 import { db } from "./db";
+import { filterUsersWhoCanViewTopic } from "./messages";
+import { SsrfError, assertPublicHttpsUrl } from "./ssrf";
 
 const log = createLogger("ws:push");
+
+// Log the host only — a push endpoint embeds a per-device bearer-ish token.
+function hostOf(raw: string): string {
+  try { return new URL(raw).host; } catch { return "invalid"; }
+}
 
 const publicKey = process.env.VAPID_PUBLIC_KEY;
 const privateKey = process.env.VAPID_PRIVATE_KEY;
@@ -59,15 +66,19 @@ export async function notifyTopicMembers(args: NotifyArgs): Promise<void> {
     );
   if (recipients.length === 0) return;
 
-  const userIds = recipients.map((r) => r.userId);
-  // Drizzle has no native inArray import here to avoid bundling cost; do per-user fetch.
-  const subs = (
-    await Promise.all(
-      userIds.map((uid) =>
-        db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, uid)),
-      ),
-    )
-  ).flat();
+  // #rt-5: topic_members rows are written on first join and never removed when
+  // the member is demoted or the topic is later restricted. Pushing to the raw
+  // list puts a preview of a topic they can no longer open on their lock screen.
+  const userIds = await filterUsersWhoCanViewTopic(
+    args.topicId,
+    recipients.map((r) => r.userId),
+  );
+  if (userIds.length === 0) return;
+
+  const subs = await db
+    .select()
+    .from(pushSubscriptions)
+    .where(inArray(pushSubscriptions.userId, userIds));
 
   const payload = JSON.stringify({
     title: topicTitle,
@@ -79,11 +90,20 @@ export async function notifyTopicMembers(args: NotifyArgs): Promise<void> {
   await Promise.all(
     subs.map(async (s) => {
       try {
+        // #rt-4: the endpoint is attacker-supplied at subscribe time. Validating
+        // it there is not enough — DNS can be re-pointed at an internal address
+        // afterwards, and rows predating that validation still exist. Re-check
+        // immediately before this process makes the outbound request.
+        await assertPublicHttpsUrl(s.endpoint);
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
           payload,
         );
       } catch (err: unknown) {
+        if (err instanceof SsrfError) {
+          log.error("push endpoint rejected by SSRF guard", { endpointHost: hostOf(s.endpoint), reason: err.message });
+          return;
+        }
         const status = (err as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {
           await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, s.id));

@@ -6,6 +6,7 @@ import { WS_EVENTS, canViewTopic, createLogger } from "@legends/shared";
 import type { AccessTokenPayload } from "@legends/shared";
 import { db } from "./db";
 import { cacheClient } from "./redis";
+import { isRateLimited } from "./rate-limit";
 
 const log = createLogger("p2p");
 
@@ -125,13 +126,19 @@ const socketTopics = new Map<string, Set<string>>();
 
 export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
   const userId = socket.data.user.sub;
-  const userRole = socket.data.user.role;
+  // Read the role at CALL time, never captured once: the re-auth sweeper
+  // (#rt-1) refreshes socket.data.user in place when the DB role changes, and a
+  // captured copy would keep a demoted user inside private calls for the whole
+  // life of the connection.
+  const currentRole = () => socket.data.user.role;
   socketTopics.set(socket.id, new Set());
 
   socket.on(WS_EVENTS.P2P_JOIN, async ({ topicId }: { topicId: string }) => {
     try {
+      // getAllSettings + 3 more round trips per event, previously unmetered (#rt-6).
+      if (await isRateLimited(`ws:p2p-join:${userId}`, 30, 60)) return;
       // Authorization gate — reject before touching ICE/TURN creds or presence.
-      if (!(await topicViewable(userRole, topicId))) return;
+      if (!(await topicViewable(currentRole(), topicId))) return;
       socketTopics.get(socket.id)?.add(topicId);
       const s = await getAllSettings(db);
       const globalMax = parseInt(s.p2p_max_participants ?? "5", 10);
@@ -171,6 +178,9 @@ export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
   // signaling into topics the sender can't access and relaying to arbitrary
   // user ids (offer/ICE spam).
   async function relayAllowed(topicId: string, toUserId: string): Promise<boolean> {
+    // Budget shared across offer/answer/ICE: a full negotiation is a few dozen
+    // packets, so this only bites on a relay-spam loop (#rt-6).
+    if (await isRateLimited(`ws:p2p-relay:${userId}`, 300, 60)) return false;
     const peers = await getActivePeers(topicId);
     return peers.includes(userId) && peers.includes(toUserId);
   }
@@ -191,6 +201,7 @@ export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
   });
 
   socket.on(WS_EVENTS.P2P_HEARTBEAT, async ({ topicId }: { topicId: string }) => {
+    if (await isRateLimited(`ws:p2p-heartbeat:${userId}`, 60, 60)) return; // #rt-6
     // Only refresh presence for a peer already admitted — a heartbeat must not
     // insert an un-joined (ungated) user into the active set.
     const isActive = await cacheClient.hexists(`p2p:active:${topicId}`, userId).catch(() => 0);
@@ -199,6 +210,7 @@ export function registerP2PHandlers(io: Server, socket: AuthedSocket): void {
   });
 
   socket.on(WS_EVENTS.P2P_LEAVE, async ({ topicId }: { topicId: string }) => {
+    if (await isRateLimited(`ws:p2p-leave:${userId}`, 60, 60)) return; // #rt-6
     socketTopics.get(socket.id)?.delete(topicId);
     await handleLeave(io, topicId, userId).catch((e) => log.error("leave failed", e));
   });

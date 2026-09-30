@@ -12,7 +12,10 @@ export class SsrfError extends Error {
   }
 }
 
-async function assertPublicHttpsUrl(raw: string): Promise<void> {
+// Throw unless `raw` is an https:// URL whose EVERY resolved address is public.
+// Literal-IP hosts are covered — dns.lookup echoes the literal back, so
+// https://169.254.169.254/ and https://[::1]/ are rejected too.
+export async function assertPublicHttpsUrl(raw: string): Promise<void> {
   let u: URL;
   try {
     u = new URL(raw);

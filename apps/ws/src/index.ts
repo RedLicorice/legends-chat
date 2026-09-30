@@ -27,6 +27,26 @@ async function getOnlineUsers(): Promise<string[]> {
   return cacheClient.smembers(ONLINE_KEY);
 }
 
+const PRESENCE_CONNS_KEY = (userId: string) => `legends:presence:conns:${userId}`;
+
+// PRESENCE_UPDATE is a GLOBAL broadcast to every connected socket, so firing it
+// on every connect/disconnect makes each extra tab another cluster-wide fan-out
+// (#rt-6). Track a user's open sockets in a Redis set and broadcast only on the
+// 0→1 and 1→0 transitions. The set carries a TTL so socket ids orphaned by a
+// crashed replica expire instead of pinning the user "online" forever.
+async function addPresenceConn(userId: string, socketId: string): Promise<boolean> {
+  const key = PRESENCE_CONNS_KEY(userId);
+  await cacheClient.sadd(key, socketId);
+  await cacheClient.expire(key, PRESENCE_TTL * 10);
+  return (await cacheClient.scard(key)) === 1;
+}
+
+async function removePresenceConn(userId: string, socketId: string): Promise<boolean> {
+  const key = PRESENCE_CONNS_KEY(userId);
+  await cacheClient.srem(key, socketId);
+  return (await cacheClient.scard(key)) === 0;
+}
+
 async function loadLinkProcessorSettings(): Promise<LinkProcessorSettings> {
   const s = await getAllSettings(db);
   return {
@@ -75,7 +95,7 @@ import {
   type GrantEffect,
 } from "@legends/shared";
 import { getAllSettings } from "@legends/db/system-settings";
-import { authenticateSocket } from "./socket-auth";
+import { authenticateSocket, reauthenticateSocket } from "./socket-auth";
 import { buildSessionBootstrap, buildTopicBootstrap } from "./bootstrap";
 import { pubClient, subClient } from "./redis";
 import { runAsLeader } from "./leader-lock";
@@ -90,6 +110,7 @@ import {
   ensureTopicMembership,
   getMessageOwner,
   getMessageTopicId,
+  messageKeyboardHasCallback,
   getMyPollVotes,
   insertMessage,
   isUserMuted,
@@ -100,7 +121,8 @@ import {
   toggleReaction,
   getTopicById,
   getTopicMemberUserIds,
-  userCanViewTopic,
+  filterUsersWhoCanViewTopic,
+  userCanAccessTopic,
   getPollTopicId,
 } from "./messages";
 import { deliverCallbackQueryToWebhooks, deliverMessageToWebhooks, deliverNewMemberToWebhooks } from "./webhook";
@@ -146,12 +168,21 @@ io.use(async (socket, next) => {
   }
 });
 
-async function userHasModQueuePerm(userId: string, role: string): Promise<boolean> {
+const MOD_ROOM = "mod:queue";
+
+interface UserAuthz {
+  role: string;
+  permissions: string[];
+}
+
+// Authoritative role + resolved permission set, straight from the DB. The JWT
+// only carries the snapshot taken when it was minted, and a socket holds that
+// snapshot for its whole life (#rt-1) — so a demotion, a revoked override or a
+// deleted account would otherwise never reach an open connection.
+async function loadUserAuthz(userId: string): Promise<UserAuthz | null> {
   const now = new Date();
-  const [rolePerms, overrideRows] = await Promise.all([
-    db.select({ permission: rolesPermissions.permission })
-      .from(rolesPermissions)
-      .where(eq(rolesPermissions.role, role)),
+  const [userRows, overrideRows] = await Promise.all([
+    db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1),
     db.select({ permission: principalPermissionOverrides.permission, effect: principalPermissionOverrides.effect })
       .from(principalPermissionOverrides)
       .where(
@@ -162,29 +193,111 @@ async function userHasModQueuePerm(userId: string, role: string): Promise<boolea
         ),
       ),
   ]);
+  const role = userRows[0]?.role;
+  if (!role) return null; // account deleted while the socket was open
+  const rolePerms = await db
+    .select({ permission: rolesPermissions.permission })
+    .from(rolesPermissions)
+    .where(eq(rolesPermissions.role, role));
   const set = resolvePermissions(
     rolePerms.map((p) => p.permission),
     overrideRows as { permission: string; effect: "allow" | "deny" }[],
   );
-  return set.has(PERMISSIONS.MODERATION_QUEUE_REVIEW);
+  return { role, permissions: [...set] };
 }
 
-const MOD_ROOM = "mod:queue";
+/**
+ * Re-reads this socket's role/permissions from the DB and re-syncs its mod-room
+ * membership. Returns false when the account no longer exists (caller drops the
+ * socket).
+ *
+ * MUTATES socket.data.user in place — every event handler below closes over
+ * that one object reference, so an in-place update is exactly what makes a
+ * demotion visible to already-registered listeners. Replacing the object would
+ * leave every handler reading the stale snapshot.
+ */
+async function syncSocketAuthz(socket: AuthedSocket): Promise<boolean> {
+  const user = socket.data.user;
+  const authz = await loadUserAuthz(user.sub);
+  if (!authz) return false;
+  const changed =
+    authz.role !== user.role ||
+    authz.permissions.length !== user.permissions.length ||
+    authz.permissions.some((p) => !user.permissions.includes(p));
+  user.role = authz.role;
+  user.permissions = authz.permissions;
+  if (authz.permissions.includes(PERMISSIONS.MODERATION_QUEUE_REVIEW)) socket.join(MOD_ROOM);
+  else socket.leave(MOD_ROOM);
+  if (changed) {
+    log.info("socket authz refreshed from db", { userId: user.sub, role: authz.role });
+  }
+  return true;
+}
+
+function dropSocket(socket: AuthedSocket, reason: string): void {
+  log.info("re-auth: closing socket", { userId: socket.data.user?.sub, reason });
+  socket.emit("error", { message: "unauthorized" });
+  socket.disconnect(true);
+}
+
+// How often a live socket's token + authz are checked again. Bounds how long a
+// logout / demotion can outlive the change when the SESSION_REVOKED signal is
+// missed (e.g. the web app could not reach Redis).
+const REAUTH_INTERVAL_MS = Number(process.env.WS_REAUTH_INTERVAL_MS ?? 30_000);
+
+// Sweeps only THIS replica's sockets (io.sockets.sockets is local); every
+// replica runs its own timer, so the whole cluster is covered.
+async function reverifyConnectedSockets(): Promise<void> {
+  for (const socket of io.sockets.sockets.values()) {
+    const s = socket as AuthedSocket;
+    if (!s.connected || !s.data.user) continue;
+    const res = await reauthenticateSocket(s);
+    // Fail open on an infrastructure error — a Redis blip must not drop every
+    // connection at once. The next sweep decides.
+    if (res.status === "unavailable") continue;
+    if (res.status === "rejected") {
+      dropSocket(s, res.reason);
+      continue;
+    }
+    try {
+      if (!(await syncSocketAuthz(s))) dropSocket(s, "account no longer exists");
+    } catch (err) {
+      log.error("re-auth: authz reload failed", err);
+    }
+  }
+}
+
+let reauthSweeping = false;
+const reauthTimer = setInterval(() => {
+  if (reauthSweeping) return;
+  reauthSweeping = true;
+  reverifyConnectedSockets()
+    .catch((err) => log.error("re-auth sweep failed", err))
+    .finally(() => { reauthSweeping = false; });
+}, REAUTH_INTERVAL_MS);
+reauthTimer.unref();
 
 io.on("connection", async (socket: AuthedSocket) => {
   const user = socket.data.user;
   socket.join(`user:${user.sub}`);
-  userHasModQueuePerm(user.sub, user.role)
-    .then((ok) => { if (ok) socket.join(MOD_ROOM); })
-    .catch(() => {});
+  // Re-resolve role/permissions from the DB (the token only carries a snapshot)
+  // and join/leave MOD_ROOM accordingly. Deliberately not awaited: an await here
+  // would delay handler registration and drop events a fast client sends first.
+  syncSocketAuthz(socket)
+    .then((ok) => { if (!ok) dropSocket(socket, "account no longer exists"); })
+    .catch((err) => log.error("authz sync failed", err));
   registerP2PHandlers(io, socket);
 
   // Track online presence (skip if user opted out)
   const optOut = await isPresenceOptOut(user.sub).catch(() => false);
   if (!optOut) {
-    await markOnline(user.sub).catch(() => {});
-    // Broadcast to all rooms this user is in
-    socket.broadcast.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: true });
+    // Only the user's FIRST live socket flips them online (#rt-6).
+    const isFirstConn = await addPresenceConn(user.sub, socket.id).catch(() => true);
+    if (isFirstConn) {
+      await markOnline(user.sub).catch(() => {});
+      // Broadcast to all rooms this user is in
+      socket.broadcast.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: true });
+    }
   }
 
   // Once-per-connect global bootstrap. Symbols / VAPID / notifications /
@@ -196,13 +309,25 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on("disconnect", async () => {
     if (!optOut) {
-      await markOffline(user.sub).catch(() => {});
-      io.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: false });
+      // ...and only the LAST one flips them offline (#rt-6).
+      const wasLastConn = await removePresenceConn(user.sub, socket.id).catch(() => true);
+      if (wasLastConn) {
+        await markOffline(user.sub).catch(() => {});
+        io.emit(WS_EVENTS.PRESENCE_UPDATE, { userId: user.sub, online: false });
+      }
     }
   });
 
   socket.on(WS_EVENTS.TOPIC_JOIN, async (slugOrId: string, ack?: (res: unknown) => void) => {
     try {
+      // The most expensive event in the app (~8 queries, one of them an
+      // unnest+GROUP BY hashtag aggregate) and it also emits the E2EE
+      // key-rotation signal to every viewer on a first join — a join/rejoin loop
+      // is both DB exhaustion and a forced Megolm discard-and-reshare (#rt-6).
+      if (await isRateLimited(`ws:topic-join:${user.sub}`, 30, 10)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" });
+        return;
+      }
       const bootstrap = await buildTopicBootstrap(user, slugOrId);
       if (!bootstrap.ok) { ack?.({ ok: false, error: bootstrap.error }); return; }
       const topicId = bootstrap.topicId;
@@ -246,6 +371,16 @@ io.on("connection", async (socket: AuthedSocket) => {
         return;
       }
       const parsed = sendMessageSchema.parse(raw);
+      // Topic view gate FIRST (#rt-2). canPrincipal below defaults OPEN when the
+      // topic's postRoles list is empty, so without this any authenticated user
+      // could post into a topic they cannot even open — and trigger its whole
+      // fan-out (MESSAGE_NEW, SIDEBAR_UPDATE, push, webhooks) — just by naming
+      // its id on a raw message:send. Room membership is not enough: the handler
+      // never required the sender to have joined.
+      if (!(await userCanAccessTopic(user.sub, user.role, parsed.topicId))) {
+        ack?.({ ok: false, error: "FORBIDDEN" });
+        return;
+      }
       const muted = await isUserMuted(user.sub);
       if (muted) {
         ack?.({ ok: false, error: "MUTED", reason: muted.reason, expiresAt: muted.expiresAt });
@@ -318,7 +453,12 @@ io.on("connection", async (socket: AuthedSocket) => {
       const plainPreview = isE2ee ? "(encrypted message)" : stripMarkdownPreview(processedText, topic?.isFeed ?? false);
       const sidebarPreview = isE2ee ? "" : plainPreview;
       // Broadcast sidebar update to all topic members so their sidebar refreshes in real time
-      getTopicMemberUserIds(parsed.topicId).then((memberIds) => {
+      getTopicMemberUserIds(parsed.topicId)
+        // #rt-5: membership is written on first join and never removed on a
+        // demotion or when the topic later becomes restricted, so the raw member
+        // list leaks a message preview to people who can no longer open it.
+        .then((ids) => filterUsersWhoCanViewTopic(parsed.topicId, ids))
+        .then((memberIds) => {
         const sidebarPayload = {
           topicId: parsed.topicId,
           preview: sidebarPreview,
@@ -370,8 +510,10 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.TOPIC_READ, async (raw: unknown) => {
     try {
+      // One DB write per event — throttle it (#rt-6).
+      if (await isRateLimited(`ws:topic-read:${user.sub}`, 60, 10)) return;
       const parsed = topicReadSchema.parse(raw);
-      if (!(await userCanViewTopic(user.role, parsed.topicId))) return; // #18 authz
+      if (!(await userCanAccessTopic(user.sub, user.role, parsed.topicId))) return; // #18/#rt-2 authz
       await setLastReadMessage(user.sub, parsed.topicId, parsed.lastReadMessageId);
     } catch (err) {
       log.error("topic:read failed", err);
@@ -388,6 +530,11 @@ io.on("connection", async (socket: AuthedSocket) => {
         return;
       }
       const parsed = createPollSchema.parse(raw);
+      // #rt-2: this handler had no topic gate at all — the role check above let
+      // any non-"user" account drop a poll into any topic in the deployment.
+      if (!(await userCanAccessTopic(user.sub, user.role, parsed.topicId))) {
+        ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
       const muted = await isUserMuted(user.sub);
       if (muted) { ack?.({ ok: false, error: "MUTED" }); return; }
       const msg = await createPollMessage({
@@ -411,8 +558,8 @@ io.on("connection", async (socket: AuthedSocket) => {
         ack?.({ ok: false, error: "RATE_LIMITED" }); return;
       }
       const parsed = pollVoteSchema.parse(raw);
-      const voteTopicId = await getPollTopicId(parsed.pollId); // #18 authz
-      if (!voteTopicId || !(await userCanViewTopic(user.role, voteTopicId))) {
+      const voteTopicId = await getPollTopicId(parsed.pollId); // #18/#rt-2 authz
+      if (!voteTopicId || !(await userCanAccessTopic(user.sub, user.role, voteTopicId))) {
         ack?.({ ok: false, error: "FORBIDDEN" }); return;
       }
       const result = await castPollVote({ pollId: parsed.pollId, userId: user.sub, optionIds: parsed.optionIds });
@@ -433,8 +580,17 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.POLL_CLOSE, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      if (await isRateLimited(`ws:poll-close:${user.sub}`, 20, 60)) { // #rt-6
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       if (user.role === "user") { ack?.({ ok: false, error: "Insufficient permissions" }); return; }
       const parsed = pollCloseSchema.parse(raw);
+      // #rt-2: no topic gate at all before this — any non-"user" account could
+      // close any poll in the deployment, including in topics it cannot open.
+      const closeTopicId = await getPollTopicId(parsed.pollId);
+      if (!closeTopicId || !(await userCanAccessTopic(user.sub, user.role, closeTopicId))) {
+        ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
       const result = await closePollById(parsed.pollId);
       if (result.pollData?.topicId) {
         io.to(`topic:${result.pollData.topicId}`).emit(WS_EVENTS.POLL_UPDATED, {
@@ -466,7 +622,7 @@ io.on("connection", async (socket: AuthedSocket) => {
         ack?.({ ok: false, error: "message not found" });
         return;
       }
-      if (!(await userCanViewTopic(user.role, topicId))) { // #18 authz
+      if (!(await userCanAccessTopic(user.sub, user.role, topicId))) { // #18/#rt-2 authz
         ack?.({ ok: false, error: "FORBIDDEN" });
         return;
       }
@@ -493,13 +649,23 @@ io.on("connection", async (socket: AuthedSocket) => {
         ack?.({ ok: false, error: "RATE_LIMITED" }); return;
       }
       const parsed = messageEditSchema.parse(raw);
+      // #rt-2: topic gate before anything else — editing is a write into a
+      // topic, so it needs the same access proof as reading it.
+      if (!(await userCanAccessTopic(user.sub, user.role, parsed.topicId))) {
+        ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
       const owner = await getMessageOwner(parsed.messageId);
       if (!owner || owner.topicId !== parsed.topicId) {
         ack?.({ ok: false, error: "not found" }); return;
       }
       const isOwn = owner.senderUserId === user.sub;
-      const canEditAny = user.role !== "user";
-      if (!isOwn && !canEditAny) {
+      // Real permission, not `role !== "user"`: that shorthand handed edit-anything
+      // to every custom role in the deployment regardless of what it was granted.
+      // socket.data.user.permissions is kept in sync with the DB by the re-auth
+      // sweeper (#rt-1), so a revoked grant lands here too.
+      const canEditAny = user.permissions.includes(PERMISSIONS.MESSAGES_EDIT_ANY);
+      const canEditOwn = user.permissions.includes(PERMISSIONS.MESSAGES_EDIT_OWN);
+      if (isOwn ? !(canEditOwn || canEditAny) : !canEditAny) {
         ack?.({ ok: false, error: "forbidden" }); return;
       }
       // Branch must match topic.isE2ee — client encrypts via Megolm for E2EE,
@@ -542,14 +708,22 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.MESSAGE_DELETE_REQ, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      if (await isRateLimited(`ws:delete:${user.sub}`, 20, 10)) { // #rt-6
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       const parsed = messageDeleteSchema.parse(raw);
+      if (!(await userCanAccessTopic(user.sub, user.role, parsed.topicId))) { // #rt-2
+        ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
       const owner = await getMessageOwner(parsed.messageId);
       if (!owner || owner.topicId !== parsed.topicId) {
         ack?.({ ok: false, error: "not found" }); return;
       }
       const isOwn = owner.senderUserId === user.sub;
-      const canDeleteAny = user.role !== "user";
-      if (!isOwn && !canDeleteAny) {
+      // See MESSAGE_EDIT_REQ — real permission, not the `role !== "user"` shorthand.
+      const canDeleteAny = user.permissions.includes(PERMISSIONS.MESSAGES_DELETE_ANY);
+      const canDeleteOwn = user.permissions.includes(PERMISSIONS.MESSAGES_DELETE_OWN);
+      if (isOwn ? !(canDeleteOwn || canDeleteAny) : !canDeleteAny) {
         ack?.({ ok: false, error: "forbidden" }); return;
       }
       await softDeleteMessage(parsed.messageId, parsed.topicId);
@@ -562,12 +736,27 @@ io.on("connection", async (socket: AuthedSocket) => {
 
   socket.on(WS_EVENTS.BOT_KEYBOARD_CALLBACK, async (raw: unknown, ack?: (res: unknown) => void) => {
     try {
+      // Each callback is an outbound HTTP POST to a bot webhook plus a Redis
+      // rpush — unthrottled outbound-request amplification otherwise (#rt-6).
+      if (await isRateLimited(`ws:bot-callback:${user.sub}`, 30, 60)) {
+        ack?.({ ok: false, error: "RATE_LIMITED" }); return;
+      }
       const { botId, messageId, callbackData } = raw as { botId: string; messageId: string; callbackData: string };
-      if (!botId || !messageId || !callbackData) { ack?.({ ok: false, error: "invalid payload" }); return; }
+      if (
+        typeof botId !== "string" || typeof messageId !== "string" || typeof callbackData !== "string" ||
+        !botId || !messageId || !callbackData || callbackData.length > 256
+      ) { ack?.({ ok: false, error: "invalid payload" }); return; }
       const topicId = await getMessageTopicId(messageId);
       if (!topicId) { ack?.({ ok: false, error: "message not found" }); return; }
-      if (!(await userCanViewTopic(user.role, topicId))) { // #18 authz
+      if (!(await userCanAccessTopic(user.sub, user.role, topicId))) { // #18/#rt-2 authz
         ack?.({ ok: false, error: "FORBIDDEN" }); return;
+      }
+      // #rt-7: callbackData is client-supplied. Without this, a user who can see
+      // any one topic could synthesize arbitrary callback payloads into bot
+      // logic. Only a button that really exists on this message's stored inline
+      // keyboard may be pressed.
+      if (!(await messageKeyboardHasCallback(messageId, callbackData))) {
+        ack?.({ ok: false, error: "unknown callback" }); return;
       }
       const callbackQueryId = randomUUID();
       ack?.({ ok: true, callbackQueryId });
@@ -582,6 +771,7 @@ io.on("connection", async (socket: AuthedSocket) => {
 // React to ban/mute pubsub from the web app: force-disconnect affected users.
 subClient.subscribe(
   REDIS_CHANNELS.USER_BANNED,
+  REDIS_CHANNELS.SESSION_REVOKED,
   REDIS_CHANNELS.USER_MUTED,
   REDIS_CHANNELS.BOT_MESSAGE_NEW,
   REDIS_CHANNELS.BOT_MESSAGE_EDIT,
@@ -601,13 +791,23 @@ subClient.on("message", (channel, message) => {
     if (channel === REDIS_CHANNELS.USER_BANNED) {
       const { userId } = JSON.parse(message) as { userId: string };
       io.to(`user:${userId}`).disconnectSockets(true);
+    } else if (channel === REDIS_CHANNELS.SESSION_REVOKED) {
+      // Logout (#rt-1). Same treatment as a ban: a socket authenticated once at
+      // handshake would otherwise stay fully authorized until its access token
+      // expired. Dropping every socket of the user is safe — other devices hold
+      // their own valid cookies and Socket.IO reconnects them transparently,
+      // while the tab that logged out has no cookie left to reconnect with.
+      const { userId } = JSON.parse(message) as { userId: string; jti?: string };
+      io.to(`user:${userId}`).disconnectSockets(true);
     } else if (channel === REDIS_CHANNELS.USER_MUTED) {
       const { userId } = JSON.parse(message) as { userId: string };
       io.to(`user:${userId}`).emit(WS_EVENTS.USER_MUTED, { userId });
     } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_NEW) {
       const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: { text?: string; senderDisplayName?: string | null; createdAt?: string } };
       io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_NEW, msg);
-      getTopicMemberUserIds(topicId).then((memberIds) => {
+      getTopicMemberUserIds(topicId)
+        .then((ids) => filterUsersWhoCanViewTopic(topicId, ids)) // #rt-5
+        .then((memberIds) => {
         const sidebarPayload = {
           topicId,
           preview: stripMarkdownPreview(msg.text ?? ""),
@@ -737,6 +937,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
   process.on(sig, () => {
     cancelAutoDelete();
     cancelAnonPurge();
+    clearInterval(reauthTimer);
   });
 }
 

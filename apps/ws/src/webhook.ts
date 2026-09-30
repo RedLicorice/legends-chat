@@ -95,11 +95,25 @@ export async function deliverCallbackQueryToWebhooks(
   senderDisplayName: string | null,
   callbackData: string,
 ): Promise<void> {
+  // #rt-7: botId comes straight from the client. Looking the bot up by
+  // id + isActive alone let any user who can view a single topic fire a
+  // synthetic callback_query at ANY active bot in the deployment, including
+  // bots never added to the topic they named. Join topicBots so only a bot
+  // actually attached to THIS topic can be targeted; an unattached bot gets
+  // nothing (not even the queued update).
   const [row] = await db
     .select({ webhookUrl: bots.webhookUrl })
-    .from(bots)
-    .where(and(eq(bots.id, botId), eq(bots.isActive, true)))
+    .from(topicBots)
+    .innerJoin(bots, eq(topicBots.botId, bots.id))
+    .where(
+      and(
+        eq(topicBots.topicId, topicId),
+        eq(topicBots.botId, botId),
+        eq(bots.isActive, true),
+      ),
+    )
     .limit(1);
+  if (!row) return;
 
   const update: WebhookUpdate = {
     update_id: await nextUpdateId(),
@@ -112,7 +126,7 @@ export async function deliverCallbackQueryToWebhooks(
     },
   };
 
-  await dispatchUpdate(botId, row?.webhookUrl ?? null, update);
+  await dispatchUpdate(botId, row.webhookUrl, update);
 }
 
 export async function deliverNewMemberToWebhooks(

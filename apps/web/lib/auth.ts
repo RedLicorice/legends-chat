@@ -7,6 +7,7 @@ import {
   REFRESH_COOKIE,
   accessTokenPayloadSchema,
   refreshTokenPayloadSchema,
+  REDIS_CHANNELS,
   REDIS_KEYS,
   resolvePermissions,
   type AccessTokenPayload,
@@ -173,6 +174,16 @@ export async function revokeCurrentSession(): Promise<void> {
       const p = accessTokenPayloadSchema.parse(payload);
       const ttl = payload.exp ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000)) : ACCESS_TTL;
       await redis.set(REDIS_KEYS.REVOKED_JTI(p.jti), "1", "EX", ttl);
+      // Blocklisting the jti only stops NEW handshakes — apps/ws authenticates a
+      // socket once at connect and never re-reads the blocklist for it, so a
+      // logged-out tab would keep a fully-authorized live connection until the
+      // periodic re-auth sweep noticed (#rt-1). Tell the ws layer now. Every
+      // socket of this user is dropped, not just this tab's: other devices hold
+      // their own valid cookies and reconnect transparently, whereas this one
+      // no longer has a cookie to reconnect with.
+      await redis
+        .publish(REDIS_CHANNELS.SESSION_REVOKED, JSON.stringify({ userId: p.sub, jti: p.jti }))
+        .catch(() => {});
     } catch {
       // invalid/expired access token — nothing to blocklist
     }
