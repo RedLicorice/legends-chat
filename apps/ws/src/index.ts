@@ -150,6 +150,67 @@ const allowedOrigins = [
   process.env.NODE_ENV !== "production" ? "http://localhost:3000" : null,
 ].filter(Boolean) as string[];
 
+// #rt-8: docker-compose.prod.yml sets APP_PUBLIC_URL but not WEB_URL, and
+// nothing checked the result — if neither were set the list silently became []
+// and the only thing left standing between a cross-site page and an
+// authenticated socket was SameSite=Lax suppressing the cookie. Fail loudly.
+if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+  throw new Error(
+    "No WS origin allow-list — set APP_PUBLIC_URL (or WEB_URL). Refusing to start: " +
+      "every browser handshake would be rejected and cross-site origin checks would have nothing to compare against.",
+  );
+}
+
+const allowedOriginSet = new Set(
+  allowedOrigins.map((o) => {
+    try { return new URL(o).origin; } catch { return o; }
+  }),
+);
+
+/**
+ * #rt-8: Socket.IO's `cors` option only governs the HTTP polling handshake —
+ * a native WebSocket upgrade never consults it, so CORS is not an auth control
+ * here. Check Origin explicitly, as a precondition of authentication.
+ *
+ * A browser ALWAYS sends Origin on a WebSocket handshake, so a missing Origin
+ * is a non-browser client (health check, server-side bot), not the CSWSH case;
+ * present-but-foreign is. Today SameSite=Lax also suppresses the cookie
+ * cross-site, but that is one implicit control carrying an auth decision — this
+ * is the explicit one.
+ */
+function originAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  try {
+    return allowedOriginSet.has(new URL(origin).origin);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * #rt-9: the ws layer had no notion of a client IP at all, so every limiter was
+ * keyed on user.sub only — and anonymous sessions are a supported feature, so
+ * minting N accounts buys N copies of every budget. Mirrors the derivation in
+ * apps/web/lib/rate-limit.ts: CF-Connecting-IP is set at the edge and
+ * overwrites anything the client sent; X-Forwarded-For's LEADING entry is
+ * client-controlled (nginx appends the real peer at the END), so read the last.
+ * Requires the header forwarding added to nginx's /socket.io/ location.
+ */
+function handshakeIp(headers: Record<string, string | string[] | undefined>, fallback: string): string {
+  const first = (v: string | string[] | undefined): string | undefined =>
+    (Array.isArray(v) ? v[0] : v)?.trim() || undefined;
+  const cf = first(headers["cf-connecting-ip"]);
+  if (cf) return cf;
+  const real = first(headers["x-real-ip"]);
+  if (real) return real;
+  const xff = first(headers["x-forwarded-for"]);
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1]!;
+  }
+  return fallback || "unknown";
+}
+
 const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>(httpServer, {
   cors: {
     origin: allowedOrigins,
@@ -161,7 +222,29 @@ io.adapter(createAdapter(pubClient, subClient));
 
 io.use(async (socket, next) => {
   try {
+    // Origin is an auth PRECONDITION (#rt-8) — checked before the cookie is
+    // even parsed, and on the upgrade path that `cors` above never reaches.
+    const origin = socket.handshake.headers.origin;
+    if (!originAllowed(origin)) {
+      log.warn("handshake rejected: disallowed origin", { origin });
+      next(new Error("origin not allowed"));
+      return;
+    }
+    // IP-keyed handshake budget (#rt-9), before any DB/JWT work so a flood is
+    // shed cheaply. Sits alongside — not instead of — the per-user budgets.
+    const ip = handshakeIp(socket.handshake.headers, socket.handshake.address);
+    if (await isRateLimited(`ws:handshake:ip:${ip}`, 120, 60)) {
+      log.warn("handshake rejected: ip rate limit", { ip });
+      next(new Error("too many connections"));
+      return;
+    }
     socket.data.user = await authenticateSocket(socket);
+    // Per-account connection churn cap, so one account cannot loop handshakes
+    // from many IPs either.
+    if (await isRateLimited(`ws:handshake:user:${socket.data.user.sub}`, 60, 60)) {
+      next(new Error("too many connections"));
+      return;
+    }
     next();
   } catch (err) {
     next(err instanceof Error ? err : new Error("auth failed"));
