@@ -262,6 +262,25 @@ interface UserAuthz {
 // only carries the snapshot taken when it was minted, and a socket holds that
 // snapshot for its whole life (#rt-1) — so a demotion, a revoked override or a
 // deleted account would otherwise never reach an open connection.
+// role → permissions, memoized briefly. The sweeper below re-resolves authz for
+// every live socket on every tick, and this lookup is identical for every user
+// sharing a role; the per-user rows are always read fresh. TTL is short enough
+// that a role's permission set still takes effect within one sweep interval.
+const ROLE_PERMS_TTL_MS = 30_000;
+const rolePermsCache = new Map<string, { at: number; perms: string[] }>();
+
+async function permissionsForRole(role: string): Promise<string[]> {
+  const hit = rolePermsCache.get(role);
+  if (hit && Date.now() - hit.at < ROLE_PERMS_TTL_MS) return hit.perms;
+  const rows = await db
+    .select({ permission: rolesPermissions.permission })
+    .from(rolesPermissions)
+    .where(eq(rolesPermissions.role, role));
+  const perms = rows.map((p) => p.permission);
+  rolePermsCache.set(role, { at: Date.now(), perms });
+  return perms;
+}
+
 async function loadUserAuthz(userId: string): Promise<UserAuthz | null> {
   const now = new Date();
   const [userRows, overrideRows] = await Promise.all([
@@ -278,12 +297,8 @@ async function loadUserAuthz(userId: string): Promise<UserAuthz | null> {
   ]);
   const role = userRows[0]?.role;
   if (!role) return null; // account deleted while the socket was open
-  const rolePerms = await db
-    .select({ permission: rolesPermissions.permission })
-    .from(rolesPermissions)
-    .where(eq(rolesPermissions.role, role));
   const set = resolvePermissions(
-    rolePerms.map((p) => p.permission),
+    await permissionsForRole(role),
     overrideRows as { permission: string; effect: "allow" | "deny" }[],
   );
   return { role, permissions: [...set] };
@@ -542,17 +557,18 @@ io.on("connection", async (socket: AuthedSocket) => {
         // list leaks a message preview to people who can no longer open it.
         .then((ids) => filterUsersWhoCanViewTopic(parsed.topicId, ids))
         .then((memberIds) => {
-        const sidebarPayload = {
-          topicId: parsed.topicId,
-          preview: sidebarPreview,
-          senderId: user.sub,
-          senderName: msg.senderDisplayName ?? null,
-          at: typeof msg.createdAt === "string" ? msg.createdAt : (msg.createdAt as Date).toISOString(),
-        };
-        for (const memberId of memberIds) {
-          io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
-        }
-      }).catch((e) => log.error("sidebar broadcast failed", e));
+          const sidebarPayload = {
+            topicId: parsed.topicId,
+            preview: sidebarPreview,
+            senderId: user.sub,
+            senderName: msg.senderDisplayName ?? null,
+            at: typeof msg.createdAt === "string" ? msg.createdAt : (msg.createdAt as Date).toISOString(),
+          };
+          for (const memberId of memberIds) {
+            io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
+          }
+        })
+        .catch((e) => log.error("sidebar broadcast failed", e));
       if (validHashtags.length > 0) {
         io.to(`topic:${parsed.topicId}`).emit(WS_EVENTS.HASHTAG_CLOUD_UPDATE, {
           topicId: parsed.topicId,
@@ -891,17 +907,18 @@ subClient.on("message", (channel, message) => {
       getTopicMemberUserIds(topicId)
         .then((ids) => filterUsersWhoCanViewTopic(topicId, ids)) // #rt-5
         .then((memberIds) => {
-        const sidebarPayload = {
-          topicId,
-          preview: stripMarkdownPreview(msg.text ?? ""),
-          senderId: null as string | null,
-          senderName: msg.senderDisplayName ?? null,
-          at: msg.createdAt ?? new Date().toISOString(),
-        };
-        for (const memberId of memberIds) {
-          io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
-        }
-      }).catch((e) => log.error("sidebar bot broadcast failed", e));
+          const sidebarPayload = {
+            topicId,
+            preview: stripMarkdownPreview(msg.text ?? ""),
+            senderId: null as string | null,
+            senderName: msg.senderDisplayName ?? null,
+            at: msg.createdAt ?? new Date().toISOString(),
+          };
+          for (const memberId of memberIds) {
+            io.to(`user:${memberId}`).emit(WS_EVENTS.SIDEBAR_UPDATE, sidebarPayload);
+          }
+        })
+        .catch((e) => log.error("sidebar bot broadcast failed", e));
     } else if (channel === REDIS_CHANNELS.BOT_MESSAGE_EDIT) {
       const { topicId, message: msg } = JSON.parse(message) as { topicId: string; message: unknown };
       io.to(`topic:${topicId}`).emit(WS_EVENTS.MESSAGE_EDIT, msg);
