@@ -25,6 +25,9 @@ import { EncryptedMessageContent } from "@/components/EncryptedMessageContent";
 import { EncryptedReasonModal, type EncryptedReason } from "@/components/EncryptedReasonModal";
 import { NewDeviceAlertBanner } from "@/components/NewDeviceAlertBanner";
 import { verifyRecipientSet } from "@/lib/e2ee-recipients";
+import { SafetyNumberModal } from "@/components/SafetyNumberModal";
+import type { SafetyTarget } from "@/lib/safety-number";
+import { toMatrixBotId, toMatrixUserId } from "@/lib/crypto-matrix";
 import type { IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
@@ -384,6 +387,9 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   // that are in neither the Members roster nor the disclosed admin set.
   const [e2eeRecipientMismatch, setE2eeRecipientMismatch] = useState<string[] | null>(null);
   const e2eeRecipientMismatchRef = useRef<string[] | null>(null);
+  // cr-h3: safety-number comparison. Built fresh on open so the modal always
+  // recomputes against the current recipient/device set.
+  const [safetyTarget, setSafetyTarget] = useState<SafetyTarget | null>(null);
   const [adminDisplayNames, setAdminDisplayNames] = useState<Map<string, string>>(new Map());
   const memberUserIdsRef = useRef<string[]>([]);
   useEffect(() => { memberUserIdsRef.current = memberUserIds; }, [memberUserIds]);
@@ -2017,8 +2023,41 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
             </>
           ) : (
             <>Only you and the other participant can read these messages.</>
-          )}
+          )}{" "}
+          {/* cr-h3: the whitepaper, the README and the new-device banner all
+              tell users to compare a safety number. This is where they do it. */}
+          <button
+            type="button"
+            className="underline decoration-dotted underline-offset-2 hover:text-text"
+            onClick={() => {
+              if (isTopicMode && topic && e2eeRoomId) {
+                setSafetyTarget({
+                  kind: "room",
+                  roomId: e2eeRoomId,
+                  userIds: memberUserIds.length > 0 ? memberUserIds : [currentUser.id],
+                  roomName: topic.title,
+                });
+              } else if (dmConversation?.peer) {
+                setSafetyTarget({
+                  kind: "peer",
+                  peerMatrixId: dmConversation.peer.type === "bot"
+                    ? toMatrixBotId(dmConversation.peer.id)
+                    : toMatrixUserId(dmConversation.peer.id),
+                  peerName: dmConversation.peer.displayName,
+                });
+              }
+            }}
+          >
+            Verify safety number
+          </button>
         </div>
+      )}
+      {safetyTarget && (
+        <SafetyNumberModal
+          target={safetyTarget}
+          currentUserId={currentUser.id}
+          onClose={() => setSafetyTarget(null)}
+        />
       )}
 
       {showDeleteConfirm && (
