@@ -19,15 +19,79 @@ export type RateLimitResult = { allowed: boolean; remaining: number; resetAt: nu
 // CF-Connecting-IP becomes client-controlled again.
 export function clientIp(req: Request): string {
   const cf = req.headers.get("cf-connecting-ip")?.trim();
-  if (cf) return cf;
+  if (cf) return normalizeIp(cf);
   const realIp = req.headers.get("x-real-ip")?.trim();
-  if (realIp) return realIp;
+  if (realIp) return normalizeIp(realIp);
   const xff = req.headers.get("x-forwarded-for");
   if (xff) {
     const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1]!;
+    if (parts.length) return normalizeIp(parts[parts.length - 1]!);
   }
   return "unknown";
+}
+
+// Collapse an address to the smallest unit an attacker can't trivially
+// multiply, so it can serve as a rate-limit bucket key.
+//
+// IPv4 keys on the full /32 — one address is one host and another one costs
+// real money. IPv6 does not work that way: the smallest block anyone is
+// assigned is a /64, so a $3/month VPS with a routed /64 has 2^64 source
+// addresses to rotate through. Keying on the full /128 handed every per-IP
+// limit in the app (register 5/h, login 20/15min, passkey, telegram-register)
+// an unlimited supply of fresh Redis buckets — and unbounded key creation with
+// it. Truncating to /64 makes one bucket per assignment, which is the unit an
+// ISP actually hands out.
+export function normalizeIp(raw: string): string {
+  const ip = raw.trim().toLowerCase();
+  if (!ip) return "unknown";
+
+  // Bracketed and/or port-suffixed forms: "[2001:db8::1]:443", "1.2.3.4:443".
+  let addr = ip;
+  if (addr.startsWith("[")) {
+    const close = addr.indexOf("]");
+    if (close > 0) addr = addr.slice(1, close);
+  } else {
+    const colon = addr.indexOf(":");
+    // A single colon means IPv4:port; two or more mean a bare IPv6 address.
+    if (colon > 0 && addr.indexOf(":", colon + 1) === -1) addr = addr.slice(0, colon);
+  }
+
+  if (!addr.includes(":")) return addr; // IPv4 — keep the full /32.
+
+  // IPv4-mapped IPv6 ("::ffff:1.2.3.4") is really an IPv4 host; key it as one.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(addr);
+  if (mapped) return mapped[1]!;
+
+  return ipv6Prefix64(addr);
+}
+
+// First four hextets of an IPv6 address as "<h0>:<h1>:<h2>:<h3>::/64",
+// zero-padded so textual variants of the same prefix key identically. Handles
+// "::" compression and a "%zone" suffix. Falls back to the input unchanged if
+// it doesn't parse — a malformed value then still keys consistently and never
+// collapses two different clients into one bucket.
+function ipv6Prefix64(addr: string): string {
+  const zoneless = addr.split("%")[0]!;
+  const halves = zoneless.split("::");
+  if (halves.length > 2) return addr;
+
+  const head = halves[0] ? halves[0]!.split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1]!.split(":") : [];
+  if (head.some((h) => h === "") || tail.some((h) => h === "")) return addr;
+
+  let hextets: string[];
+  if (halves.length === 2) {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return addr;
+    hextets = [...head, ...Array<string>(fill).fill("0"), ...tail];
+  } else {
+    if (head.length !== 8) return addr;
+    hextets = head;
+  }
+
+  const prefix = hextets.slice(0, 4);
+  if (prefix.length !== 4 || prefix.some((h) => !/^[0-9a-f]{1,4}$/.test(h))) return addr;
+  return `${prefix.map((h) => h.padStart(4, "0")).join(":")}::/64`;
 }
 
 // Increment `key`; return a ready-to-send 429 if over the limit, else null.

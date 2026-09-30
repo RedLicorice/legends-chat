@@ -47,10 +47,14 @@ channels are server-side encrypted at rest; sensitive channels and
 
 **Auth**
 - Passkeys (WebAuthn / FIDO2) — primary, phishing-resistant
-- Email + bcrypt password, optional TOTP 2FA
+- Email + scrypt password, optional TOTP 2FA with single-use
+  recovery codes shown once at enrolment
 - Telegram magic link
-- Short-lived JWT access tokens + hashed refresh tokens; per-user
-  revocation through an in-memory revocation list
+- Short-lived JWT access tokens (15 min) + longer-lived refresh
+  tokens (24 h), each session tracked in Postgres by its token id
+- Per-session and per-user revocation through a Redis blocklist of
+  revoked token ids — shared across replicas and outliving a
+  process restart, so a logout stays a logout
 
 **PWA**
 - Installable on iOS, Android, desktop (Chrome / Edge)

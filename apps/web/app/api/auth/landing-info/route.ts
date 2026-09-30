@@ -6,11 +6,20 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { getAllSettings } from "@legends/db/system-settings";
 import { cleanupAbandonedRegistrations } from "@/lib/registration-cleanup";
+import { clientIp, enforceRateLimit } from "@/lib/rate-limit";
 
 const log = createLogger("api:landing-info");
 
 export async function GET(req: NextRequest) {
-  // Fire-and-forget cleanup. Best-effort; ignore errors.
+  // Public, unauthenticated, and it looks magic-link tokens up — so it gets a
+  // bucket like every other pre-auth route. Generous: a normal landing visit
+  // hits this a handful of times.
+  const limited = await enforceRateLimit(`auth:landing-info:ip:${clientIp(req)}`, 30, 900);
+  if (limited) return limited;
+
+  // Fire-and-forget cleanup. Best-effort; ignore errors. Internally debounced
+  // to at most one real sweep every few minutes across all replicas, so this
+  // can't become a per-request table scan + DELETE.
   cleanupAbandonedRegistrations().catch(() => {});
 
   const token = req.nextUrl.searchParams.get("token") ?? "";

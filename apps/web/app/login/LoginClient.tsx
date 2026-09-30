@@ -169,14 +169,17 @@ export function LoginClient() {
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Authenticator code</label>
                 <input
                   required
-                  inputMode="numeric"
                   autoComplete="one-time-code"
-                  maxLength={6}
+                  maxLength={11}
                   value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
+                  // Accepts either the 6-digit code or one of the recovery
+                  // codes issued at enrolment (XXXXX-XXXXX), so the field
+                  // can't strip the letters out of a recovery code.
+                  onChange={(e) => setTotpCode(e.target.value.replace(/[^0-9A-Za-z-]/g, "").toUpperCase())}
                   placeholder="123456"
                   className="w-full rounded-xl border border-border bg-panel px-4 py-2.5 text-sm tracking-widest outline-none focus:border-accent placeholder:text-muted"
                 />
+                <p className="mt-1 text-xs text-muted">Lost your device? Enter one of your recovery codes instead.</p>
               </div>
             )}
             {error && <p className="text-sm text-danger">{error}</p>}

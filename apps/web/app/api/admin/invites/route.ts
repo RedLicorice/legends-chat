@@ -4,6 +4,7 @@ import { z } from "zod";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { inviteCodes, inviteQuotaConfig, users } from "@legends/db/schema";
 import {
+  INVITE_CODE_BODY_LENGTH,
   PERMISSIONS,
   formatInviteCodeFromBytes,
   type Role,
@@ -25,7 +26,10 @@ async function uniqueCode(): Promise<string> {
   const prefixSetting = await getSetting(db, "invite_code_prefix");
   const prefix = prefixSetting ? prefixSetting.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) + "#" : undefined;
   for (let i = 0; i < 5; i += 1) {
-    const candidate = formatInviteCodeFromBytes(randomBytes(12), prefix);
+    // One random byte per body character — tie the request to the constant so
+    // raising INVITE_CODE_BODY_LENGTH can never again leave the extra entropy
+    // unconsumed (it used to ask for 12 bytes and use only the first 6).
+    const candidate = formatInviteCodeFromBytes(randomBytes(INVITE_CODE_BODY_LENGTH), prefix);
     const existing = await db
       .select({ id: inviteCodes.id })
       .from(inviteCodes)

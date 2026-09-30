@@ -24,7 +24,10 @@ const PUBLIC_PATHS = [
   "/api/theme.css",
   "/api/favicon",
   "/api/register-config",
-  "/api/invite-check",
+  // /api/invite-check is gone on purpose: a public, unthrottled endpoint that
+  // answers {valid:true|false} for an arbitrary code is a free invite-code
+  // oracle. POST /api/auth/register does the validation now, behind the
+  // 5/IP/hour limiter, and returns the same generic message.
   "/api/user/email-link/verify",
   "/api/bot/",
   "/manifest.webmanifest",

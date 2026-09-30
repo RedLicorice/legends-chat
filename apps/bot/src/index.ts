@@ -1,10 +1,16 @@
 import { createServer } from "node:http";
 import { Bot, webhookCallback, session, type Context, type SessionFlavor } from "grammy";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { inviteCodes } from "@legends/db/schema";
+import { redeemableInvitePredicate } from "@legends/db/invites";
 import { createLogger } from "@legends/shared";
 import { db } from "./db";
 import { formatBanMessage, getActiveBan } from "./ban";
+import {
+  INVITE_MAX_ATTEMPTS,
+  clearInviteAttempts,
+  isInviteLockedOut,
+  recordFailedInviteAttempt,
+} from "./invite-attempts";
 import { appPublicUrl, attachTelegramMessage, issueLoginToken, issuePendingToken, loginUrl } from "./login";
 import { createAnonUser, findUserByTelegramId, getRegistrationPolicy, touchTelegramUsername } from "./registration";
 import {
@@ -117,6 +123,13 @@ bot.command("start", async (ctx) => {
   const policy = await getRegistrationPolicy();
 
   if (policy.invitesEnabled) {
+    // /start must not reset the guess allowance — otherwise the cap is one
+    // /start away from being unlimited.
+    if (await isInviteLockedOut(BigInt(tgUser.id))) {
+      ctx.session.awaitingInvite = false;
+      await ctx.reply("Too many incorrect invite codes. Please try again later.");
+      return;
+    }
     ctx.session.awaitingInvite = true;
     await ctx.reply("Welcome! Please send your invite code to register.");
     return;
@@ -150,30 +163,53 @@ bot.on("message:text", async (ctx) => {
     return;
   }
 
-  // Validate invite code without claiming it. The web register endpoint
-  // performs the atomic claim when the user actually completes the form.
-  const now = new Date();
-  const [invite] = await db
-    .select({ id: inviteCodes.id, role: inviteCodes.role })
-    .from(inviteCodes)
-    .where(
-      and(
-        eq(inviteCodes.code, code),
-        or(isNull(inviteCodes.expiresAt), gt(inviteCodes.expiresAt, now)),
-        or(
-          isNull(inviteCodes.maxUses),
-          sql`${inviteCodes.usesCount} < ${inviteCodes.maxUses}`,
-        ),
-        or(eq(inviteCodes.role, "user"), eq(inviteCodes.usesCount, 0)),
-      ),
-    )
-    .limit(1);
-
-  if (!invite) {
-    await ctx.reply("That invite code is invalid, expired, or out of uses. Please try again.");
+  // This prompt is an invite-code oracle with no browser and nowhere to put a
+  // CAPTCHA, so guesses are capped server-side. The counter is keyed on the
+  // Telegram user id and lives in Redis (see invite-attempts.ts) — grammY's
+  // in-memory session would reset on every bot restart.
+  const telegramUserId = BigInt(tgUser.id);
+  if (await isInviteLockedOut(telegramUserId)) {
+    ctx.session.awaitingInvite = false;
+    log.warn("invite prompt locked out", { telegramUserId: telegramUserId.toString() });
+    await ctx.reply(
+      "Too many incorrect invite codes. Please wait an hour and send /start to try again.",
+    );
     return;
   }
 
+  // Validate invite code without claiming it. The web register endpoint
+  // performs the atomic claim when the user actually completes the form.
+  const [invite] = await db
+    .select({ id: inviteCodes.id, role: inviteCodes.role })
+    .from(inviteCodes)
+    .where(redeemableInvitePredicate(code))
+    .limit(1);
+
+  if (!invite) {
+    const state = await recordFailedInviteAttempt(telegramUserId);
+    if (state.lockedOut) {
+      ctx.session.awaitingInvite = false;
+      log.warn("invite prompt locked out", {
+        telegramUserId: telegramUserId.toString(),
+        attempts: state.used,
+      });
+      await ctx.reply(
+        "Too many incorrect invite codes. Please wait an hour and send /start to try again.",
+      );
+      return;
+    }
+    log.info("invite code rejected", {
+      telegramUserId: telegramUserId.toString(),
+      attempts: state.used,
+    });
+    const left = INVITE_MAX_ATTEMPTS - state.used;
+    await ctx.reply(
+      `That invite code is invalid, expired, or out of uses. ${left} attempt${left === 1 ? "" : "s"} remaining.`,
+    );
+    return;
+  }
+
+  await clearInviteAttempts(telegramUserId);
   ctx.session.awaitingInvite = false;
   await ctx.reply("Code accepted! Generating your registration link…");
   await sendPendingLink(
