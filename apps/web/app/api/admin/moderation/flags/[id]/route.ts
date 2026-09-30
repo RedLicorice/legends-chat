@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // All non-dismiss actions soft-delete the offending message.
-  await softDeleteMessage(flag.messageId.toString());
+  await softDeleteMessage(flag.messageId.toString(), { userId: user.id, reason: `moderation:${body.action}` });
   await resolveFlag({ flagId, reviewerUserId: user.id, status: "actioned" });
   await publishPendingFlagCount();
 

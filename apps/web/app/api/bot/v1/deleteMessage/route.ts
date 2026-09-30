@@ -5,6 +5,7 @@ import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getBotFromRequest } from "@/lib/bot-auth";
+import { AUDIT_ACTIONS, logAdminAction } from "@/lib/audit-log";
 
 export async function POST(req: Request) {
   const bot = await getBotFromRequest(req);
@@ -19,7 +20,19 @@ export async function POST(req: Request) {
     .limit(1);
   if (!msg) return NextResponse.json({ ok: false, error: "message not found or not owned by bot" }, { status: 404 });
 
-  await db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, BigInt(body.messageId)));
+  // cr-m10: a bot has no users.id, so the actor is recorded in the audit row's
+  // metadata and in delete_reason rather than deleted_by_user_id.
+  await db
+    .update(messages)
+    .set({ deletedAt: new Date(), deleteReason: `bot:${bot.id}` })
+    .where(eq(messages.id, BigInt(body.messageId)));
+  await logAdminAction({
+    actorUserId: null,
+    action: AUDIT_ACTIONS.MESSAGE_DELETE,
+    targetType: "message",
+    targetId: body.messageId,
+    metadata: { botId: bot.id, via: "bot_api" },
+  });
 
   await redis.publish(REDIS_CHANNELS.BOT_MESSAGE_DELETE, JSON.stringify({
     topicId: msg.topicId,

@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
+import { AUDIT_ACTIONS, logAdminAction } from "@/lib/audit-log";
 
 async function syncTopicPermissions(slug: string, viewRoles: string[], readRoles: string[], postRoles: string[], replyRoles: string[]) {
   await db.delete(rolesPermissions).where(
@@ -75,7 +76,20 @@ export async function PATCH(
   }
   if (typeof body.isE2ee === "boolean") {
     if (body.isE2ee && body.wipeMessages) {
-      await db.update(messages).set({ deletedAt: new Date() }).where(and(eq(messages.topicId, id), isNull(messages.deletedAt)));
+      // cr-m10: this soft-deletes EVERY message in the topic and used to record
+      // nothing at all — not the actor, not the count.
+      const wiped = await db
+        .update(messages)
+        .set({ deletedAt: new Date(), deletedByUserId: user.id, deleteReason: "admin:e2ee_wipe" })
+        .where(and(eq(messages.topicId, id), isNull(messages.deletedAt)))
+        .returning({ id: messages.id });
+      await logAdminAction({
+        actorUserId: user.id,
+        action: AUDIT_ACTIONS.MESSAGE_BULK_DELETE,
+        targetType: "topic",
+        targetId: id,
+        metadata: { count: wiped.length, reason: "e2ee_wipe" },
+      });
     }
     patch.isE2ee = body.isE2ee;
     // Plan D constraint: flipping the topic to E2EE requires
@@ -200,5 +214,13 @@ export async function DELETE(
     );
   }
   await db.delete(topics).where(eq(topics.id, id));
+  // cr-m10: a topic delete cascades every message in it and recorded nothing.
+  await logAdminAction({
+    actorUserId: user.id,
+    action: AUDIT_ACTIONS.TOPIC_DELETE,
+    targetType: "topic",
+    targetId: id,
+    metadata: { slug: existing?.slug ?? null },
+  });
   return NextResponse.json({ ok: true });
 }

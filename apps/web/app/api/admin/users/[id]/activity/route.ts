@@ -1,6 +1,7 @@
-import { and, count, desc, eq, isNotNull, max } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, max, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { NextResponse, type NextRequest } from "next/server";
-import { messages, sessions, topicMembers, topics, userBans, userMutes } from "@legends/db/schema";
+import { auditLog, messages, sessions, topicMembers, topics, userBans, userMutes, users } from "@legends/db/schema";
 import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
@@ -14,10 +15,13 @@ export interface ActivityEvent {
     | "mute_applied"
     | "mute_lifted"
     | "topic_joined"
-    | "message_activity";
+    | "message_activity"
+    | "audit_action";
   timestamp: string;
   description: string;
   meta?: Record<string, string | number | null>;
+  /** cr-m10: who performed the action, when the event has a distinct actor. */
+  actor?: { id: string; displayName: string } | null;
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -31,12 +35,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const rawLimit = req.nextUrl.searchParams.get("limit");
   const limit = Math.min(Math.max(1, parseInt(rawLimit ?? "30", 10) || 30), 200);
 
+  // cr-m10: ban/mute rows have carried banned_by_user_id / muted_by_user_id /
+  // lifted_by_user_id since day one, but this route never selected them, so
+  // "which admin did this" was unanswerable from the UI despite the data being
+  // right there. Join the actors in.
+  const banActor = alias(users, "ban_actor");
+  const banLifter = alias(users, "ban_lifter");
+  const muteActor = alias(users, "mute_actor");
+  const muteLifter = alias(users, "mute_lifter");
+  const auditActor = alias(users, "audit_actor");
+
   const [
     sessionRows,
     banRows,
     muteRows,
     memberRows,
     msgRows,
+    auditRows,
   ] = await Promise.all([
     // Sessions: both created and revoked events come from the same rows
     db
@@ -58,8 +73,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         reason: userBans.reason,
         createdAt: userBans.createdAt,
         liftedAt: userBans.liftedAt,
+        actorId: banActor.id,
+        actorName: banActor.displayName,
+        lifterId: banLifter.id,
+        lifterName: banLifter.displayName,
       })
       .from(userBans)
+      .leftJoin(banActor, eq(banActor.id, userBans.bannedByUserId))
+      .leftJoin(banLifter, eq(banLifter.id, userBans.liftedByUserId))
       .where(eq(userBans.userId, id))
       .orderBy(desc(userBans.createdAt))
       .limit(limit),
@@ -71,8 +92,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         reason: userMutes.reason,
         createdAt: userMutes.createdAt,
         liftedAt: userMutes.liftedAt,
+        actorId: muteActor.id,
+        actorName: muteActor.displayName,
+        lifterId: muteLifter.id,
+        lifterName: muteLifter.displayName,
       })
       .from(userMutes)
+      .leftJoin(muteActor, eq(muteActor.id, userMutes.mutedByUserId))
+      .leftJoin(muteLifter, eq(muteLifter.id, userMutes.liftedByUserId))
       .where(eq(userMutes.userId, id))
       .orderBy(desc(userMutes.createdAt))
       .limit(limit),
@@ -109,6 +136,31 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .groupBy(messages.topicId, topics.title)
       .orderBy(desc(max(messages.createdAt)))
       .limit(limit),
+
+    // cr-m10: the real append-only record. Everything this user did as an
+    // admin, and everything an admin did TO them — including message deletion,
+    // which had no representation here at all.
+    db
+      .select({
+        id: auditLog.id,
+        action: auditLog.action,
+        targetType: auditLog.targetType,
+        targetId: auditLog.targetId,
+        metadata: auditLog.metadata,
+        createdAt: auditLog.createdAt,
+        actorId: auditActor.id,
+        actorName: auditActor.displayName,
+      })
+      .from(auditLog)
+      .leftJoin(auditActor, eq(auditActor.id, auditLog.actorUserId))
+      .where(
+        or(
+          eq(auditLog.actorUserId, id),
+          and(eq(auditLog.targetType, "user"), eq(auditLog.targetId, id)),
+        ),
+      )
+      .orderBy(desc(auditLog.createdAt))
+      .limit(limit),
   ]);
 
   const events: ActivityEvent[] = [];
@@ -132,35 +184,43 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   for (const b of banRows) {
+    const by = b.actorId && b.actorName ? { id: b.actorId, displayName: b.actorName } : null;
     events.push({
       type: "ban_applied",
       timestamp: b.createdAt.toISOString(),
-      description: `Ban applied: ${b.reason}`,
+      description: by ? `Ban applied by ${by.displayName}: ${b.reason}` : `Ban applied: ${b.reason}`,
       meta: { reason: b.reason },
+      actor: by,
     });
     if (b.liftedAt) {
+      const lifter = b.lifterId && b.lifterName ? { id: b.lifterId, displayName: b.lifterName } : null;
       events.push({
         type: "ban_lifted",
         timestamp: b.liftedAt.toISOString(),
-        description: `Ban lifted: ${b.reason}`,
+        description: lifter ? `Ban lifted by ${lifter.displayName}: ${b.reason}` : `Ban lifted: ${b.reason}`,
         meta: { reason: b.reason },
+        actor: lifter,
       });
     }
   }
 
   for (const m of muteRows) {
+    const by = m.actorId && m.actorName ? { id: m.actorId, displayName: m.actorName } : null;
     events.push({
       type: "mute_applied",
       timestamp: m.createdAt.toISOString(),
-      description: `Mute applied: ${m.reason}`,
+      description: by ? `Mute applied by ${by.displayName}: ${m.reason}` : `Mute applied: ${m.reason}`,
       meta: { reason: m.reason },
+      actor: by,
     });
     if (m.liftedAt) {
+      const lifter = m.lifterId && m.lifterName ? { id: m.lifterId, displayName: m.lifterName } : null;
       events.push({
         type: "mute_lifted",
         timestamp: m.liftedAt.toISOString(),
-        description: `Mute lifted: ${m.reason}`,
+        description: lifter ? `Mute lifted by ${lifter.displayName}: ${m.reason}` : `Mute lifted: ${m.reason}`,
         meta: { reason: m.reason },
+        actor: lifter,
       });
     }
   }
@@ -186,6 +246,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         topicTitle: msg.topicTitle,
         messageCount: Number(msg.messageCount),
       },
+    });
+  }
+
+  for (const a of auditRows) {
+    const by = a.actorId && a.actorName ? { id: a.actorId, displayName: a.actorName } : null;
+    const target = a.targetType && a.targetId ? ` ${a.targetType} ${a.targetId}` : "";
+    events.push({
+      type: "audit_action",
+      timestamp: a.createdAt.toISOString(),
+      description: `${by ? by.displayName : "system"}: ${a.action}${target}`,
+      meta: {
+        action: a.action,
+        targetType: a.targetType,
+        targetId: a.targetId,
+        metadata: a.metadata ? JSON.stringify(a.metadata) : null,
+      },
+      actor: by,
     });
   }
 

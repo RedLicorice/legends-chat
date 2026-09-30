@@ -257,6 +257,12 @@ export const messages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // cr-m10: who removed it, and why. Deletion was entirely unrepresented in
+    // the admin activity view because only `deleted_at` was ever written — an
+    // admin could read an E2EE topic, delete the message that revealed it, and
+    // leave no record of who did that anywhere.
+    deletedByUserId: uuid("deleted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    deleteReason: text("delete_reason"),
     hashtags: text("hashtags").array().default(sql`'{}'::text[]`),
     // Matrix m.room.encrypted envelope; populated only on E2EE (Megolm) rows.
     // Mutually exclusive with non-empty content_ciphertext (enforced by

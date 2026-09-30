@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { revokeUserJtis } from "@/lib/auth-revoke";
 import { logDeviceChange } from "@/lib/device-change-log";
+import { AUDIT_ACTIONS, logAdminAction } from "@/lib/audit-log";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
@@ -106,6 +107,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const isAdmin = parsed.data.role === "admin";
     if (wasAdmin !== isAdmin) {
       await logDeviceChange(id, isAdmin ? "admin_grant" : "admin_revoke");
+    }
+    // cr-m10: a role change — including granting admin, which makes the user a
+    // permanent Megolm recipient of every E2EE topic — left no audit trail.
+    if (prior.role !== parsed.data.role) {
+      await logAdminAction({
+        actorUserId: actor.id,
+        action: AUDIT_ACTIONS.USER_ROLE_CHANGE,
+        targetType: "user",
+        targetId: id,
+        metadata: {
+          from: prior.role,
+          to: parsed.data.role,
+          expiresAt: patch.roleExpiresAt instanceof Date ? patch.roleExpiresAt.toISOString() : null,
+          fallback: (patch.roleFallback as string | null | undefined) ?? null,
+        },
+      });
     }
   }
 

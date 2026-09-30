@@ -5,6 +5,7 @@ import { db } from "./db";
 import { redis } from "./redis";
 import { revokeUserJtis } from "./auth-revoke";
 import { publishTopicMembersUpdated } from "./topic-events";
+import { AUDIT_ACTIONS, logAdminAction } from "./audit-log";
 
 /**
  * cr-m9: a ban used to revoke sessions and nothing else. The banned account
@@ -69,6 +70,17 @@ export async function banUser(args: {
   await redis.set(REDIS_KEYS.BAN_CACHE(args.userId), "1", "EX", 60);
   await revokeE2eeTopicMembership(args.userId);
   await redis.publish(REDIS_CHANNELS.USER_BANNED, JSON.stringify({ userId: args.userId }));
+  await logAdminAction({
+    actorUserId: args.bannedByUserId,
+    action: AUDIT_ACTIONS.USER_BAN,
+    targetType: "user",
+    targetId: args.userId,
+    metadata: {
+      reason: args.reason,
+      expiresAt: args.expiresAt?.toISOString() ?? null,
+      sourceFlagId: args.sourceFlagId ?? null,
+    },
+  });
 }
 
 export async function liftBan(banId: string, liftedByUserId: string): Promise<void> {
@@ -80,6 +92,13 @@ export async function liftBan(banId: string, liftedByUserId: string): Promise<vo
     .returning({ userId: userBans.userId });
   if (!row) return;
   await redis.del(REDIS_KEYS.BAN_CACHE(row.userId));
+  await logAdminAction({
+    actorUserId: liftedByUserId,
+    action: AUDIT_ACTIONS.USER_BAN_LIFT,
+    targetType: "user",
+    targetId: row.userId,
+    metadata: { banId },
+  });
 }
 
 export async function muteUser(args: {
@@ -98,4 +117,15 @@ export async function muteUser(args: {
   });
   await redis.set(REDIS_KEYS.MUTE_CACHE(args.userId), "1", "EX", 60);
   await redis.publish(REDIS_CHANNELS.USER_MUTED, JSON.stringify({ userId: args.userId }));
+  await logAdminAction({
+    actorUserId: args.mutedByUserId,
+    action: AUDIT_ACTIONS.USER_MUTE,
+    targetType: "user",
+    targetId: args.userId,
+    metadata: {
+      reason: args.reason,
+      expiresAt: args.expiresAt?.toISOString() ?? null,
+      sourceFlagId: args.sourceFlagId ?? null,
+    },
+  });
 }
