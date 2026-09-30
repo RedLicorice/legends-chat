@@ -94,17 +94,36 @@ export async function POST(req: Request) {
   const maxFileMb = parseInt10(settings.upload_max_size_file_mb, 50);
   const MAX_IMAGE_SIZE = maxImageMb * 1024 * 1024;
   const MAX_FILE_SIZE = maxFileMb * 1024 * 1024;
-  const allowOriginal = (settings.upload_allow_original ?? "true") === "true";
+  // cr-m6: defaults OFF. Metadata stripping is the headline privacy control;
+  // an unset value must not mean "anyone may opt out of it".
+  const allowOriginal = (settings.upload_allow_original ?? "false") === "true";
 
   const form = await req.formData();
   const file = form.get("file") as File | null;
   const bucket = (form.get("bucket") as string | null) ?? "uploads";
-  const preserveOriginal = form.get("preserveOriginal") === "true";
+  const isImageBucket = bucket === "avatars" || bucket === "gifs" || bucket === "uploads";
+
+  // ── cr-m6: the EXIF/GPS opt-out is a privileged action ──────────────────────
+  //
+  // `preserveOriginal` was a bare client-controlled form field, on by default
+  // globally, gated by nothing but a boolean setting — so on a stock deployment
+  // any member could upload photos with full GPS/serial/timestamp intact and
+  // every other member's browser would render them.
+  //
+  // It is only meaningful for the image buckets: the `files` bucket has no
+  // stripping step to opt out of, and the client sends the flag there too, so
+  // gating it unconditionally would break ordinary file attachments.
+  const preserveOriginal = form.get("preserveOriginal") === "true" && isImageBucket;
 
   if (!file) return NextResponse.json({ error: "no file" }, { status: 400 });
 
-  if (preserveOriginal && !allowOriginal) {
-    return NextResponse.json({ error: "originals disabled" }, { status: 403 });
+  if (preserveOriginal) {
+    if (!allowOriginal) {
+      return NextResponse.json({ error: "originals disabled" }, { status: 403 });
+    }
+    if (!user.permissions.has(PERMISSIONS.CONTENT_UPLOAD_ORIGINAL)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
   }
 
   const declaredType = normalizeDeclaredMime(file.type);
@@ -197,8 +216,8 @@ export async function POST(req: Request) {
   //
   // Now: sniff the real container, require the declared type to agree, and use
   // the *sniffed* type for both the extension map and the scanner.
-  const isImageBucket = bucket === "avatars" || bucket === "gifs" || bucket === "uploads";
   let sniffed: string | null = null;
+  let retainedMetadata: string[] = [];
   if (isImageBucket) {
     sniffed = sniffImageMime(buf);
     if (!sniffed || !IMAGE_TYPES.has(sniffed)) {
@@ -224,6 +243,9 @@ export async function POST(req: Request) {
     if (!preserveOriginal && meta.blocking) {
       return NextResponse.json({ error: "image contains metadata", kinds: meta.kinds }, { status: 400 });
     }
+    // cr-m6: the scan now runs on the preserve-original path too, and what it
+    // found is reported back to the uploader rather than silently skipped.
+    retainedMetadata = meta.kinds;
   }
 
   if (preserveOriginal) {
@@ -275,5 +297,8 @@ export async function POST(req: Request) {
     // Report the server-verified type, not the client's claim.
     mimeType: sniffed ?? file.type,
     size: file.size,
+    // Non-empty only on the preserve-original path; the default path rejects
+    // instead of returning anything here.
+    retainedMetadata,
   });
 }

@@ -17,6 +17,11 @@ export const PERMISSIONS = {
   ADMIN_CONFIG: "admin.config",
   CONTENT_ATTACHMENT: "content.attachment",
   CONTENT_GIF_UPLOAD: "content.gif.upload",
+  // cr-m6: opting out of EXIF/GPS stripping used to be a bare client-controlled
+  // form field with no permission gate at all — unlike every other upload
+  // bucket. Not granted to any built-in role by default; hand it out per user
+  // (permission override) or add it to a role deliberately.
+  CONTENT_UPLOAD_ORIGINAL: "content.upload.original",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

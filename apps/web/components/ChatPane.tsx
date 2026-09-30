@@ -450,6 +450,7 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const canCreatePoll = currentUser.role !== "user";
   const canAttach = currentUser.permissions.includes(PERMISSIONS.CONTENT_ATTACHMENT);
   const canUploadGif = currentUser.permissions.includes(PERMISSIONS.CONTENT_GIF_UPLOAD);
+  const canUploadOriginal = currentUser.permissions.includes(PERMISSIONS.CONTENT_UPLOAD_ORIGINAL);
   const canDeleteOwn = currentUser.permissions.includes(PERMISSIONS.MESSAGES_DELETE_OWN);
   const canDeleteAny = currentUser.permissions.includes(PERMISSIONS.MESSAGES_DELETE_ANY);
   const canEditOwn = currentUser.permissions.includes(PERMISSIONS.MESSAGES_EDIT_OWN);
@@ -1492,8 +1493,13 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   async function uploadAsOriginal(file: File): Promise<Attachment | null> {
     // File path: preserve original. Images go to uploads bucket (skip strip),
     // anything else to files bucket.
+    //
+    // cr-m6: skipping EXIF/GPS stripping now needs `content.upload.original`.
+    // Without it the image still uploads through this zone — stripped — rather
+    // than failing with a 403. Non-image attachments have no stripping step, so
+    // they never carry the flag.
     const isImage = file.type.startsWith("image/");
-    return uploadFile(file, isImage ? "uploads" : "files", true);
+    return uploadFile(file, isImage ? "uploads" : "files", isImage && canUploadOriginal);
   }
 
   function isMarkdownFile(file: File): boolean {
@@ -1854,7 +1860,11 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           >
             <FileIcon className="h-10 w-10" />
             <p className="text-base font-semibold text-text">Original quality</p>
-            <p className="text-xs text-muted">Sends as a file attachment for any type</p>
+            <p className="text-xs text-muted">
+              {canUploadOriginal
+                ? "Sends as a file attachment for any type"
+                : "Sends as a file attachment — images are still stripped of location data"}
+            </p>
           </div>
           <div
             onDragEnter={() => setHoverZone("image")}
