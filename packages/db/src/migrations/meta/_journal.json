@@ -337,6 +337,20 @@
       "when": 1780700000000,
       "tag": "0047_dm_participant_cleared_at",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0048_uploads_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1780900000000,
+      "tag": "0049_data_key_domain_separation",
+      "breakpoints": true
     }
   ]
 }

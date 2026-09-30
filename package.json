@@ -11,7 +11,8 @@
     "db:generate": "pnpm --filter @legends/db generate",
     "db:migrate": "pnpm --filter @legends/db migrate",
     "db:seed": "pnpm --filter @legends/db seed",
-    "dev:login": "tsx scripts/dev-login.ts"
+    "dev:login": "tsx scripts/dev-login.ts",
+    "db:sweep": "pnpm --filter @legends/db sweep"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

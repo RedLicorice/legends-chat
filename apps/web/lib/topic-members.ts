@@ -6,11 +6,19 @@
 //
 //   member_user_ids  = topic_members rows for this topic
 //   admin_user_ids   = role=admin, not anon, with at least one userKeyBundle
-//                      uploaded (only when is_e2ee=true; plain topics return
-//                      [] for parity with the route)
+//                      uploaded, and whose role grant has NOT expired (only
+//                      when is_e2ee=true; plain topics return [] for parity
+//                      with the route)
+//
+// cr-m8: the expiry filter is deliberately applied here rather than trusting
+// the scheduled reconciler (packages/db/src/maintenance.ts `sweepExpiredRoles`)
+// to have run. Role expiry used to be enforced only when the expiring user made
+// their own request, so a lapsed temporary admin who simply stopped logging in
+// stayed in `admin_user_ids` forever and kept receiving every Megolm key
+// rotation. Filtering at the read makes a missed sweep fail closed.
 //
 // Bots are excluded — bots cannot participate in Plan D E2EE rooms.
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, isNull, or } from "drizzle-orm";
 import {
   topicMembers,
   topics,
@@ -44,7 +52,14 @@ export async function listTopicCryptoMembers(topicId: string): Promise<TopicCryp
       .select({ id: users.id })
       .from(users)
       .innerJoin(userKeyBundles, eq(userKeyBundles.userId, users.id))
-      .where(and(eq(users.role, "admin"), eq(users.isAnon, false)))
+      .where(
+        and(
+          eq(users.role, "admin"),
+          eq(users.isAnon, false),
+          // Temporary grant still live, or no expiry at all.
+          or(isNull(users.roleExpiresAt), gt(users.roleExpiresAt, new Date())),
+        ),
+      )
       .groupBy(users.id);
     adminUserIds = adminRows.map((r) => r.id).sort();
   }

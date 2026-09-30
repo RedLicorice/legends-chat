@@ -2,7 +2,7 @@ import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import {
   dmConversations, dmParticipants,
-  encryptionKeys, messages, topicBots, topicPrincipalGrants, topics,
+  messages, topicBots, topicPrincipalGrants, topics,
 } from "@legends/db/schema";
 import {
   BOT_E2EE_ERROR_CODES,
@@ -11,7 +11,10 @@ import {
   type GrantEffect,
   type TopicGrant,
 } from "@legends/shared";
-import { encryptMessage, unwrapKey, generateDataKey, wrapKey } from "@legends/crypto";
+import { encryptMessage } from "@legends/crypto";
+// cr-l12: shared, lock-protected key selection — this route used to carry its
+// own copy of the read-then-insert race.
+import { currentDataKey } from "@legends/db/data-keys";
 import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { getBotFromRequest } from "@/lib/bot-auth";
@@ -27,21 +30,6 @@ interface InlineKeyboardButton { text: string; callbackData: string }
 //   - E2EE convo ⇒ ciphertext required (text rejected)
 //   - Plaintext convo ⇒ text required (ciphertext rejected)
 
-let cachedKey: { id: string; data: Uint8Array } | null = null;
-async function currentDataKey(): Promise<{ id: string; data: Uint8Array }> {
-  if (cachedKey) return cachedKey;
-  const { desc } = await import("drizzle-orm");
-  const rows = await db.select().from(encryptionKeys).where(eq(encryptionKeys.purpose, "messages")).orderBy(desc(encryptionKeys.createdAt)).limit(1);
-  if (rows[0]) {
-    cachedKey = { id: rows[0].id, data: unwrapKey(rows[0].wrappedKey) };
-    return cachedKey;
-  }
-  const data = generateDataKey();
-  const { wrapped } = wrapKey(data);
-  const [inserted] = await db.insert(encryptionKeys).values({ purpose: "messages", wrappedKey: wrapped }).returning();
-  cachedKey = { id: inserted!.id, data };
-  return cachedKey;
-}
 
 export async function POST(req: Request) {
   const bot = await getBotFromRequest(req);
@@ -224,7 +212,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
   }
 
-  const key = await currentDataKey();
+  const key = await currentDataKey("messages", db);
   const aad = new TextEncoder().encode(topicId);
   const { ciphertext, nonce } = encryptMessage(key.data, body.text!.trim(), aad);
   const [row] = await db.insert(messages).values({
