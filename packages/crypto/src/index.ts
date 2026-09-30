@@ -63,7 +63,23 @@ export function decryptMessage(
   return new TextDecoder().decode(plain);
 }
 
-export function buildAad(parts: { messageId?: string | bigint; topicId: string; createdAt?: Date }): Uint8Array {
-  const s = `${parts.topicId}|${parts.messageId ?? ""}|${parts.createdAt?.toISOString() ?? ""}`;
-  return new TextEncoder().encode(s);
-}
+// cr-m7: `buildAad({ topicId, messageId, createdAt })` used to live here with
+// ZERO call sites, which made the envelope look like it bound message identity
+// when it does not. Every real caller passes only the scope id as AAD:
+//
+//     const aad = new TextEncoder().encode(topicId);        // topic messages
+//     const aad = new TextEncoder().encode(conversationId); // DMs
+//
+// So what the AEAD actually authenticates is "this ciphertext belongs to this
+// topic/conversation" — NOT which row, which sender, or when. Anyone with
+// direct DB write access can relocate a (content_ciphertext, content_nonce,
+// key_id) triple to another row in the same topic and it decrypts and
+// authenticates perfectly under a different sender and timestamp.
+//
+// The helper is deleted rather than adopted because adopting it is not a
+// crypto-package change: it needs a versioned AAD (so existing rows keep
+// decrypting under the narrower v1 binding) applied at every write and read
+// site, and `messages.id` is a bigserial that doesn't exist until after the
+// INSERT — so binding it needs a two-phase write or a pre-allocated sequence
+// value in each path. Leaving dead code that implies the binding exists is
+// strictly worse than being explicit that it doesn't.
