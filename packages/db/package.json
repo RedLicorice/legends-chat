@@ -10,12 +10,15 @@
     "./schema": "./src/schema.ts",
     "./invites": "./src/invites.ts",
     "./system-settings": "./src/system-settings.ts",
+    "./data-keys": "./src/data-keys.ts",
+    "./maintenance": "./src/maintenance.ts",
     "./system-messages": "./src/system-messages.ts",
     "./dm-key": "./src/dm-key.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
+    "sweep": "tsx src/sweep.ts",
     "seed": "tsx src/seed.ts",
     "test": "vitest",
     "test:run": "vitest run",

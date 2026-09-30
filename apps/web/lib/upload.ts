@@ -19,7 +19,9 @@ const FALLBACK_CONFIG: UploadConfig = {
   uploadResizeCap: DEFAULT_MAX_EDGE,
   uploadJpegQuality: DEFAULT_JPEG_QUALITY,
   uploadMaxSizeImageMb: 10,
-  uploadAllowOriginal: true,
+  // cr-m6: fail closed if /api/register-config is unreachable — never assume
+  // the privacy opt-out is available.
+  uploadAllowOriginal: false,
 };
 
 let configPromise: Promise<UploadConfig> | null = null;

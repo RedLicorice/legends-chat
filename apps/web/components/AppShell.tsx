@@ -41,6 +41,7 @@ import { AdminSymbolsView } from "@/components/views/AdminSymbolsView";
 import { AdminThemesView } from "@/components/views/AdminThemesView";
 import { AdminTopicsView } from "@/components/views/AdminTopicsView";
 import { AdminUsersView } from "@/components/views/AdminUsersView";
+import { NewDeviceAlertBanner } from "@/components/NewDeviceAlertBanner";
 
 /**
  * Single-container persistent SPA shell.
@@ -594,6 +595,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   return (
     <AppShellContext.Provider value={contextValue}>
+      {/* cr-h4: mounted here, not inside ChatPane — a rogue-device signal that
+          arrives while the user is on Settings or the topic list must still be
+          surfaced. Renders nothing until an alert fires. */}
+      <NewDeviceAlertBanner />
       {/* Fixed, fills the viewport (.app-shell in globals.css). No keyboard JS —
           the on-screen keyboard is left to the browser's native behavior. */}
       <div className="app-shell flex">

@@ -1,40 +1,12 @@
-import { desc, eq } from "drizzle-orm";
-import { encryptionKeys, messages } from "./schema";
+import { messages } from "./schema";
 import { db } from "./client";
-import {
-  decryptMessage,
-  encryptMessage,
-  generateDataKey,
-  unwrapKey,
-  wrapKey,
-} from "@legends/crypto";
-
-let cachedKey: { id: string; data: Uint8Array } | null = null;
-
-async function currentDataKey(): Promise<{ id: string; data: Uint8Array }> {
-  if (cachedKey) return cachedKey;
-  const rows = await db
-    .select()
-    .from(encryptionKeys)
-    .where(eq(encryptionKeys.purpose, "messages"))
-    .orderBy(desc(encryptionKeys.createdAt))
-    .limit(1);
-  if (rows[0]) {
-    cachedKey = { id: rows[0].id, data: unwrapKey(rows[0].wrappedKey) };
-    return cachedKey;
-  }
-  const data = generateDataKey();
-  const { wrapped } = wrapKey(data);
-  const [inserted] = await db
-    .insert(encryptionKeys)
-    .values({ purpose: "messages", wrappedKey: wrapped })
-    .returning();
-  cachedKey = { id: inserted!.id, data };
-  return cachedKey;
-}
+import { currentDataKey } from "./data-keys";
+import { encryptMessage } from "@legends/crypto";
 
 export async function insertSystemMessage(topicId: string, text: string): Promise<string> {
-  const key = await currentDataKey();
+  // cr-l12: key selection now lives in ./data-keys (locked create path); this
+  // file used to carry its own copy of the read-then-insert race.
+  const key = await currentDataKey("messages");
   const aad = new TextEncoder().encode(topicId);
   const { ciphertext, nonce } = encryptMessage(key.data, text, aad);
   const [row] = await db

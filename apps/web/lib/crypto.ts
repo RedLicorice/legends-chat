@@ -604,6 +604,9 @@ export async function ensureDmSession(
     const resp = await postJson<unknown>("/api/crypto/keys/claim", claim.body);
     await machine.markRequestAsSent(claim.id, claim.type, JSON.stringify(resp));
   }
+  // 3b) cr-h4: the device list is now fresh from /keys/query — inspect it
+  //     against the pinned baseline before the room key is wrapped for it.
+  await checkForNewDevices([peerMatrixId, selfMatrixId]).catch(() => {});
   // 4) Share the Megolm outbound session for `roomKey`. With step 2's
   //    pump having populated the device list and step 3 having
   //    established the Olm 1:1 sessions, this can now safely wrap the
@@ -650,6 +653,7 @@ async function ensureRoomMembersPeers(matrixIds: string[]): Promise<void> {
   // Single pump drains the KeysQuery scheduled by updateTrackedUsers plus
   // any follow-ups. Routed through the single-flight mutex.
   await pumpOutgoing();
+  await checkForNewDevices(matrixIds).catch(() => {});
 }
 
 // ── Encrypt / decrypt ─────────────────────────────────────────────────────────
@@ -678,10 +682,21 @@ export async function ensureRoomMembers(
   userIds: string[],
 ): Promise<void> {
   const machine = await getMachine();
-  // 1) Make sure we have current device lists for everyone. This schedules
-  //    a KeysQuery internally; we drain it in the single pump at the end.
+  // 1) Make sure we have current device lists for everyone. updateTrackedUsers
+  //    only *schedules* a KeysQuery; the pump below is what actually fetches
+  //    it. This used to be deferred to the single pump at the end, which meant
+  //    both getMissingSessions and shareRoomKey ran against a stale device
+  //    list — and left no point at which the freshly-returned device set could
+  //    be inspected before the room key went out (cr-h4). Ordering now matches
+  //    ensureDmSession: track → query → claim → share.
   const trackUsers = userIds.map((u) => new UserId(toMatrixUserId(u)));
   await machine.updateTrackedUsers(trackUsers);
+  await pumpOutgoing();
+  // 1b) cr-h4: compare the device set /keys/query actually returned against
+  //     the locally pinned baseline, immediately before we wrap the room key
+  //     for it. Detection only — never withholds keys, so it cannot break
+  //     legitimate decryption.
+  await checkForNewDevices(userIds.map(toMatrixUserId)).catch(() => {});
   // 2) Establish Olm 1:1 sessions with every device that's missing one (these
   //    are the channels Megolm room keys ride on). getMissingSessions returns
   //    a KeysClaim request directly — handle it inline.
@@ -864,10 +879,10 @@ export async function pollSync(): Promise<{ newToDeviceCount: number }> {
   await metaPut(cursorKey, body.next_batch);
 
   // #7 interim hardening (Tier A): loudly flag when a tracked user's device
-  // list GAINS a device. With no cross-signing, a compromised server can inject
-  // a rogue device to become a silent Megolm recipient — this makes the event
-  // visible. Detection only (never withholds keys), so it can't break legit
-  // decryption. First sighting of a user establishes a silent TOFU baseline.
+  // list GAINS a device. This sync-driven call is now only a *fast path* — the
+  // authoritative checks run on every session share (see checkForNewDevices),
+  // because `device_lists.changed` is server-controlled and the adversary this
+  // targets can simply omit the entry (cr-h4).
   await checkForNewDevices(rawChanged).catch(() => {});
 
   // Drain follow-up requests (e.g. queued KeysQuery for changed devices,
@@ -881,6 +896,8 @@ export async function pollSync(): Promise<{ newToDeviceCount: number }> {
 
 export interface NewDeviceAlertDetail {
   userMatrixId: string;
+  /** Bare users.id UUID, so the UI can resolve a display name. */
+  userId: string | null;
   /** ed25519 keys (base64) of devices newly seen for this user. */
   newDeviceKeys: string[];
   /** True when the affected account is the local user's own. */
@@ -900,22 +917,42 @@ async function currentDeviceKeys(machine: OlmMachineT, userMatrixId: string): Pr
   return keys.sort();
 }
 
-// For each user whose device list changed, compare against the locally-pinned
-// baseline and dispatch `e2ee:new-device` when a device is ADDED. First sight
-// of a user pins silently (expected first contact); only later additions alert.
-async function checkForNewDevices(changedUserMatrixIds: string[]): Promise<void> {
-  if (changedUserMatrixIds.length === 0) return;
+// Compare the device set the OlmMachine currently holds — i.e. whatever
+// /keys/query actually returned — against the locally-pinned baseline, and
+// dispatch `e2ee:new-device` when a device is ADDED. First sight of a user pins
+// silently (expected first contact); only later additions alert.
+//
+// cr-h4: this used to be driven exclusively by `device_lists.changed` from
+// /api/crypto/sync, which the server populates from its own
+// user_device_change_log. A malicious server — the exact adversary the check
+// exists for — could insert a rogue device into user_key_bundles and simply not
+// write the change-log row: `changed` stayed empty, the pin comparison never
+// ran, and peers still picked the device up via /keys/query and shared the room
+// key to it. It is now also called from every session-share path
+// (ensureRoomMembers / ensureDmSession / ensureRoomMembersPeers) against the
+// device set that is about to receive the key, so omitting the log entry no
+// longer suppresses detection.
+async function checkForNewDevices(userMatrixIds: string[]): Promise<void> {
+  if (userMatrixIds.length === 0) return;
   const machine = await getMachine();
-  const selfId = cachedSession?.userId;
-  for (const uid of changedUserMatrixIds) {
+  // The baseline is keyed by Matrix id; the `isSelf` comparison used to test
+  // the Matrix-formatted id against the BARE uuid (cachedSession.userId), so it
+  // was always false and a new device on the user's own account showed the
+  // weaker "an encrypted contact" copy instead of "your account".
+  const selfMatrixId = cachedSession?.matrixUserId;
+  for (const uid of new Set(userMatrixIds)) {
     let current: string[];
     try {
       current = await currentDeviceKeys(machine, uid);
     } catch {
       continue;
     }
+    // A user we know nothing about yet (no devices returned) must not clobber
+    // an existing baseline with an empty set — that would make the NEXT sight
+    // of their real devices look like an addition we then treat as pinned.
     const key = `known_devices:${uid}`;
     const prev = await metaGet<string[]>(key);
+    if (current.length === 0 && prev !== undefined) continue;
     // Always update the baseline (covers additions + removals) so each new
     // device alerts exactly once.
     await metaPut(key, current);
@@ -924,11 +961,22 @@ async function checkForNewDevices(changedUserMatrixIds: string[]): Promise<void>
     if (added.length > 0 && typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent<NewDeviceAlertDetail>("e2ee:new-device", {
-          detail: { userMatrixId: uid, newDeviceKeys: added, isSelf: uid === selfId },
+          detail: {
+            userMatrixId: uid,
+            userId: bareUserIdFromMatrix(uid),
+            newDeviceKeys: added,
+            isSelf: !!selfMatrixId && uid === selfMatrixId,
+          },
         }),
       );
     }
   }
+}
+
+/** `@<uuid>:legends.local` -> `<uuid>`; null for bot ids and anything else. */
+function bareUserIdFromMatrix(matrixId: string): string | null {
+  const m = matrixId.match(/^@([0-9a-fA-F-]+):legends\.local$/);
+  return m && m[1] ? m[1] : null;
 }
 
 // ── Fingerprints ──────────────────────────────────────────────────────────────

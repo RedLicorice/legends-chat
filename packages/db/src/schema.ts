@@ -31,7 +31,7 @@ const tsvector = customType<{ data: string; default: false }>({
 
 export const autoDeleteMode = pgEnum("auto_delete_mode", ["none", "age", "count"]);
 export const flagStatus = pgEnum("flag_status", ["pending", "dismissed", "actioned"]);
-export const encryptionPurpose = pgEnum("encryption_purpose", ["messages", "attachments"]);
+export const encryptionPurpose = pgEnum("encryption_purpose", ["messages", "attachments", "dm_messages"]);
 
 export const users = pgTable(
   "users",
@@ -257,6 +257,12 @@ export const messages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // cr-m10: who removed it, and why. Deletion was entirely unrepresented in
+    // the admin activity view because only `deleted_at` was ever written — an
+    // admin could read an E2EE topic, delete the message that revealed it, and
+    // leave no record of who did that anywhere.
+    deletedByUserId: uuid("deleted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    deleteReason: text("delete_reason"),
     hashtags: text("hashtags").array().default(sql`'{}'::text[]`),
     // Matrix m.room.encrypted envelope; populated only on E2EE (Megolm) rows.
     // Mutually exclusive with non-empty content_ciphertext (enforced by
@@ -904,5 +910,38 @@ export const dmBlocks = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.blockerUserId, t.blockedUserId] }),
+  }),
+);
+
+// Ledger of every file written by /api/upload.
+//
+// Exists for two reasons (cr-h5):
+//   1. a per-user storage quota needs a cheap SUM(size_bytes) — the filesystem
+//      has no notion of who wrote what;
+//   2. the orphan sweeper needs to know which files are candidates for
+//      deletion and who to attribute them to. Files with no row here (i.e.
+//      uploads predating this table) are never touched by the sweeper.
+//
+// `deletedAt` is the tombstone the sweeper sets once the file is unlinked; the
+// row is kept so an operator can see what was reclaimed and when.
+export const uploads = pgTable(
+  "uploads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    bucket: text("bucket").notNull(),
+    /** Public URL path, e.g. `/uploads/<uuid>.jpg`. Unique. */
+    url: text("url").notNull(),
+    /** Path relative to the upload root, e.g. `avatars/<uuid>.png`. */
+    storagePath: text("storage_path").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    urlIdx: uniqueIndex("uploads_url_idx").on(t.url),
+    userIdx: index("uploads_user_idx").on(t.userId, t.createdAt),
+    sweepIdx: index("uploads_sweep_idx").on(t.deletedAt, t.createdAt),
   }),
 );

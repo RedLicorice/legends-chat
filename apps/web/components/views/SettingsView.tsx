@@ -9,6 +9,7 @@ import { ThemeSelector } from "@/components/ThemeSelector";
 import { SidebarCompactSelector } from "@/components/SidebarCompactSelector";
 import { EmailLinkPanel } from "@/components/EmailLinkPanel";
 import { PasskeyPanel } from "@/components/PasskeyPanel";
+import { SafetyNumberPanel } from "@/components/SafetyNumberPanel";
 import { SettingsClient } from "@/components/SettingsClient";
 import { useMe } from "@/lib/hooks/use-me";
 import { useSettings } from "@/lib/hooks/use-settings";
@@ -61,6 +62,9 @@ export function SettingsView() {
               </div>
               <div className="rounded-xl border border-border bg-panel p-5">
                 <PasskeyPanel />
+              </div>
+              <div className="rounded-xl border border-border bg-panel p-5">
+                <SafetyNumberPanel />
               </div>
             </>
           }

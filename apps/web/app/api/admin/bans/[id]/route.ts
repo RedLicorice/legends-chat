@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@legends/shared";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { liftBan } from "@/lib/moderation";
+import { AUDIT_ACTIONS, logAdminAction } from "@/lib/audit-log";
 
 export async function DELETE(
   req: Request,
@@ -20,7 +21,19 @@ export async function DELETE(
   const { id } = await params;
 
   if (type === "mute") {
-    await db.update(userMutes).set({ liftedAt: new Date(), liftedByUserId: user.id }).where(eq(userMutes.id, id));
+    const [row] = await db
+      .update(userMutes)
+      .set({ liftedAt: new Date(), liftedByUserId: user.id })
+      .where(eq(userMutes.id, id))
+      .returning({ userId: userMutes.userId });
+    // cr-m10: liftBan audits itself; the mute-lift path writes here.
+    await logAdminAction({
+      actorUserId: user.id,
+      action: AUDIT_ACTIONS.USER_MUTE_LIFT,
+      targetType: "user",
+      targetId: row?.userId ?? null,
+      metadata: { muteId: id },
+    });
   } else {
     await liftBan(id, user.id);
   }

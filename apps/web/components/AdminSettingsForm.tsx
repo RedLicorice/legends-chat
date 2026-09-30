@@ -75,7 +75,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [registrationMode, setRegistrationMode] = useState<string>(settings.registration_mode ?? "telegram_only");
   const [requirePasskey, setRequirePasskey] = useState(settings.require_passkey_at_registration === "true");
   const [magicLinkDisabled, setMagicLinkDisabled] = useState(settings.magic_link_login_disabled === "true");
-  const [e2eeAdminDisclosure, setE2eeAdminDisclosure] = useState(settings.e2ee_admin_disclosure === "true");
+  const [e2eeAdminDisclosure, setE2eeAdminDisclosure] = useState((settings.e2ee_admin_disclosure ?? "true") === "true");
   const [defaultTopicId, setDefaultTopicId] = useState(settings.default_topic_id ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcome_message ?? "Welcome, {nickname}!");
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
@@ -95,7 +95,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [uploadJpegQuality, setUploadJpegQuality] = useState(settings.upload_jpeg_quality ?? "85");
   const [uploadMaxSizeImageMb, setUploadMaxSizeImageMb] = useState(settings.upload_max_size_image_mb ?? "10");
   const [uploadMaxSizeFileMb, setUploadMaxSizeFileMb] = useState(settings.upload_max_size_file_mb ?? "50");
-  const [uploadAllowOriginal, setUploadAllowOriginal] = useState((settings.upload_allow_original ?? "true") === "true");
+  const [uploadAllowOriginal, setUploadAllowOriginal] = useState((settings.upload_allow_original ?? "false") === "true");
   const [uploadOriginalPerHour, setUploadOriginalPerHour] = useState(settings.upload_original_per_hour ?? "10");
   const [uploadOriginalPerDay, setUploadOriginalPerDay] = useState(settings.upload_original_per_day ?? "50");
   const [shlinkEnabled, setShlinkEnabled] = useState(settings.shlink_enabled === "true");
@@ -403,7 +403,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
         <Field label="Allow native-resolution uploads">
           <label className="flex cursor-pointer items-center gap-3">
             <Toggle checked={uploadAllowOriginal} onChange={setUploadAllowOriginal} />
-            <span className="text-sm">{uploadAllowOriginal ? "Users may opt to keep originals (rate-limited)" : "All uploads stripped and resized"}</span>
+            <span className="text-sm">{uploadAllowOriginal ? "Users with content.upload.original may keep originals (rate-limited)" : "All uploads stripped and resized"}</span>
           </label>
         </Field>
         <Field label="Originals per hour">

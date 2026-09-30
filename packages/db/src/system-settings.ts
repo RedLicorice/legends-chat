@@ -30,6 +30,13 @@ export type SystemSettingKey =
   | "upload_allow_original"
   | "upload_original_per_hour"
   | "upload_original_per_day"
+  // unconditional upload limits (cr-h5) — these apply to every bucket and
+  // every upload, not just to the preserve-original opt-out
+  | "upload_per_hour"
+  | "upload_per_day"
+  | "upload_bytes_per_day_mb"
+  | "upload_quota_mb"
+  | "upload_orphan_grace_hours"
   | "banner_in_topics"
   | "banner_topic_height"
   | "banner_topic_overlap"

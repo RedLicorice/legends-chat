@@ -64,10 +64,14 @@ interface ActivityEvent {
     | "mute_applied"
     | "mute_lifted"
     | "topic_joined"
-    | "message_activity";
+    | "message_activity"
+    // cr-m10: rows from the real audit_log table (message deletes, role
+    // changes, settings updates, invite creation…).
+    | "audit_action";
   timestamp: string;
   description: string;
   meta?: Record<string, string | number | null>;
+  actor?: { id: string; displayName: string } | null;
 }
 
 const ROLES = ["user", "moderator", "admin"] as const;

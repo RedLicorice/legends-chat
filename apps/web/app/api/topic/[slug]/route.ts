@@ -67,7 +67,12 @@ export async function GET(
       // When the admin-disclosure setting is on, E2EE topics tell members that
       // platform admins are also key recipients (see SECURITY_AUDIT #6). Only
       // meaningful for E2EE topics.
-      adminReadsE2ee: topic.isE2ee && adminDisclosureSetting === "true",
+      //
+      // cr-l14: DEFAULTS ON. There was no default, so a fresh deployment
+      // rendered a plain "encrypted" pill with no admin-read indicator even
+      // though admins were already recipients. Disclosure is the whole basis on
+      // which that design was accepted, so an unset value must mean "disclose".
+      adminReadsE2ee: topic.isE2ee && (adminDisclosureSetting ?? "true") === "true",
     },
     mute: mute ? { reason: mute.reason, expiresAt: mute.expiresAt?.toISOString() ?? null } : null,
     hasPasskey: passkeyCount > 0,

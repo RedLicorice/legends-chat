@@ -9,6 +9,7 @@ import { decryptMessage, unwrapKey } from "@legends/crypto";
 import { REDIS_CHANNELS } from "@legends/shared";
 import { db } from "./db";
 import { redis } from "./redis";
+import { AUDIT_ACTIONS, logAdminAction } from "./audit-log";
 
 export interface ModerationFlagRow {
   id: string;
@@ -98,11 +99,35 @@ export async function resolveFlag(args: {
     .where(and(eq(messageFlags.id, args.flagId), eq(messageFlags.status, "pending")));
 }
 
-export async function softDeleteMessage(messageId: string): Promise<void> {
-  await db
+/**
+ * cr-m10: records WHO deleted the message and why. Every delete path used to
+ * write `deleted_at` alone, so message deletion was unrepresented in the admin
+ * activity view and the actor was unrecoverable.
+ */
+export async function softDeleteMessage(
+  messageId: string,
+  actor?: { userId: string; reason?: string | null },
+): Promise<void> {
+  const [row] = await db
     .update(messages)
-    .set({ deletedAt: new Date() })
-    .where(eq(messages.id, BigInt(messageId)));
+    .set({
+      deletedAt: new Date(),
+      deletedByUserId: actor?.userId ?? null,
+      deleteReason: actor?.reason ?? null,
+    })
+    .where(eq(messages.id, BigInt(messageId)))
+    .returning({ topicId: messages.topicId, senderUserId: messages.senderUserId });
+  await logAdminAction({
+    actorUserId: actor?.userId ?? null,
+    action: AUDIT_ACTIONS.MESSAGE_DELETE,
+    targetType: "message",
+    targetId: messageId,
+    metadata: {
+      topicId: row?.topicId ?? null,
+      senderUserId: row?.senderUserId ?? null,
+      reason: actor?.reason ?? null,
+    },
+  });
 }
 
 export async function publishPendingFlagCount(): Promise<void> {

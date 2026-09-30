@@ -18,7 +18,8 @@ export async function GET() {
   const jpegQ = parseInt(settings.upload_jpeg_quality ?? "85", 10);
   const uploadJpegQuality = Math.min(1, Math.max(0.01, (Number.isFinite(jpegQ) ? jpegQ : 85) / 100));
   const uploadMaxSizeImageMb = parseInt(settings.upload_max_size_image_mb ?? "10", 10) || 10;
-  const uploadAllowOriginal = (settings.upload_allow_original ?? "true") === "true";
+  // cr-m6: defaults OFF.
+  const uploadAllowOriginal = (settings.upload_allow_original ?? "false") === "true";
 
   return NextResponse.json({
     invitesRequired,

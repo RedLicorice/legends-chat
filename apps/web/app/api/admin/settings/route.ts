@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { getAllSettings, setSetting } from "@legends/db/system-settings";
 import { topics } from "@legends/db/schema";
 import { asc } from "drizzle-orm";
+import { AUDIT_ACTIONS, logAdminAction } from "@/lib/audit-log";
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -63,6 +64,11 @@ export async function PATCH(req: Request) {
     "upload_allow_original",
     "upload_original_per_hour",
     "upload_original_per_day",
+    "upload_per_hour",
+    "upload_per_day",
+    "upload_bytes_per_day_mb",
+    "upload_quota_mb",
+    "upload_orphan_grace_hours",
     "shlink_enabled",
     "shlink_host",
     "shlink_api_key",
@@ -74,11 +80,37 @@ export async function PATCH(req: Request) {
     "external_link_whitelist",
   ] as const;
 
+  // cr-m10: ~30 allowlisted keys (including e2ee_admin_disclosure,
+  // registration_mode, turn_credential and upload_allow_original) used to be
+  // rewritable with no record of who changed what. Capture before/after for
+  // every key actually touched.
+  const before = await getAllSettings(db);
+  const changed: Record<string, { from: string | null; to: string | null }> = {};
+  const SECRET_KEYS = new Set(["turn_credential", "giphy_api_key", "shlink_api_key"]);
+
   for (const key of allowed) {
     if (key in body) {
       const val = body[key];
-      await setSetting(db, key, val ?? null);
+      const prev = before[key] ?? null;
+      const next = val ?? null;
+      if (prev !== next) {
+        // Never copy a secret's value into the audit row; record that it moved.
+        changed[key] = SECRET_KEYS.has(key)
+          ? { from: prev === null ? null : "<redacted>", to: next === null ? null : "<redacted>" }
+          : { from: prev, to: next };
+      }
+      await setSetting(db, key, next);
     }
+  }
+
+  if (Object.keys(changed).length > 0) {
+    await logAdminAction({
+      actorUserId: user.id,
+      action: AUDIT_ACTIONS.SETTINGS_UPDATE,
+      targetType: "system_settings",
+      targetId: null,
+      metadata: { changed },
+    });
   }
 
   revalidatePath("/", "layout");

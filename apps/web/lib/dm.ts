@@ -1,37 +1,19 @@
 import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
-import { dmConversations, dmParticipants, dmMessages, dmBlocks, encryptionKeys, users, bots } from "@legends/db/schema";
-import { generateDataKey, wrapKey, unwrapKey, encryptMessage, decryptMessage } from "@legends/crypto";
+import { dmConversations, dmParticipants, dmMessages, dmBlocks, users, bots } from "@legends/db/schema";
+import { encryptMessage, decryptMessage } from "@legends/crypto";
+import { currentDataKey, getDataKeyById } from "@legends/db/data-keys";
 import { buildDmKey } from "@legends/db/dm-key";
 import { BOT_E2EE_ERROR_CODES } from "@legends/shared";
 import { db } from "@/lib/db";
 import { encodeDmContent, decodeDmContent } from "@/lib/dm.codec";
 import { toMatrixRoomId } from "@/lib/crypto-matrix";
 
-// ── data key (cached) — mirrors apps/ws/src/messages.ts currentDataKey ────────
-let cachedKey: { id: string; data: Uint8Array } | null = null;
-async function currentDataKey(): Promise<{ id: string; data: Uint8Array }> {
-  if (cachedKey) return cachedKey;
-  const rows = await db.select().from(encryptionKeys).where(eq(encryptionKeys.purpose, "messages")).orderBy(desc(encryptionKeys.createdAt)).limit(1);
-  if (rows[0]) {
-    cachedKey = { id: rows[0].id, data: unwrapKey(rows[0].wrappedKey) };
-    return cachedKey;
-  }
-  const data = generateDataKey();
-  const { wrapped } = wrapKey(data);
-  const [inserted] = await db.insert(encryptionKeys).values({ purpose: "messages", wrappedKey: wrapped }).returning();
-  cachedKey = { id: inserted!.id, data };
-  return cachedKey;
-}
-const keyDataCache = new Map<string, Uint8Array>();
-async function getKeyData(keyId: string): Promise<Uint8Array> {
-  const hit = keyDataCache.get(keyId);
-  if (hit) return hit;
-  const [row] = await db.select().from(encryptionKeys).where(eq(encryptionKeys.id, keyId)).limit(1);
-  if (!row) throw new Error("encryption key not found");
-  const data = unwrapKey(row.wrappedKey);
-  keyDataCache.set(keyId, data);
-  return data;
-}
+// ── data key ─────────────────────────────────────────────────────────────────
+// cr-l12: key selection is shared (@legends/db/data-keys) instead of being a
+// fourth copy of the same read-then-insert race. DMs now write under their own
+// `dm_messages` purpose for domain separation — existing rows keep their
+// recorded key_id and keep decrypting through getDataKeyById unchanged.
+const DM_KEY_PURPOSE = "dm_messages" as const;
 
 export type DmMessageView = {
   id: string;
@@ -301,7 +283,7 @@ export async function listMessages(conversationId: string, beforeId?: string, li
       // E2EE row: server cannot decrypt; client handles.
       ciphertext = r.ciphertextJson;
     } else {
-      const keyData = await getKeyData(r.keyId);
+      const keyData = await getDataKeyById(r.keyId, db);
       const aad = new TextEncoder().encode(conversationId);
       const raw = decryptMessage(keyData, r.contentCiphertext, r.contentNonce, aad);
       text = decodeDmContent(raw);
@@ -334,7 +316,7 @@ export async function insertDmMessage(args: {
   if ((args.text == null) === (args.ciphertext == null)) {
     throw new Error("insertDmMessage: provide exactly one of `text` or `ciphertext`");
   }
-  const key = await currentDataKey();
+  const key = await currentDataKey(DM_KEY_PURPOSE, db);
   let contentCiphertext: Uint8Array;
   let contentNonce: Uint8Array;
   if (args.ciphertext) {

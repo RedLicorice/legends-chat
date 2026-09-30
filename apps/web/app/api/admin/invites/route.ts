@@ -12,6 +12,7 @@ import {
 import { getSetting } from "@legends/db/system-settings";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { AUDIT_ACTIONS, logAdminAction } from "@/lib/audit-log";
 
 const bodySchema = z.object({
   role: z.enum(["user", "moderator", "admin"]).default("user"),
@@ -108,6 +109,20 @@ export async function POST(req: NextRequest) {
       notes: notes ?? null,
     })
     .returning();
+  // cr-m10: invite creation — including elevated-role invites — left no record
+  // of who minted the code. The code itself is deliberately NOT stored in the
+  // audit row; the invite_codes row already holds it.
+  await logAdminAction({
+    actorUserId: user.id,
+    action: AUDIT_ACTIONS.INVITE_CREATE,
+    targetType: "invite",
+    targetId: row?.id ?? null,
+    metadata: {
+      role,
+      maxUses: maxUses ?? null,
+      expiresAt: resolvedExpiresAt ? new Date(resolvedExpiresAt).toISOString() : null,
+    },
+  });
   return NextResponse.json({ invite: row });
 }
 
