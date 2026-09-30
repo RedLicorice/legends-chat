@@ -23,7 +23,6 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { TopicInfoModal } from "@/components/TopicInfoModal";
 import { EncryptedMessageContent } from "@/components/EncryptedMessageContent";
 import { EncryptedReasonModal, type EncryptedReason } from "@/components/EncryptedReasonModal";
-import { NewDeviceAlertBanner } from "@/components/NewDeviceAlertBanner";
 import { verifyRecipientSet } from "@/lib/e2ee-recipients";
 import { SafetyNumberModal } from "@/components/SafetyNumberModal";
 import type { SafetyTarget } from "@/lib/safety-number";
@@ -1898,8 +1897,6 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
           }}
         />
       )}
-
-      <NewDeviceAlertBanner />
 
       <header className="chat-header relative z-10 flex shrink-0 items-center gap-3 border-b border-border bg-panel px-4 pb-2.5 pt-[calc(0.75rem+var(--sat)+var(--kb-offset,0px))] md:px-6">
         <button
