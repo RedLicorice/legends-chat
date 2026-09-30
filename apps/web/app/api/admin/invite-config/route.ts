@@ -19,6 +19,7 @@ export async function GET() {
 
   return NextResponse.json({
     invitesEnabled: regCfg[0]?.invitesEnabled ?? true,
+    publicRegistrationEnabled: regCfg[0]?.publicRegistrationEnabled ?? false,
     quotas: Object.fromEntries(quotas.map((q) => [q.role, q.dailyLimit])),
     codePrefix: codePrefix ?? "LGND",
   });
@@ -31,15 +32,32 @@ export async function PATCH(req: Request) {
 
   const body = await req.json() as {
     invitesEnabled?: boolean;
+    publicRegistrationEnabled?: boolean;
     quotas?: { user?: number | null; moderator?: number | null; admin?: number | null };
     codePrefix?: string;
   };
 
-  if (typeof body.invitesEnabled === "boolean") {
+  // `publicRegistrationEnabled` had no admin API at all — it could only ever
+  // be its schema default (false) — while the toggle that actually opened
+  // signup was `invitesEnabled`. Both are settable here now, and both are
+  // enforced by /api/auth/register and the Telegram bot, so what the console
+  // shows is what the server does.
+  if (typeof body.invitesEnabled === "boolean" || typeof body.publicRegistrationEnabled === "boolean") {
+    const set: { invitesEnabled?: boolean; publicRegistrationEnabled?: boolean; updatedAt: Date } = {
+      updatedAt: new Date(),
+    };
+    if (typeof body.invitesEnabled === "boolean") set.invitesEnabled = body.invitesEnabled;
+    if (typeof body.publicRegistrationEnabled === "boolean") {
+      set.publicRegistrationEnabled = body.publicRegistrationEnabled;
+    }
     await db
       .insert(registrationConfig)
-      .values({ id: 1, invitesEnabled: body.invitesEnabled, publicRegistrationEnabled: false })
-      .onConflictDoUpdate({ target: registrationConfig.id, set: { invitesEnabled: body.invitesEnabled, updatedAt: new Date() } });
+      .values({
+        id: 1,
+        invitesEnabled: body.invitesEnabled ?? true,
+        publicRegistrationEnabled: body.publicRegistrationEnabled ?? false,
+      })
+      .onConflictDoUpdate({ target: registrationConfig.id, set });
   }
 
   if (body.quotas) {

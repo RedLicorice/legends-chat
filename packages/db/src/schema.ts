@@ -733,6 +733,33 @@ export const totpSecrets = pgTable("totp_secrets", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Single-use TOTP recovery codes, issued once when 2FA enrolment is confirmed
+// and shown to the user exactly once. Without them, losing the authenticator
+// app means permanent lockout — this deployment has no password-reset flow.
+//
+// Only the hash is stored (SHA-256, unsalted: the codes are 50 bits of
+// server-generated randomness, not user-chosen secrets, so they aren't
+// dictionary-attackable and the digest is just a lookup key). A code is spent
+// by stamping `used_at`; rows are kept rather than deleted so the user can be
+// told how many are left, and the whole set is dropped when 2FA is disabled or
+// re-enrolled.
+export const totpRecoveryCodes = pgTable(
+  "totp_recovery_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("totp_recovery_codes_user_idx").on(t.userId),
+    lookupIdx: uniqueIndex("totp_recovery_codes_lookup_idx").on(t.userId, t.codeHash),
+  }),
+);
+
 // Append-only audit of crypto-relevant device changes per user. Drives
 // OlmMachine.receive_sync_changes invalidation: every time a user's device
 // list materially changes (keys upload, topic join/leave, admin grant/revoke),

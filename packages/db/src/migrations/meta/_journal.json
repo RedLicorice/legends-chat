@@ -337,6 +337,13 @@
       "when": 1780700000000,
       "tag": "0047_dm_participant_cleared_at",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0048_totp_recovery_codes",
+      "breakpoints": true
     }
   ]
 }

@@ -7,8 +7,16 @@ import { issueSession, setAuthCookies } from "@/lib/auth";
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/browser";
 import { getRpConfig } from "@/lib/passkey";
+import { clientIp, enforceRateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  // This was the only POST under /api/auth/* with no limiter at all. It takes
+  // a userId straight from the body, so while it isn't exploitable without the
+  // matching Redis challenge, unthrottled it is still a free existence oracle
+  // (and free Redis lookups). Same bucket as its parent route.
+  const limited = await enforceRateLimit(`auth:tg-register:ip:${clientIp(req)}`, 20, 900);
+  if (limited) return limited;
+
   const body = await req.json() as {
     userId: string;
     passkeyResponse: RegistrationResponseJSON;

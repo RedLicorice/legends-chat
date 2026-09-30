@@ -22,6 +22,13 @@ function challengeKey(sessionId: string): string {
 }
 
 export async function GET(req: Request) {
+  // Same bucket as the POST below. This route is public and every call writes
+  // a fresh Redis key with a 300 s TTL, so leaving it unthrottled let anyone
+  // create unbounded keys — memory pressure on the very Redis the rate limiter
+  // depends on.
+  const limited = await enforceRateLimit(`auth:passkey:ip:${clientIp(req)}`, 30, 900);
+  if (limited) return limited;
+
   const { rpID } = getRpConfig(req.headers.get("origin"), req.headers.get("host"));
 
   const options = await generateAuthenticationOptions({

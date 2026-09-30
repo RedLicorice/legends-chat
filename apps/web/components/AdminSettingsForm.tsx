@@ -510,6 +510,7 @@ const ROLES = ["user", "moderator", "admin"] as const;
 
 function InviteConfigSection() {
   const [invitesEnabled, setInvitesEnabled] = useState(true);
+  const [publicRegistrationEnabled, setPublicRegistrationEnabled] = useState(false);
   const [quotas, setQuotas] = useState<Record<string, number>>({ user: 1, moderator: 10, admin: 100 });
   const [codePrefix, setCodePrefix] = useState("LGND");
   const [saving, setSaving] = useState(false);
@@ -519,8 +520,14 @@ function InviteConfigSection() {
   useEffect(() => {
     apiFetch("/api/admin/invite-config")
       .then((r) => r.json())
-      .then((d: { invitesEnabled: boolean; quotas: Record<string, number>; codePrefix?: string }) => {
+      .then((d: {
+        invitesEnabled: boolean;
+        publicRegistrationEnabled?: boolean;
+        quotas: Record<string, number>;
+        codePrefix?: string;
+      }) => {
         setInvitesEnabled(d.invitesEnabled);
+        setPublicRegistrationEnabled(d.publicRegistrationEnabled ?? false);
         setQuotas((prev) => ({ ...prev, ...d.quotas }));
         if (d.codePrefix) setCodePrefix(d.codePrefix);
       })
@@ -535,7 +542,12 @@ function InviteConfigSection() {
       const res = await apiFetch("/api/admin/invite-config", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ invitesEnabled, quotas, codePrefix: codePrefix.trim() || "LGND" }),
+        body: JSON.stringify({
+          invitesEnabled,
+          publicRegistrationEnabled,
+          quotas,
+          codePrefix: codePrefix.trim() || "LGND",
+        }),
       });
       if (!res.ok) throw new Error("save failed");
       setSaved(true);
@@ -554,6 +566,24 @@ function InviteConfigSection() {
           <span className="text-sm">{invitesEnabled ? "Invite code required" : "Anyone can register without invite"}</span>
         </label>
         <p className="mt-1 text-xs text-muted">When enabled, new users must present a valid invite code during registration.</p>
+      </Field>
+      <Field label="Allow registration without an invite">
+        <label className="flex cursor-pointer items-center gap-3">
+          <Toggle checked={publicRegistrationEnabled} onChange={setPublicRegistrationEnabled} />
+          <span className="text-sm">
+            {publicRegistrationEnabled ? "Open signup allowed" : "Open signup blocked"}
+          </span>
+        </label>
+        <p className="mt-1 text-xs text-muted">
+          Only consulted when invite codes are <em>not</em> required. With invites off and this off
+          too, nobody can register — which is the safe default. Turning both off means fully open,
+          unauthenticated signup (email and Telegram alike), protected only by rate limiting.
+        </p>
+        {!invitesEnabled && publicRegistrationEnabled && (
+          <p className="mt-1 text-xs text-danger">
+            Anyone on the internet can currently create an account.
+          </p>
+        )}
       </Field>
       <Field label="Invite code prefix">
         <div className="flex items-center gap-2">
