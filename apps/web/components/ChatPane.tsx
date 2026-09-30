@@ -24,6 +24,7 @@ import { TopicInfoModal } from "@/components/TopicInfoModal";
 import { EncryptedMessageContent } from "@/components/EncryptedMessageContent";
 import { EncryptedReasonModal, type EncryptedReason } from "@/components/EncryptedReasonModal";
 import { NewDeviceAlertBanner } from "@/components/NewDeviceAlertBanner";
+import { verifyRecipientSet } from "@/lib/e2ee-recipients";
 import type { IncomingEnvelope } from "@/lib/crypto";
 import { HashtagClickContext } from "@/contexts/HashtagClickContext";
 import { useSymbols } from "@/contexts/SymbolsContext";
@@ -379,6 +380,10 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
   const e2eeRoomId = roomKey;
   const [memberUserIds, setMemberUserIds] = useState<string[]>([]);
   const [adminUserIds, setAdminUserIds] = useState<string[]>([]);
+  // cr-h2: non-empty when the server asked us to share the room key with ids
+  // that are in neither the Members roster nor the disclosed admin set.
+  const [e2eeRecipientMismatch, setE2eeRecipientMismatch] = useState<string[] | null>(null);
+  const e2eeRecipientMismatchRef = useRef<string[] | null>(null);
   const [adminDisplayNames, setAdminDisplayNames] = useState<Map<string, string>>(new Map());
   const memberUserIdsRef = useRef<string[]>([]);
   useEffect(() => { memberUserIdsRef.current = memberUserIds; }, [memberUserIds]);
@@ -630,16 +635,57 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
     ensureCrypto().catch(() => {});
   }, [isE2ee, ensureCrypto]);
 
-  const refreshRoomMembers = useCallback(async () => {
-    if (!isTopicMode || !isE2ee || !e2eeRoomId) return;
+  // cr-h2: NEVER take the Megolm recipient set from the server verbatim.
+  //
+  // We fetch the crypto members endpoint AND the independent Members-panel
+  // roster, compute `roster ∪ admin_user_ids` ourselves, and drop anything the
+  // server asked us to encrypt to that falls outside it. A rejection is a hard
+  // error surfaced in the UI (not a console log) — it means the server tried to
+  // insert a recipient that neither the roster nor the disclosure banner names.
+  const refreshRoomMembers = useCallback(async (): Promise<string[] | null> => {
+    if (!isTopicMode || !isE2ee || !e2eeRoomId || !topic) return null;
     try {
-      const r = await apiFetch(`/api/crypto/rooms/${encodeURIComponent(e2eeRoomId)}/members`);
-      if (!r.ok) return;
-      const d = (await r.json()) as { user_ids: string[]; member_user_ids: string[]; admin_user_ids: string[] };
-      setMemberUserIds(d.user_ids);
-      setAdminUserIds(d.admin_user_ids);
+      const [cryptoRes, rosterRes] = await Promise.all([
+        apiFetch(`/api/crypto/rooms/${encodeURIComponent(e2eeRoomId)}/members`),
+        apiFetch(`/api/topics/${encodeURIComponent(topic.id)}/members`),
+      ]);
+      if (!cryptoRes.ok || !rosterRes.ok) return null;
+      const d = (await cryptoRes.json()) as { user_ids: string[]; member_user_ids: string[]; admin_user_ids: string[] };
+      const roster = (await rosterRes.json()) as { id: string }[];
+      const rosterIds = Array.isArray(roster) ? roster.map((m) => m.id) : [];
+
+      const verdict = verifyRecipientSet({
+        serverUserIds: d.user_ids,
+        rosterUserIds: rosterIds,
+        adminUserIds: d.admin_user_ids,
+        selfUserId: currentUser.id,
+      });
+      if (!verdict.ok) {
+        console.error("[e2ee] server proposed undisclosed recipients", {
+          topicId: topic.id,
+          rejected: verdict.rejected,
+        });
+        e2eeRecipientMismatchRef.current = verdict.rejected;
+        setE2eeRecipientMismatch(verdict.rejected);
+      } else {
+        e2eeRecipientMismatchRef.current = null;
+        setE2eeRecipientMismatch(null);
+      }
+      // Keep the ref in lock-step with the state: callers that need the
+      // verified set immediately after awaiting this can't wait for React to
+      // flush the effect below.
+      memberUserIdsRef.current = verdict.recipients;
+      setMemberUserIds(verdict.recipients);
+      setAdminUserIds(verdict.disclosedAdminIds);
+      return verdict.recipients;
     } catch { /* network blip — retry on next member change */ }
-  }, [isTopicMode, isE2ee, e2eeRoomId]);
+    return null;
+  }, [isTopicMode, isE2ee, e2eeRoomId, topic, currentUser.id]);
+
+  // Stable handle for the socket subscription, which must not re-subscribe
+  // every time this callback's identity changes.
+  const refreshRoomMembersRef = useRef(refreshRoomMembers);
+  useEffect(() => { refreshRoomMembersRef.current = refreshRoomMembers; }, [refreshRoomMembers]);
 
   useEffect(() => {
     refreshRoomMembers();
@@ -842,13 +888,15 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         const onSymbols = () => { refetchSymbols(); };
         const onMembers = async (payload: { topicId: string; action: "join" | "leave"; affectedUserId: string; memberUserIds: string[]; adminUserIds: string[] }) => {
           if (!active || !topic || payload.topicId !== topic.id) return;
-          setMemberUserIds(Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds])).sort());
-          setAdminUserIds(payload.adminUserIds);
+          // cr-h2: the WS payload is the same untrusted recipient set as the
+          // REST one, so don't reshare off it. Re-derive the verified set
+          // (roster ∪ disclosed admins) and reshare to THAT.
+          const verified = (await refreshRoomMembersRef.current()) ?? memberUserIdsRef.current;
+          if (!active) return;
           const cc = chatCryptoRef.current;
           if (!cc?.onMembershipChange) return;
-          const fullMembers = Array.from(new Set([...payload.memberUserIds, ...payload.adminUserIds]));
           try {
-            await cc.onMembershipChange(payload.action, payload.affectedUserId, fullMembers);
+            await cc.onMembershipChange(payload.action, payload.affectedUserId, verified);
           } catch (err) {
             console.error("[e2ee] onMembershipChange failed", { topicId: payload.topicId, err });
           }
@@ -1064,6 +1112,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
       let envelope: Record<string, unknown>;
       try {
         await refreshRoomMembers();
+        // cr-h2: refuse to encrypt at all while the server is proposing
+        // recipients outside the roster ∪ disclosed-admin set.
+        if (e2eeRecipientMismatchRef.current) {
+          setE2eeError("Encryption paused: the server listed a recipient who isn't a member of this channel.");
+          return;
+        }
         await cc.ensureSession(memberUserIdsRef.current);
         envelope = (await cc.encrypt(text)) as unknown as Record<string, unknown>;
       } catch (err) {
@@ -1562,6 +1616,12 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
       }
       try {
         await refreshRoomMembers();
+        // cr-h2: refuse to encrypt at all while the server is proposing
+        // recipients outside the roster ∪ disclosed-admin set.
+        if (e2eeRecipientMismatchRef.current) {
+          setE2eeError("Encryption paused: the server listed a recipient who isn't a member of this channel.");
+          return;
+        }
         await cc.ensureSession(memberUserIdsRef.current);
         const envelope = await cc.encrypt(processed);
         ciphertextEnvelope = envelope as unknown as Record<string, unknown>;
@@ -1931,6 +1991,36 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
         )}
       </header>
 
+      {/* cr-l14: the E2EE disclosure used to be the first child of the
+          SCROLLING message list, so it scrolled away and was absent whenever
+          the user was at the latest message — despite the whitepaper calling it
+          a "non-dismissible banner inside the channel". It is pinned chrome now.
+          cr-h2: the recipient-mismatch banner sits above it because it means we
+          have stopped encrypting entirely. */}
+      {isE2ee && e2eeRecipientMismatch && e2eeRecipientMismatch.length > 0 && (
+        <div role="alert" className="shrink-0 border-b border-danger/40 bg-danger/10 px-4 py-2 text-xs text-danger md:px-6">
+          <span className="font-medium">Encryption paused.</span>{" "}
+          The server asked this device to share the channel key with{" "}
+          {e2eeRecipientMismatch.length === 1 ? "an account" : `${e2eeRecipientMismatch.length} accounts`}{" "}
+          that {e2eeRecipientMismatch.length === 1 ? "is" : "are"} neither in the member list nor disclosed as an admin.
+          Nothing was shared with {e2eeRecipientMismatch.length === 1 ? "it" : "them"}. Report this to an admin.
+        </div>
+      )}
+      {isE2ee && (
+        <div className="shrink-0 border-b border-border bg-panel2 px-4 py-2 text-xs text-muted md:px-6">
+          <span aria-hidden="true">🔒</span>{" "}
+          <span className="font-medium text-text">End-to-end encrypted.</span>{" "}
+          {isTopicMode ? (
+            <>
+              Visible to admins: <span className="text-text">{adminListLabel}</span>.{" "}
+              New members will NOT see prior messages.
+            </>
+          ) : (
+            <>Only you and the other participant can read these messages.</>
+          )}
+        </div>
+      )}
+
       {showDeleteConfirm && (
         <div
           className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 md:items-center"
@@ -2162,14 +2252,6 @@ export function ChatPane({ user: currentUser, mode, source, chatCrypto, highligh
             width on a wide desktop scatters bubbles and opens a dead centre
             channel. Scrollbar stays at the pane edge; content centres. */}
         <div className={cn("mx-auto w-full max-w-3xl", isFeed ? "space-y-4" : "space-y-1")}>
-        {isE2ee && (
-          <div className="mb-3 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
-            <span aria-hidden="true">🔒</span>{" "}
-            <span className="font-medium text-text">End-to-end encrypted.</span>{" "}
-            Visible to admins: <span className="text-text">{adminListLabel}</span>.{" "}
-            New members will NOT see prior messages.
-          </div>
-        )}
         {isE2ee && e2eeSetupNeeded && !e2eeReady && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-panel2 px-3 py-2 text-xs text-muted">
             <span>Enable encryption to read and send messages in this topic.</span>

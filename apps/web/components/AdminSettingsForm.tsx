@@ -75,7 +75,7 @@ export function AdminSettingsForm({ settings, topics }: Props) {
   const [registrationMode, setRegistrationMode] = useState<string>(settings.registration_mode ?? "telegram_only");
   const [requirePasskey, setRequirePasskey] = useState(settings.require_passkey_at_registration === "true");
   const [magicLinkDisabled, setMagicLinkDisabled] = useState(settings.magic_link_login_disabled === "true");
-  const [e2eeAdminDisclosure, setE2eeAdminDisclosure] = useState(settings.e2ee_admin_disclosure === "true");
+  const [e2eeAdminDisclosure, setE2eeAdminDisclosure] = useState((settings.e2ee_admin_disclosure ?? "true") === "true");
   const [defaultTopicId, setDefaultTopicId] = useState(settings.default_topic_id ?? "");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcome_message ?? "Welcome, {nickname}!");
   const [farewellMessage, setFarewellMessage] = useState(settings.farewell_message ?? "Goodbye, {nickname}.");
