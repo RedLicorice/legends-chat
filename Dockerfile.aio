@@ -80,7 +80,8 @@ COPY --from=builder /app/package.json    /app/pnpm-workspace.yaml \
 COPY deploy/nginx.conf           /etc/nginx/nginx.conf
 COPY deploy/supervisord.aio.conf /etc/supervisord.conf
 COPY deploy/entrypoint-aio.sh    /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY deploy/install-unlock.sh    /usr/local/bin/install-unlock
+RUN chmod +x /entrypoint.sh /usr/local/bin/install-unlock
 
 VOLUME ["/data"]
 EXPOSE 80

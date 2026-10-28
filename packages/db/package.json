@@ -20,6 +20,7 @@
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "sweep": "tsx src/sweep.ts",
+    "install:unlock": "tsx src/install-unlock.ts",
     "seed": "tsx src/seed.ts",
     "test": "vitest",
     "test:run": "vitest run",

@@ -5,6 +5,9 @@ import { publicOrigin } from "@/lib/public-origin";
 const PUBLIC_PATHS = [
   "/login",
   "/register",
+  // Gated by a one-time token that only the CLI (install-unlock.ts) can mint.
+  "/install",
+  "/api/install/",
   "/auth/callback",
   "/auth/browser-open",
   "/auth/landing",
