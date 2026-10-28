@@ -8,9 +8,9 @@
 # EXPOSE  80             — single public port (nginx reverse proxy)
 #
 # Required env vars (no defaults — must be supplied at runtime):
-#   JWT_SECRET            — HS256 secret for access tokens
+#   JWT_ACCESS_SECRET     — HS256 secret for access tokens
 #   JWT_REFRESH_SECRET    — HS256 secret for refresh tokens
-#   ENCRYPTION_KEY        — 32-char key used to wrap DB encryption keys
+#   ENCRYPTION_MASTER_KEY — base64 32-byte key used to wrap DB encryption keys
 #   APP_PUBLIC_URL        — public-facing base URL, e.g. https://chat.example.com
 #
 # Optional env vars:
@@ -50,7 +50,8 @@ RUN apk add --no-cache \
         nginx supervisor \
         postgresql16 postgresql16-client \
         redis \
-    && mkdir -p /var/log/supervisor /run/nginx
+    && mkdir -p /var/log/supervisor /run/nginx /run/postgresql \
+    && chown postgres:postgres /run/postgresql
 
 ENV NODE_ENV=production
 ENV PGDATA=/data/postgres
