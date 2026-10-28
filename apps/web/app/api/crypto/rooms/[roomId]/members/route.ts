@@ -22,7 +22,7 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { checkAndIncrement } from "@/lib/rate-limit";
 import { fromMatrixRoomId } from "@/lib/crypto-matrix";
-import { listTopicCryptoMembers } from "@/lib/topic-members";
+import { listTopicCryptoMembers } from "@legends/db/topic-crypto-members";
 
 function matrixError(errcode: string, error: string, status: number) {
   return NextResponse.json({ errcode, error }, { status });
@@ -83,7 +83,7 @@ export async function GET(
     // uploaded — an admin without a bootstrapped E2EE session cannot decrypt
     // anyway, and including them would make the sender's OlmMachine spin
     // forever trying to claim Olm sessions with a user that has zero devices.
-    const crypto = await listTopicCryptoMembers(topic.id);
+    const crypto = await listTopicCryptoMembers(topic.id, db);
     const memberIds = crypto?.memberUserIds ?? [];
     const adminIds = crypto?.adminUserIds ?? [];
 

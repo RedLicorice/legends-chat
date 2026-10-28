@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyRecipientSet } from "@/lib/e2ee-recipients";
+import { verifyRecipientSet } from "./e2ee-recipients";
 
 const SELF = "self-uuid";
 
@@ -74,5 +74,18 @@ describe("verifyRecipientSet (cr-h2)", () => {
       selfUserId: SELF,
     });
     expect(v.recipients).toEqual([SELF, "member-a"].sort());
+  });
+
+  it("accepts a recipient set with no admin disclosure (bot path: adminUserIds always [])", () => {
+    // @legends/bot-sdk has no disclosure banner and no admin auto-add, so it
+    // always calls this with adminUserIds: [] — allowed is roster-only.
+    const v = verifyRecipientSet({
+      serverUserIds: ["member-a", "member-b"],
+      rosterUserIds: ["member-a", "member-b"],
+      adminUserIds: [],
+      selfUserId: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(v.recipients).toEqual(["member-a", "member-b"]);
   });
 });

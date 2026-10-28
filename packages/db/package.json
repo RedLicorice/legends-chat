@@ -11,6 +11,7 @@
     "./invites": "./src/invites.ts",
     "./system-settings": "./src/system-settings.ts",
     "./data-keys": "./src/data-keys.ts",
+    "./topic-crypto-members": "./src/topic-crypto-members.ts",
     "./maintenance": "./src/maintenance.ts",
     "./system-messages": "./src/system-messages.ts",
     "./dm-key": "./src/dm-key.ts"

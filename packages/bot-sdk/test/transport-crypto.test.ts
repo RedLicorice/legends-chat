@@ -123,6 +123,18 @@ describe("BotCryptoTransport", () => {
     expect(out).toEqual({ members: [{ matrix_id: "@u:legends.local", devices: ["DEV"] }] });
   });
 
+  it("roomMembersRoster hits the independent roster route (cr-h2) and URL-encodes the room id", async () => {
+    fetchSpy.mockResolvedValueOnce(okResponse({ matrix_ids: ["@u:legends.local"] }));
+    const t = new BotCryptoTransport({ token: "tok", baseUrl: "https://chat.test" });
+    const out = await t.roomMembersRoster("!abc-uuid:legends.local");
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `https://chat.test/api/bot/v1/rooms/${encodeURIComponent("!abc-uuid:legends.local")}/members`,
+    );
+    expect(init.method).toBe("GET");
+    expect(out).toEqual({ matrix_ids: ["@u:legends.local"] });
+  });
+
   it("strips a trailing slash from baseUrl", async () => {
     fetchSpy.mockResolvedValueOnce(okResponse({ one_time_key_counts: {} }));
     const t = new BotCryptoTransport({ token: "tok", baseUrl: "https://chat.test/" });

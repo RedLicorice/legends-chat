@@ -93,6 +93,18 @@ export interface RoomMembersResponse {
   members: Array<{ matrix_id: string; devices: string[] }>;
 }
 
+/**
+ * Response shape from `GET /api/bot/v1/rooms/<roomId>/members` (cr-h2).
+ *
+ * The independent roster {@link BotCryptoTransport.roomMembersRoster} checks
+ * {@link RoomMembersResponse.members} against before `shareRoomKey` — a
+ * separately-coded query over the same participant tables, with no
+ * device-list assembly and no admin auto-add merge.
+ */
+export interface RoomRosterResponse {
+  matrix_ids: string[];
+}
+
 // ── Error type ─────────────────────────────────────────────────────────────
 
 /**
@@ -176,6 +188,18 @@ export class BotCryptoTransport {
     return this.request<RoomMembersResponse>(
       "GET",
       `/api/bot/v1/crypto/rooms/${encodeURIComponent(roomId)}`,
+    );
+  }
+
+  /**
+   * cr-h2: the independent roster that {@link roomMembers}'s `members` must
+   * be verified against before anything reaches `shareRoomKey`. See
+   * {@link RoomRosterResponse}.
+   */
+  async roomMembersRoster(roomId: string): Promise<RoomRosterResponse> {
+    return this.request<RoomRosterResponse>(
+      "GET",
+      `/api/bot/v1/rooms/${encodeURIComponent(roomId)}/members`,
     );
   }
 

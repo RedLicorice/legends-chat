@@ -10,6 +10,7 @@ import type {
   SendMessageParams,
   Update,
 } from "./types.js";
+import { verifyRecipientSet } from "@legends/shared";
 import { LegendsBotClient } from "./client.js";
 import { OlmStore } from "./crypto/olm-store.js";
 import { BotOlmMachine } from "./crypto/olm-machine.js";
@@ -204,7 +205,9 @@ export class LegendsBot {
    * callers should use `ctx.reply()` instead.
    *
    * Flow:
-   *   1. Resolve the room's member matrix-ids from the server.
+   *   1. Resolve the room's member matrix-ids from the server, and verify
+   *      them against the independent roster (cr-h2) before trusting any of
+   *      them — see step 1 below.
    *   2. Track those users + drain `keys_query`. Required for the
    *      first-reply case: without an in-flight device list,
    *      `getMissingSessions` has nothing to claim and `shareRoomKey`
@@ -240,9 +243,29 @@ export class LegendsBot {
   }): Promise<{ messageId: string }> {
     if (!this._crypto) throw new Error("crypto not initialised");
 
-    // 1. Member list.
-    const { members } = await this.cryptoTransport.roomMembers(roomId);
-    const memberIds = members.map((m) => m.matrix_id);
+    // 1. Member list, verified against the independent roster (cr-h2).
+    // `roomMembers` and `roomMembersRoster` are two separately-coded routes
+    // over the same participant tables; a `shareRoomKey` call must never run
+    // off `roomMembers` alone, since a compromise of that one handler could
+    // add a phantom matrix id with nothing to catch it. Bots have no admin
+    // auto-add and no disclosure banner, so `adminUserIds` is always empty
+    // and `selfUserId` is omitted — our own id is never in either set
+    // (both routes exclude the calling bot from its own room).
+    const [{ members }, roster] = await Promise.all([
+      this.cryptoTransport.roomMembers(roomId),
+      this.cryptoTransport.roomMembersRoster(roomId),
+    ]);
+    const verdict = verifyRecipientSet({
+      serverUserIds: members.map((m) => m.matrix_id),
+      rosterUserIds: roster.matrix_ids,
+      adminUserIds: [],
+    });
+    if (!verdict.ok) {
+      throw new Error(
+        `cr-h2: room ${roomId} server-proposed recipients outside the verified roster: ${verdict.rejected.join(", ")}`,
+      );
+    }
+    const memberIds = verdict.recipients;
 
     // 2. Track the recipient users and drain any `keys_query` the wasm
     //    emits in response. On the first reply to a user we've never

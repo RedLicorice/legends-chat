@@ -16,7 +16,8 @@
 //   }
 import { REDIS_CHANNELS } from "@legends/shared";
 import { redis } from "@/lib/redis";
-import { listTopicCryptoMembers } from "@/lib/topic-members";
+import { db } from "@/lib/db";
+import { listTopicCryptoMembers } from "@legends/db/topic-crypto-members";
 
 export type TopicMembersAction = "join" | "leave";
 
@@ -47,7 +48,7 @@ export async function publishTopicMembersUpdated(args: {
   let memberUserIds = args.memberUserIds ?? null;
   let adminUserIds = args.adminUserIds ?? null;
   if (memberUserIds === null || adminUserIds === null) {
-    const computed = await listTopicCryptoMembers(args.topicId);
+    const computed = await listTopicCryptoMembers(args.topicId, db);
     if (!computed) return;
     memberUserIds = memberUserIds ?? computed.memberUserIds;
     adminUserIds = adminUserIds ?? computed.adminUserIds;

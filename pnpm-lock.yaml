@@ -290,6 +290,9 @@ importers:
 
   packages/bot-sdk:
     dependencies:
+      '@legends/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@matrix-org/matrix-sdk-crypto-wasm':
         specifier: ^18.3.0
         version: 18.3.0

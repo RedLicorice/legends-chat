@@ -1,6 +1,9 @@
-// Client-side verification of the Megolm recipient set (cr-h2).
+// Verification of a Megolm recipient set against an independent roster
+// (cr-h2). Shared by the web client and the bot SDK — both take a `user_ids`
+// array from a single crypto-rooms-style endpoint and must refuse to hand
+// anything outside an independently-sourced roster to `shareRoomKey`.
 //
-// The client used to take `user_ids` from /api/crypto/rooms/<id>/members
+// The web client used to take `user_ids` from /api/crypto/rooms/<id>/members
 // verbatim and hand the whole array to `shareRoomKey`. Three sets were in play
 // and nothing reconciled them:
 //
@@ -15,11 +18,13 @@
 // `checkForNewDevices` would stay silent (first sighting = silent TOFU
 // baseline). A completely invisible additional recipient.
 //
-// The fix is structural: the client computes the recipient set itself as
-//   roster(/api/topics/<id>/members) ∪ admin_user_ids
+// The fix is structural: the caller computes the recipient set itself as
+//   roster(independent endpoint) ∪ admin_user_ids
 // and refuses to pass anything outside it to `shareRoomKey`. An id that is
 // only reachable by being an admin is at least *named* in the disclosure
-// banner, which is the trade-off the project already accepted.
+// banner, which is the trade-off the project already accepted. Bots have no
+// admin auto-add and no disclosure banner, so they always pass `adminUserIds:
+// []` — see @legends/bot-sdk's `_sendEncrypted`.
 
 export interface RecipientVerification {
   /** Ids that are safe to hand to shareRoomKey, sorted. */

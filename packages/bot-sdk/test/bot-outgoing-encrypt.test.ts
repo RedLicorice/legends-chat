@@ -67,6 +67,14 @@ describe("LegendsBot — outgoing encrypt", () => {
           { status: 200 },
         );
       }
+      // cr-h2: the independent roster _sendEncrypted cross-checks `members`
+      // against — must agree, or verifyRecipientSet rejects the recipient.
+      if (url.includes("/api/bot/v1/rooms/") && url.endsWith("/members")) {
+        return new Response(
+          JSON.stringify({ matrix_ids: ["@user-a:legends.local"] }),
+          { status: 200 },
+        );
+      }
       if (url.endsWith("/api/bot/v1/crypto/keys/query")) {
         return new Response(JSON.stringify({ device_keys: {} }), { status: 200 });
       }
@@ -189,6 +197,13 @@ describe("LegendsBot — outgoing encrypt", () => {
             { status: 200 },
           );
         }
+        // cr-h2: independent roster, must agree with the `members` above.
+        if (url.includes("/api/bot/v1/rooms/") && url.endsWith("/members")) {
+          return new Response(
+            JSON.stringify({ matrix_ids: [user.getMatrixId()] }),
+            { status: 200 },
+          );
+        }
         if (url.endsWith("/api/bot/v1/crypto/keys/query")) {
           return new Response(directory.respondToQuery((init?.body as string) ?? "{}"), { status: 200 });
         }
@@ -269,6 +284,76 @@ describe("LegendsBot — outgoing encrypt", () => {
     },
     20_000,
   );
+
+  it("ctx.reply throws when the crypto-rooms member list disagrees with the independent roster (cr-h2)", async () => {
+    fetchSpy.mockImplementation(async (url: string) => {
+      if (url.endsWith("/api/bot/v1/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: "bot-a",
+              name: "A",
+              avatarUrl: null,
+              webhookUrl: null,
+              e2ee_state: "ready",
+              e2ee_device_id: "DEV-A",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/api/bot/v1/crypto/keys/upload")) {
+        return new Response(
+          JSON.stringify({ one_time_key_counts: { signed_curve25519: 50 } }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/bot/v1/crypto/rooms/")) {
+        // A compromised handler smuggles in an id the roster never named.
+        return new Response(
+          JSON.stringify({
+            members: [
+              { matrix_id: "@user-a:legends.local", devices: ["DEV-U"] },
+              { matrix_id: "@attacker:legends.local", devices: ["DEV-X"] },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/bot/v1/rooms/") && url.endsWith("/members")) {
+        return new Response(
+          JSON.stringify({ matrix_ids: ["@user-a:legends.local"] }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+    });
+
+    const bot = new LegendsBot({
+      token: "tok",
+      baseUrl: "https://chat.test",
+      cryptoStorePath: path.join(dir, "bot.pickle"),
+    });
+    await bot.loadBotInfoForTest();
+
+    const ctx = new DmMessageContext(
+      bot,
+      { update_id: "u", type: "dm_message" },
+      {
+        message_id: "m1",
+        conversation_id: "conv1",
+        from: { id: "user-a", display_name: "U" },
+        text: "hi",
+        ciphertext: undefined,
+        e2ee_room_id: "!conv1:legends.local",
+        sender_matrix_id: "@user-a:legends.local",
+        date: 0,
+      },
+    );
+
+    await expect(ctx.reply("hello back")).rejects.toThrow(/cr-h2/);
+  });
 
   it("ctx.reply on a non-E2EE DM falls back to sendMessage (plaintext)", async () => {
     fetchSpy.mockImplementation(async (url: string) => {

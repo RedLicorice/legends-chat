@@ -1,6 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
-  encryptionKeys,
   messageEdits,
   messageReactions,
   messages,
@@ -10,57 +9,23 @@ import {
   topicMembers,
   topics,
   userDeviceChangeLog,
-  userKeyBundles,
   userMutes,
   users,
 } from "@legends/db/schema";
-import {
-  decryptMessage,
-  encryptMessage,
-  generateDataKey,
-  unwrapKey,
-  wrapKey,
-} from "@legends/crypto";
+// cr-l12: shared, lock-protected key selection — this module used to carry
+// its own copy of the read-then-insert race (and its own by-id cache).
+import { currentDataKey, getDataKeyById } from "@legends/db/data-keys";
+// cr-m8/cr-l15: shared, expiry-filtered crypto-member resolver — this module
+// used to carry its own copy with no roleExpiresAt filter, so a lapsed
+// temporary admin kept getting every Megolm key rotation pushed over this
+// live channel even though the HTTP route already excluded them.
+import { listTopicCryptoMembers } from "@legends/db/topic-crypto-members";
+import { decryptMessage, encryptMessage } from "@legends/crypto";
 import { REDIS_CHANNELS, canViewTopic, createLogger } from "@legends/shared";
 import { db } from "./db";
 import { cacheClient, pubClient } from "./redis";
 
 const log = createLogger("ws:messages");
-
-let cachedKey: { id: string; data: Uint8Array } | null = null;
-
-async function currentDataKey(): Promise<{ id: string; data: Uint8Array }> {
-  if (cachedKey) return cachedKey;
-  const rows = await db
-    .select()
-    .from(encryptionKeys)
-    .where(eq(encryptionKeys.purpose, "messages"))
-    .orderBy(desc(encryptionKeys.createdAt))
-    .limit(1);
-  if (rows[0]) {
-    cachedKey = { id: rows[0].id, data: unwrapKey(rows[0].wrappedKey) };
-    return cachedKey;
-  }
-  const data = generateDataKey();
-  const { wrapped } = wrapKey(data);
-  const [inserted] = await db
-    .insert(encryptionKeys)
-    .values({ purpose: "messages", wrappedKey: wrapped })
-    .returning();
-  cachedKey = { id: inserted!.id, data };
-  return cachedKey;
-}
-
-const keyDataCache = new Map<string, Uint8Array>();
-async function getKeyData(keyId: string): Promise<Uint8Array> {
-  const cached = keyDataCache.get(keyId);
-  if (cached) return cached;
-  const rows = await db.select().from(encryptionKeys).where(eq(encryptionKeys.id, keyId)).limit(1);
-  if (!rows[0]) throw new Error(`encryption key ${keyId} not found`);
-  const data = unwrapKey(rows[0].wrappedKey);
-  keyDataCache.set(keyId, data);
-  return data;
-}
 
 export interface PollOption {
   id: string;
@@ -154,7 +119,7 @@ export async function insertMessage(args: {
    */
   ciphertextJson?: Record<string, unknown> | null;
 }): Promise<InsertedMessage> {
-  const key = await currentDataKey();
+  const key = await currentDataKey("messages", db);
   const isE2ee = !!args.ciphertextJson;
 
   let contentCiphertext: Uint8Array;
@@ -285,7 +250,7 @@ export async function listRecentMessages(topicId: string, limit = 50, viewerId?:
     let attachments: MessageAttachment[] = [];
     const isE2eeRow = !!r.ciphertextJson;
     if (!isE2eeRow) {
-      const key = await getKeyData(r.keyId);
+      const key = await getDataKeyById(r.keyId, db);
       const raw = decryptMessage(key, r.contentCiphertext, r.contentNonce, aad);
       const decoded = decodeContent(raw);
       text = decoded.text;
@@ -476,45 +441,6 @@ export async function isUserMuted(userId: string): Promise<{ reason: string; exp
 }
 
 /**
- * Crypto-member resolver mirroring apps/web/lib/topic-members.ts. Used by the
- * topic-members live-update publisher so every connected TopicView can rotate
- * its Megolm session as soon as someone joins (rather than on next send).
- *
- *   member_user_ids → topic_members rows for this topic
- *   admin_user_ids  → role=admin, !isAnon, has ≥1 userKeyBundle (only for
- *                     is_e2ee topics; plain topics return [])
- */
-async function listTopicCryptoMembers(
-  topicId: string,
-): Promise<{ memberUserIds: string[]; adminUserIds: string[] } | null> {
-  const [topic] = await db
-    .select({ id: topics.id, isE2ee: topics.isE2ee })
-    .from(topics)
-    .where(eq(topics.id, topicId))
-    .limit(1);
-  if (!topic) return null;
-
-  const memberRows = await db
-    .select({ userId: topicMembers.userId })
-    .from(topicMembers)
-    .where(eq(topicMembers.topicId, topic.id));
-  const memberUserIds = memberRows.map((r) => r.userId).sort();
-
-  let adminUserIds: string[] = [];
-  if (topic.isE2ee) {
-    const adminRows = await db
-      .select({ id: users.id })
-      .from(users)
-      .innerJoin(userKeyBundles, eq(userKeyBundles.userId, users.id))
-      .where(and(eq(users.role, "admin"), eq(users.isAnon, false)))
-      .groupBy(users.id);
-    adminUserIds = adminRows.map((r) => r.id).sort();
-  }
-
-  return { memberUserIds, adminUserIds };
-}
-
-/**
  * Publish a topic membership change over the WS relay
  * (REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED → WS_EVENTS.TOPIC_MEMBERS_UPDATED).
  *
@@ -527,7 +453,7 @@ async function publishTopicMembersUpdated(args: {
   affectedUserId: string;
 }): Promise<void> {
   try {
-    const crypto = await listTopicCryptoMembers(args.topicId);
+    const crypto = await listTopicCryptoMembers(args.topicId, db);
     if (!crypto) return;
     await pubClient.publish(
       REDIS_CHANNELS.TOPIC_MEMBERS_UPDATED,
@@ -827,7 +753,7 @@ export async function editMessage(args: {
       .where(eq(messages.id, BigInt(args.messageId)));
   } else {
     // Plaintext branch: re-encrypt envelope with current data key.
-    const key = await currentDataKey();
+    const key = await currentDataKey("messages", db);
     const aad = new TextEncoder().encode(args.topicId);
     const encoded = encodeContent(args.newText ?? "");
     const { ciphertext, nonce } = encryptMessage(key.data, encoded, aad);
