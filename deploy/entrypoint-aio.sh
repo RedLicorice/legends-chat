@@ -6,7 +6,28 @@ DB_PASS="${DB_PASS:-legends}"
 DB_NAME="${DB_NAME:-legends}"
 
 export DATABASE_URL="postgres://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}"
-export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
+
+# Redis is the realtime transport; ws refuses to boot in production against an
+# unauthenticated one. Use REDIS_PASSWORD if given, else generate once and
+# persist it on the data volume so restarts keep the same password.
+mkdir -p /data/redis
+if [ -z "${REDIS_PASSWORD:-}" ]; then
+    if [ ! -s /data/redis/.password ]; then
+        head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > /data/redis/.password
+        chmod 600 /data/redis/.password
+    fi
+    REDIS_PASSWORD="$(cat /data/redis/.password)"
+fi
+export REDIS_PASSWORD
+export REDIS_URL="redis://default:${REDIS_PASSWORD}@127.0.0.1:6379"
+
+# The Telegram bot is optional: only autostart it when a token is configured.
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    export BOT_AUTOSTART=true
+else
+    export BOT_AUTOSTART=false
+    echo "==> [aio] TELEGRAM_BOT_TOKEN not set — Telegram bot disabled"
+fi
 
 # ── PostgreSQL initialisation ───────────────────────────────────────────────
 if [ ! -f "${PGDATA}/PG_VERSION" ]; then
